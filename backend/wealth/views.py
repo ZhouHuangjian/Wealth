@@ -80,7 +80,7 @@ def health(request):
         return JsonResponse(
             {
                 "status": "ok",
-                "version": "2.7.0",
+                "version": settings.SPECTACULAR_SETTINGS["VERSION"],
                 "mode": "development" if settings.DEBUG else "production",
             }
         )
