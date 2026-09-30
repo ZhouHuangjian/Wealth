@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew Wealth short-lived IP TLS certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/wealth-certbot/bin/certbot renew --quiet --no-random-sleep-on-renew --deploy-hook "/usr/sbin/nginx -t && /usr/bin/systemctl reload nginx"
+TimeoutStartSec=15min
+UMask=0077

@@ -1,0 +1,647 @@
+{
+  "fund_new_good": {
+    "data": [
+      {
+        "NAV": 2.781,
+        "GZTIME": null,
+        "SHORTNAME": "易方达消费行业股票",
+        "FCODE": "110022",
+        "PDATE": "2026-09-24",
+        "GSZ": null,
+        "GSZZL": null
+      },
+      {
+        "NAV": 0.5208,
+        "GZTIME": "2026-09-24 15:00",
+        "SHORTNAME": "招商中证白酒指数(LOF)A",
+        "FCODE": "161725",
+        "PDATE": "2026-09-24",
+        "GSZ": 0.5204,
+        "GSZZL": -2.11
+      },
+      {
+        "NAV": 1.295,
+        "GZTIME": null,
+        "SHORTNAME": "华夏成长混合",
+        "FCODE": "000001",
+        "PDATE": "2026-09-24",
+        "GSZ": null,
+        "GSZZL": null
+      },
+      {
+        "NAV": 1.7985,
+        "GZTIME": "2026-09-24 15:00",
+        "SHORTNAME": "易方达沪深300ETF联接C",
+        "FCODE": "007339",
+        "PDATE": "2026-09-24",
+        "GSZ": 1.7963,
+        "GSZZL": -1.73
+      }
+    ],
+    "errorCode": 0,
+    "firstError": null,
+    "success": true,
+    "hasWrongToken": null,
+    "totalCount": 29159,
+    "expansion": null,
+    "jf": "pj"
+  },
+  "fund_search": {
+    "ErrCode": 0,
+    "ErrMsg": "fromes",
+    "Datas": [
+      {
+        "HIGHTLIGHT": "<font color='#ff4400'>1</font><font color='#ff4400'>1</font><font color='#ff4400'>0</font><font color='#ff4400'>0</font><font color='#ff4400'>2</font><font color='#ff4400'>2</font>_易方达消费行业股票_YFDXFHYGP",
+        "_id": "110022",
+        "CODE": "110022",
+        "NAME": "易方达消费行业股票",
+        "JP": "YFDXFHYGP",
+        "CATEGORY": 700,
+        "CATEGORYDESC": "基金",
+        "STOCKMARKET": null,
+        "BACKCODE": "110022",
+        "MatchCount": 1,
+        "FundBaseInfo": {
+          "_id": "110022",
+          "DWJZ": 2.781,
+          "FCODE": "110022",
+          "FSRQ": "2026-09-24",
+          "FTYPE": "股票型",
+          "FUNDTYPE": "001",
+          "ISBUY": "1",
+          "JJGS": "易方达基金",
+          "JJGSBID": 4.0,
+          "JJGSID": "80000229",
+          "JJJL": "萧楠",
+          "JJJLID": "30189741",
+          "MINSG": 10.0,
+          "OTHERNAME": "易方达消费行业,易基消费股票",
+          "SHORTNAME": "易方达消费行业股票",
+          "RSFUNDTYPE": "001",
+          "NAVURL": "http://fund.eastmoney.com/GP_jzzzl.html"
+        },
+        "StockHolder": null,
+        "ZTJJInfo": [
+          {
+            "TTYPE": "BK000390",
+            "TTYPENAME": "消费"
+          }
+        ],
+        "SEARCHWEIGHT": 0.0,
+        "NEWTEXCH": ""
+      }
+    ]
+  },
+  "search_stock": {
+    "QuotationCodeTable": {
+      "Data": [
+        {
+          "Code": "600519",
+          "Name": "贵州茅台",
+          "PinYin": "GZMT",
+          "ID": "6005191",
+          "JYS": "2",
+          "Classify": "AStock",
+          "MarketType": "1",
+          "SecurityTypeName": "沪A",
+          "SecurityType": "1",
+          "MktNum": "1",
+          "TypeUS": "2",
+          "QuoteID": "1.600519",
+          "UnifiedCode": "600519",
+          "InnerCode": "46077278941243"
+        }
+      ],
+      "Status": 0,
+      "Message": "成功",
+      "TotalCount": 1,
+      "BizCode": "",
+      "BizMsg": ""
+    }
+  },
+  "search_hk": {
+    "QuotationCodeTable": {
+      "Data": [
+        {
+          "Code": "00700",
+          "Name": "腾讯控股",
+          "PinYin": "TXKG",
+          "ID": "007005",
+          "JYS": "HK",
+          "Classify": "HK",
+          "MarketType": "5",
+          "SecurityTypeName": "港股",
+          "SecurityType": "19",
+          "MktNum": "116",
+          "TypeUS": "3",
+          "QuoteID": "116.00700",
+          "UnifiedCode": "00700",
+          "InnerCode": "30668133409363"
+        },
+        {
+          "Code": "000700",
+          "Name": "模塑科技",
+          "PinYin": "MSKJ",
+          "ID": "0007002",
+          "JYS": "6",
+          "Classify": "AStock",
+          "MarketType": "2",
+          "SecurityTypeName": "深A",
+          "SecurityType": "2",
+          "MktNum": "0",
+          "TypeUS": "6",
+          "QuoteID": "0.000700",
+          "UnifiedCode": "000700",
+          "InnerCode": "32330018826214"
+        },
+        {
+          "Code": "300700",
+          "Name": "岱勒新材",
+          "PinYin": "DLXC",
+          "ID": "3007002",
+          "JYS": "80",
+          "Classify": "AStock",
+          "MarketType": "2",
+          "SecurityTypeName": "深A",
+          "SecurityType": "2",
+          "MktNum": "0",
+          "TypeUS": "80",
+          "QuoteID": "0.300700",
+          "UnifiedCode": "300700",
+          "InnerCode": "19784971629974"
+        },
+        {
+          "Code": "600700",
+          "Name": "*ST数码",
+          "PinYin": "STSM",
+          "ID": "6007001",
+          "JYS": "2",
+          "Classify": "AStock",
+          "MarketType": "1",
+          "SecurityTypeName": "沪A",
+          "SecurityType": "1",
+          "MktNum": "1",
+          "TypeUS": "2",
+          "QuoteID": "1.600700",
+          "UnifiedCode": "600700",
+          "InnerCode": "19651906144443"
+        },
+        {
+          "Code": "000700",
+          "Name": "Eusu Holdings",
+          "PinYin": "EUSUHOLDINGS",
+          "ID": "000700_KRX",
+          "JYS": "KRX",
+          "Classify": "KRX",
+          "MarketType": "_KRX",
+          "SecurityTypeName": "韩股",
+          "SecurityType": "51",
+          "MktNum": "177",
+          "TypeUS": "0",
+          "QuoteID": "177.000700",
+          "UnifiedCode": "000700",
+          "InnerCode": "13620074852031"
+        },
+        {
+          "Code": "100700",
+          "Name": "Sewoon Medical",
+          "PinYin": "SEWOONMEDICAL",
+          "ID": "100700_KRX",
+          "JYS": "KRX",
+          "Classify": "KRX",
+          "MarketType": "_KRX",
+          "SecurityTypeName": "韩股",
+          "SecurityType": "51",
+          "MktNum": "177",
+          "TypeUS": "0",
+          "QuoteID": "177.100700",
+          "UnifiedCode": "100700",
+          "InnerCode": "49438392447793"
+        },
+        {
+          "Code": "500700",
+          "Name": "鑫驰5A3",
+          "PinYin": "XC5A3",
+          "ID": "5007002",
+          "JYS": "8",
+          "Classify": "Bond",
+          "MarketType": "2",
+          "SecurityTypeName": "债券",
+          "SecurityType": "16",
+          "MktNum": "0",
+          "TypeUS": "8",
+          "QuoteID": "0.500700",
+          "UnifiedCode": "500700",
+          "InnerCode": "11421606821942"
+        },
+        {
+          "Code": "000700",
+          "Name": "宏利货币B",
+          "PinYin": "HLHBB",
+          "ID": "0007006",
+          "JYS": "OTCFUND",
+          "Classify": "OTCFUND",
+          "MarketType": "6",
+          "SecurityTypeName": "基金",
+          "SecurityType": "17",
+          "MktNum": "150",
+          "TypeUS": "4",
+          "QuoteID": "150.000700",
+          "UnifiedCode": "000700",
+          "InnerCode": "28327976143887"
+        },
+        {
+          "Code": "007000",
+          "Name": "鹏华中债1-3年国开行债券指数A",
+          "PinYin": "PHZZ13NGKHZQZSA",
+          "ID": "0070006",
+          "JYS": "OTCFUND",
+          "Classify": "OTCFUND",
+          "MarketType": "6",
+          "SecurityTypeName": "基金",
+          "SecurityType": "17",
+          "MktNum": "150",
+          "TypeUS": "3",
+          "QuoteID": "150.007000",
+          "UnifiedCode": "007000",
+          "InnerCode": "41690334553743"
+        },
+        {
+          "Code": "007001",
+          "Name": "鹏华中债1-3年国开行债券指数C",
+          "PinYin": "PHZZ13NGKHZQZSC",
+          "ID": "0070016",
+          "JYS": "OTCFUND",
+          "Classify": "OTCFUND",
+          "MarketType": "6",
+          "SecurityTypeName": "基金",
+          "SecurityType": "17",
+          "MktNum": "150",
+          "TypeUS": "3",
+          "QuoteID": "150.007001",
+          "UnifiedCode": "007001",
+          "InnerCode": "45560088363231"
+        }
+      ],
+      "Status": 0,
+      "Message": "成功",
+      "TotalCount": 14,
+      "BizCode": "",
+      "BizMsg": ""
+    }
+  },
+  "search_us": {
+    "QuotationCodeTable": {
+      "Data": [
+        {
+          "Code": "AAPL",
+          "Name": "苹果",
+          "PinYin": "PG",
+          "ID": "AAPL7",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "20",
+          "MktNum": "105",
+          "TypeUS": "1",
+          "QuoteID": "105.AAPL",
+          "UnifiedCode": "AAPL",
+          "InnerCode": "15518892523437"
+        },
+        {
+          "Code": "AAPL22",
+          "Name": "Apple Inc Notes 2022",
+          "PinYin": "APPLEINCNOTES2022",
+          "ID": "AAPL227",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL22",
+          "UnifiedCode": "AAPL22",
+          "InnerCode": "17562041915027"
+        },
+        {
+          "Code": "AAPL24",
+          "Name": "Apple Inc Notes 2024",
+          "PinYin": "APPLEINCNOTES2024",
+          "ID": "AAPL247",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL24",
+          "UnifiedCode": "AAPL24",
+          "InnerCode": "16938803894003"
+        },
+        {
+          "Code": "AAPL25",
+          "Name": "Apple Inc Notes 2025",
+          "PinYin": "APPLEINCNOTES2025",
+          "ID": "AAPL257",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL25",
+          "UnifiedCode": "AAPL25",
+          "InnerCode": "44192837903491"
+        },
+        {
+          "Code": "AAPL26",
+          "Name": "Apple Inc Notes 2026",
+          "PinYin": "APPLEINCNOTES2026",
+          "ID": "AAPL267",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL26",
+          "UnifiedCode": "AAPL26",
+          "InnerCode": "43057585032979"
+        },
+        {
+          "Code": "AAPL27",
+          "Name": "Apple Inc Notes 2027",
+          "PinYin": "APPLEINCNOTES2027",
+          "ID": "AAPL277",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL27",
+          "UnifiedCode": "AAPL27",
+          "InnerCode": "30308007882467"
+        },
+        {
+          "Code": "AAPL29",
+          "Name": "Apple Inc Notes 2029",
+          "PinYin": "APPLEINCNOTES2029",
+          "ID": "AAPL297",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL29",
+          "UnifiedCode": "AAPL29",
+          "InnerCode": "16426789018557"
+        },
+        {
+          "Code": "AAPL29A",
+          "Name": "Apple Inc Notes 2029",
+          "PinYin": "APPLEINCNOTES2029",
+          "ID": "AAPL29A7",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL29A",
+          "UnifiedCode": "AAPL29A",
+          "InnerCode": "47386350058103"
+        },
+        {
+          "Code": "AAPL42",
+          "Name": "Apple Inc Notes 2042",
+          "PinYin": "APPLEINCNOTES2042",
+          "ID": "AAPL427",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "6",
+          "QuoteID": "105.AAPL42",
+          "UnifiedCode": "AAPL42",
+          "InnerCode": "41613358691405"
+        },
+        {
+          "Code": "AAPB",
+          "Name": "二倍做多苹果ETF-GraniteShares",
+          "PinYin": "EBZDPGETFGRANITESHARES",
+          "ID": "AAPB7",
+          "JYS": "NASDAQ",
+          "Classify": "UsStock",
+          "MarketType": "7",
+          "SecurityTypeName": "美股",
+          "SecurityType": "7",
+          "MktNum": "105",
+          "TypeUS": "5",
+          "QuoteID": "105.AAPB",
+          "UnifiedCode": "AAPB",
+          "InnerCode": "36112820528205"
+        }
+      ],
+      "Status": 0,
+      "Message": "成功",
+      "TotalCount": 17,
+      "BizCode": "",
+      "BizMsg": ""
+    }
+  },
+  "cn_history": {
+    "code": 0,
+    "msg": "",
+    "data": {
+      "sh600519": {
+        "day": [
+          [
+            "2026-05-06",
+            "1365.100",
+            "1375.000",
+            "1379.000",
+            "1360.050",
+            "47806.000"
+          ],
+          [
+            "2026-05-07",
+            "1375.000",
+            "1371.050",
+            "1388.000",
+            "1370.010",
+            "40461.000"
+          ],
+          [
+            "2026-05-08",
+            "1371.660",
+            "1372.990",
+            "1382.770",
+            "1370.000",
+            "33369.000"
+          ]
+        ],
+        "mx_price": {
+          "mx": [],
+          "price": []
+        },
+        "prec": "31.390",
+        "version": "16"
+      }
+    }
+  },
+  "hk_history": {
+    "code": 0,
+    "msg": "",
+    "data": {
+      "hk00700": {
+        "day": [
+          [
+            "2026-05-04",
+            "469.800",
+            "473.000",
+            "478.800",
+            "469.800",
+            "23758824.000"
+          ],
+          [
+            "2026-05-05",
+            "469.000",
+            "472.200",
+            "472.400",
+            "465.600",
+            "13004679.000"
+          ],
+          [
+            "2026-05-06",
+            "470.600",
+            "463.000",
+            "473.400",
+            "460.200",
+            "44367227.000"
+          ]
+        ],
+        "prec": "3.700",
+        "vcm": "",
+        "version": "16"
+      }
+    }
+  },
+  "quotes": "v_sh600519=\"1~贵州茅台~600519~1237.00~1251.24~1250.01~31239~13918~17321~1237.00~13~1236.95~4~1236.85~1~1236.83~1~1236.51~2~1237.05~1~1237.50~1~1237.70~1~1237.90~1~1237.97~1~~20260924161444~-14.24~-1.14~1256.13~1231.05~1237.00/31239/3867310920~31239~386731~0.25~18.99~~1256.13~1231.05~2.00~15463.51~15463.51~6.15~1376.36~1126.12~1.27~16~1237.96~17.37~18.78~~~0.07~386731.0920~74.2200~6~   A~GP-A~-8.31~-2.37~4.21~32.41~27.30~1539.98~1151.01~-3.75~-4.28~2.83~1250081601~1250081601~61.54~-9.97~1250081601~~~-11.01~-0.09~~CNY~0~___D__F__N~1238.05~-39~\";\nv_sz000001=\"51~平安银行~000001~11.30~11.35~11.35~1043819~475274~568545~11.30~2697~11.29~10758~11.28~5643~11.27~1406~11.26~2556~11.31~2612~11.32~1174~11.33~785~11.34~140~11.35~904~~20260924161421~-0.05~-0.44~11.47~11.29~11.30/1043819/1186736896~1043819~118674~0.54~5.05~~11.47~11.29~1.59~2192.84~2192.87~0.47~12.49~10.22~1.30~17445~11.37~4.27~5.14~~~0.17~118673.6896~3.0092~27~   A~GP-A~4.62~-0.54~5.39~7.93~0.72~11.83~9.74~-2.59~-0.36~12.65~19405684991~19405918198~60.84~3.19~19405684991~~~6.45~-0.09~~CNY~0~C~11.22~3864~\";\nv_hk00700=\"100~腾讯控股~00700~436.600~438.400~433.800~9113746.0~0~0~436.600~0~0~0~0~0~0~0~0~0~436.600~0~0~0~0~0~0~0~0~0~9113746.0~2026/09/25 16:08:20~-1.800~-0.41~437.200~431.200~436.600~9113746.0~3957692360.282~0~15.95~~0~0~1.37~39709.3512~39709.3512~TENCENT~1.22~677.700~411.000~0.29~-32.78~0~0~0~0~0~14.64~3.05~0.10~100~-26.46~4.20~GP~20.41~11.00~1.91~-4.09~1.25~9095133109.00~9095133109.00~15.11~5.313~434.255~-29.32~HKD~1~50\";\nv_usAAPL=\"200~苹果~AAPL.OQ~335.92~337.02~336.72~24733098~0~0~335.75~40~0~0~0~0~0~0~0~0~335.94~200~0~0~0~0~0~0~0~0~~2026-09-24 16:00:01~-1.10~-0.33~338.91~334.30~USD~24733098~8327204334~0.17~38.52~~45.03~~1.37~48994.29774~49024.76946~Apple Inc.~8.72~345.34~242.76~-160~45.60~0.32~49024.76946~23.90~-0.32~GP~148.75~36.08~2.86~7.17~16.20~14594180000~14585108878~0.54~36.62~1.06~336.68~~~~~\";\nv_sh510300=\"1~沪深300ETF华泰柏瑞~510300~4.515~4.590~4.578~7102519~2559985~4542535~4.515~7339~4.514~9244~4.513~9224~4.512~18472~4.511~6635~4.516~5293~4.517~9349~4.518~16872~4.519~2672~4.520~2831~~20260924161456~-0.075~-1.63~4.579~4.512~4.515/7102519/3220888135~7102519~322089~2.97~~~4.579~4.512~1.46~1079.29~1079.29~0.00~5.049~4.131~1.19~13897~4.535~~~~~~322088.8135~181.7739~4026~   A~ETF~-2.48~-0.38~~~~5.095~4.405~-2.21~-3.75~-6.91~23904487700~23904487700~15.80~-2.69~23904487700~-0.01~4.5156~-0.55~-0.04~4.5127~CNY~0~___D__F__N~4.510~34441~\";\n",
+  "sina_derivative": "var hq_str_nf_RB2701=\"螺纹钢2701,150000,3115.000,3120.000,3100.000,3118.000,3118.000,3119.000,3118.000,3111.000,3117.000,1,857,1615888.000,570630,沪,螺纹钢,2026-09-24,1,,,,,,,,,3111.857,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0\";\nvar hq_str_nf_AU2612=\"黄金2612,150000,934.820,936.040,927.400,927.660,927.340,927.660,927.660,931.320,940.180,1,25,222206.000,183228,沪,黄金,2026-09-24,1,,,,,,,,,931.325,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0\";\nvar hq_str_CON_OP_10008273=\"\";\nvar hq_str_au0=\"\";\n",
+  "option_good": "var hq_str_CON_OP_10012427=\"5,0.2110,0.2148,0.2151,1,1366,-15.27,2.7500,0.2667,0.2435,0.5535,0.0001,0.2197,1,0.2193,1,0.2190,1,0.2179,62,0.2151,1,0.2110,5,0.2107,1,0.2100,8,0.2090,1,0.2087,1,2026-09-24 14:54:44,0,E 00,EBS,510050,50ETF购10月2750,12.56,0.2435,0.2100,1071,2411677.00,M,0.2535,C,2026-10-28,34,2,0.209,0.0058\";\nvar hq_str_nf_IF2610=\"4495.000,4495.000,4426.000,4428.000,25746,114712729.800,52944.000,4428.000,0.000,4961.600,4059.600,0.000,0.000,4509.000,4510.600,50422.000,4427.800,2,0.000,0,0.000,0,0.000,0,0.000,0,4428.600,1,0.000,0,0.000,0,0.000,0,0.000,0,2026-09-24,15:00:00,0,0,,,,,,,,,4455.555,沪深300指数期货2610\";\nvar hq_str_nf_IO2610C4800=\"\";\nvar hq_str_nf_RB2701C3300=\"\";\n",
+  "gold": "var hq_str_SGE_Au9999=\"\";\nvar hq_str_SGE_AuTD=\"\";\nvar hq_str_hf_XAU=\"4298.96,4273.760,4298.96,4299.31,4315.60,4256.35,20:57:00,4273.76,4273.12,0,0,0,2026-09-25,伦敦金（现货黄金）\";\nvar hq_str_nf_AU0=\"黄金连续,150000,934.820,936.040,927.400,927.660,927.340,927.660,927.660,931.320,940.180,1,25,222206.000,183228,沪,黄金,2026-09-24,1,,,,,,,,,931.325,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0,0.000,0\";\n",
+  "fund_history": "var fS_code=\"110022\";var fS_name=\"易方达消费行业股票\";var Data_netWorthTrend=[{\"x\":1777996800000,\"y\":3.099,\"equityReturn\":-1.09,\"unitMoney\":\"\"},{\"x\":1778083200000,\"y\":3.103,\"equityReturn\":0.13,\"unitMoney\":\"\"},{\"x\":1790179200000,\"y\":2.781,\"equityReturn\":-1.38,\"unitMoney\":\"\"}];",
+  "us_history": {
+    "chart": {
+      "result": [
+        {
+          "meta": {
+            "currency": "USD",
+            "symbol": "AAPL",
+            "exchangeName": "NMS",
+            "fullExchangeName": "NasdaqGS",
+            "instrumentType": "EQUITY",
+            "firstTradeDate": 345479400,
+            "regularMarketTime": 1790280001,
+            "hasPrePostMarketData": true,
+            "gmtoffset": -14400,
+            "timezone": "EDT",
+            "exchangeTimezoneName": "America/New_York",
+            "regularMarketPrice": 335.92,
+            "regularMarketChangePercent": -0.326,
+            "fulldayPrice": 336.227,
+            "fulldayChange": 0.26,
+            "fulldayChangePercent": 0.077,
+            "fiftyTwoWeekHigh": 345.34,
+            "fiftyTwoWeekLow": 243.42,
+            "regularMarketDayHigh": 338.91,
+            "regularMarketDayLow": 334.3,
+            "regularMarketVolume": 24364559,
+            "longName": "Apple Inc.",
+            "shortName": "Apple Inc.",
+            "chartPreviousClose": 251.64,
+            "priceHint": 2,
+            "currentTradingPeriod": {
+              "pre": {
+                "timezone": "EDT",
+                "end": 1790343000,
+                "start": 1790323200,
+                "gmtoffset": -14400
+              },
+              "regular": {
+                "timezone": "EDT",
+                "end": 1790366400,
+                "start": 1790343000,
+                "gmtoffset": -14400
+              },
+              "post": {
+                "timezone": "EDT",
+                "end": 1790380800,
+                "start": 1790366400,
+                "gmtoffset": -14400
+              }
+            },
+            "dataGranularity": "1d",
+            "range": "6mo",
+            "validRanges": [
+              "1d",
+              "5d",
+              "1mo",
+              "3mo",
+              "6mo",
+              "1y",
+              "2y",
+              "5y",
+              "10y",
+              "ytd",
+              "max"
+            ]
+          },
+          "timestamp": [
+            1774445400,
+            1774531800
+          ],
+          "indicators": {
+            "quote": [
+              {
+                "close": [
+                  252.6199951171875,
+                  252.88999938964844
+                ],
+                "low": [
+                  251.60000610351562,
+                  250.77000427246094
+                ],
+                "open": [
+                  254.10000610351562,
+                  252.1199951171875
+                ],
+                "high": [
+                  255.0,
+                  257.0
+                ],
+                "volume": [
+                  28476700,
+                  41796700
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "error": null
+    }
+  }
+}

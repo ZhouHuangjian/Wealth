@@ -1,0 +1,22 @@
+[Unit]
+Description=Consistent encrypted Wealth backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=wealth-ops
+Group=wealth-ops
+SupplementaryGroups=docker
+WorkingDirectory=/opt/wealth
+ExecStart=/usr/bin/python3 /opt/wealth/scripts/backup.py --env-file /etc/wealth/runtime.env backup --key-file /etc/wealth/backup.key --output-dir /var/backups/wealth
+TimeoutStartSec=1h
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/wealth
+
+[Install]
+WantedBy=multi-user.target

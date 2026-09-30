@@ -1,0 +1,302 @@
+{
+  "commodity_option": "var hq_str_P_OP_m2701P3300=\"8,39.500,40.000,41.000,4,37092.000,,3300,45.500,45.500,251.000,0.500,0.000,0,0.000,0,0.000,0,0.000,0,41.000,4,39.500,8,0.000,0,0.000,0,0.000,0,0.000,0,2026-09-24 15:04:42,0,,,,,,51.000,40.000,6673,300872.500,,47.000,\";",
+  "cn_index_quote": {
+    "rc": 0,
+    "rt": 4,
+    "svr": 180606382,
+    "lt": 1,
+    "full": 1,
+    "dlmkts": "",
+    "dsc": "0",
+    "data": {
+      "f43": 10848.95,
+      "f57": "H30269",
+      "f58": "红利低波",
+      "f60": 10847.74,
+      "f86": 1790238593,
+      "f170": 0.01
+    }
+  },
+  "cn_index_history": {
+    "rc": 0,
+    "rt": 17,
+    "svr": 183124372,
+    "lt": 1,
+    "full": 0,
+    "dlmkts": "",
+    "dsc": "0",
+    "data": {
+      "code": "H30269",
+      "market": 2,
+      "name": "红利低波",
+      "decimal": 2,
+      "dktotal": 3106,
+      "preKPrice": 10739.33,
+      "klines": [
+        "2025-03-03,10755.16,10749.19,10796.31,10719.24,35506870",
+        "2026-09-24,10825.85,10848.95,10895.82,10820.99,29889830"
+      ]
+    }
+  },
+  "ndx": {
+    "chart": {
+      "result": [
+        {
+          "meta": {
+            "currency": "USD",
+            "symbol": "^NDX",
+            "exchangeName": "NIM",
+            "fullExchangeName": "Nasdaq GIDS",
+            "instrumentType": "INDEX",
+            "firstTradeDate": 497021400,
+            "regularMarketTime": 1790346185,
+            "hasPrePostMarketData": false,
+            "gmtoffset": -14400,
+            "timezone": "EDT",
+            "exchangeTimezoneName": "America/New_York",
+            "regularMarketPrice": 30464.553,
+            "regularMarketChangePercent": -0.047,
+            "fulldayPrice": 30464.553,
+            "fulldayChange": -14.303,
+            "fulldayChangePercent": -0.047,
+            "fiftyTwoWeekHigh": 30770.63,
+            "fiftyTwoWeekLow": 22841.42,
+            "regularMarketDayHigh": 30649.2,
+            "regularMarketDayLow": 30413.586,
+            "regularMarketVolume": 242147376,
+            "longName": "NASDAQ-100",
+            "shortName": "NASDAQ-100",
+            "chartPreviousClose": 24397.31,
+            "priceHint": 2,
+            "currentTradingPeriod": {
+              "pre": {
+                "timezone": "EDT",
+                "end": 1790343000,
+                "start": 1790323200,
+                "gmtoffset": -14400
+              },
+              "regular": {
+                "timezone": "EDT",
+                "end": 1790366400,
+                "start": 1790343000,
+                "gmtoffset": -14400
+              },
+              "post": {
+                "timezone": "EDT",
+                "end": 1790380800,
+                "start": 1790366400,
+                "gmtoffset": -14400
+              }
+            },
+            "dataGranularity": "1d",
+            "range": "1y",
+            "validRanges": [
+              "1d",
+              "5d",
+              "1mo",
+              "3mo",
+              "6mo",
+              "1y",
+              "2y",
+              "5y",
+              "10y",
+              "ytd",
+              "max"
+            ]
+          },
+          "timestamp": [
+            1758807000,
+            1758893400,
+            1790343000
+          ],
+          "indicators": {
+            "quote": [
+              {
+                "close": [
+                  24397.310546875,
+                  24503.849609375,
+                  30464.552734375
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "spx": {
+    "chart": {
+      "result": [
+        {
+          "meta": {
+            "currency": "USD",
+            "symbol": "^GSPC",
+            "exchangeName": "SNP",
+            "fullExchangeName": "SNP",
+            "instrumentType": "INDEX",
+            "firstTradeDate": -1325583000,
+            "regularMarketTime": 1790346185,
+            "hasPrePostMarketData": false,
+            "gmtoffset": -14400,
+            "timezone": "EDT",
+            "exchangeTimezoneName": "America/New_York",
+            "regularMarketPrice": 7704.43,
+            "regularMarketChangePercent": 0.004,
+            "fulldayPrice": 7704.43,
+            "fulldayChange": 0.3,
+            "fulldayChangePercent": 0.004,
+            "fiftyTwoWeekHigh": 7816.7,
+            "fiftyTwoWeekLow": 6316.91,
+            "regularMarketDayHigh": 7733.58,
+            "regularMarketDayLow": 7693.08,
+            "regularMarketVolume": 462962439,
+            "longName": "S&P 500",
+            "shortName": "S&P 500",
+            "chartPreviousClose": 6604.72,
+            "priceHint": 2,
+            "currentTradingPeriod": {
+              "pre": {
+                "timezone": "EDT",
+                "start": 1790323200,
+                "end": 1790343000,
+                "gmtoffset": -14400
+              },
+              "regular": {
+                "timezone": "EDT",
+                "start": 1790343000,
+                "end": 1790366400,
+                "gmtoffset": -14400
+              },
+              "post": {
+                "timezone": "EDT",
+                "start": 1790366400,
+                "end": 1790380800,
+                "gmtoffset": -14400
+              }
+            },
+            "dataGranularity": "1d",
+            "range": "1y",
+            "validRanges": [
+              "1d",
+              "5d",
+              "1mo",
+              "3mo",
+              "6mo",
+              "1y",
+              "2y",
+              "5y",
+              "10y",
+              "ytd",
+              "max"
+            ]
+          },
+          "timestamp": [
+            1758807000,
+            1758893400,
+            1790343000
+          ],
+          "indicators": {
+            "quote": [
+              {
+                "close": [
+                  6604.72021484375,
+                  6643.7001953125,
+                  7704.43017578125
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "error": null
+    }
+  },
+  "vix": {
+    "chart": {
+      "result": [
+        {
+          "meta": {
+            "currency": "USD",
+            "symbol": "^VIX",
+            "exchangeName": "CXI",
+            "fullExchangeName": "Cboe Indices",
+            "instrumentType": "INDEX",
+            "firstTradeDate": 631267200,
+            "regularMarketTime": 1790345281,
+            "hasPrePostMarketData": false,
+            "gmtoffset": -18000,
+            "timezone": "CDT",
+            "exchangeTimezoneName": "America/Chicago",
+            "regularMarketPrice": 15.75,
+            "regularMarketChangePercent": 0.51,
+            "fulldayPrice": 15.75,
+            "fulldayChange": 0.08,
+            "fulldayChangePercent": 0.51,
+            "fiftyTwoWeekHigh": 35.3,
+            "fiftyTwoWeekLow": 13.38,
+            "regularMarketDayHigh": 15.92,
+            "regularMarketDayLow": 15.02,
+            "regularMarketVolume": 0,
+            "longName": "CBOE Volatility Index",
+            "shortName": "CBOE Volatility Index",
+            "chartPreviousClose": 16.74,
+            "priceHint": 2,
+            "currentTradingPeriod": {
+              "pre": {
+                "timezone": "CDT",
+                "start": 1790319600,
+                "end": 1790319600,
+                "gmtoffset": -18000
+              },
+              "regular": {
+                "timezone": "CDT",
+                "start": 1790319600,
+                "end": 1790367300,
+                "gmtoffset": -18000
+              },
+              "post": {
+                "timezone": "CDT",
+                "start": 1790367300,
+                "end": 1790367300,
+                "gmtoffset": -18000
+              }
+            },
+            "dataGranularity": "1d",
+            "range": "1y",
+            "validRanges": [
+              "1d",
+              "5d",
+              "1mo",
+              "3mo",
+              "6mo",
+              "1y",
+              "2y",
+              "5y",
+              "10y",
+              "ytd",
+              "max"
+            ]
+          },
+          "timestamp": [
+            1758783600,
+            1758870000,
+            1790319600
+          ],
+          "indicators": {
+            "quote": [
+              {
+                "close": [
+                  16.739999771118164,
+                  15.289999961853027,
+                  15.75
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "error": null
+    }
+  }
+}
