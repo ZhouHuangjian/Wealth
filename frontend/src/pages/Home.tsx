@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Input, Select, Space, Table, Tag } from "antd";
+import { Alert, Button, Input, Select, Space, Table, Tag, Tooltip } from "antd";
 import {
   ArrowRight,
   Wallet,
@@ -10,6 +10,7 @@ import {
   FolderInput,
   Plus,
   ArrowUpRight,
+  Info,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as echarts from "echarts/core";
@@ -36,6 +37,7 @@ import {
 } from "../api";
 import type { Item } from "../api";
 import { HelpText, helpColumns } from "../help";
+import "./fund-experience.css";
 export function Chart({
   items,
   xKey,
@@ -176,9 +178,9 @@ export default function Home() {
   const todos = home?.todos || [];
   const isEmpty = !accounts.length;
   return (
-    <>
+    <div className="home-dashboard">
       <PageTitle
-        eyebrow="YOUR FINANCIAL LANDSCAPE"
+        eyebrow="资产概览"
         title="首页"
         actions={
           <Space wrap>
@@ -239,30 +241,25 @@ export default function Home() {
               />
             </div>
             {home.gaps?.length > 0 && (
-              <Alert
-                className="section-alert"
-                type="warning"
-                showIcon
-                message="部分数据仍待补全"
-                description={
-                  hidden ? (
-                    "内容已隐藏"
-                  ) : (
-                    <details className="compact-help">
-                      <summary>查看 {home.gaps.length} 项待核对事项</summary>
-                      <ul>
-                        {home.gaps.map((g: any, index: number) => (
-                          <li key={index}>
-                            {typeof g === "string"
-                              ? g
-                              : g.reason || g.message || g.kind}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )
-                }
-              />
+              <details className="home-data-notice">
+                <summary>
+                  <Info size={14} aria-hidden="true" />
+                  {home.gaps.length} 项数据待补全<span>查看详情</span>
+                </summary>
+                {hidden ? (
+                  <p>内容已隐藏</p>
+                ) : (
+                  <ul>
+                    {home.gaps.map((g: any, index: number) => (
+                      <li key={index}>
+                        {typeof g === "string"
+                          ? g
+                          : g.reason || g.message || g.kind}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </details>
             )}
             {isEmpty && (
               <div className="setup-strip">
@@ -299,15 +296,20 @@ export default function Home() {
                     size="small"
                     rowKey="id"
                     pagination={false}
+                    scroll={{ x: 440 }}
                     columns={helpColumns([
-                      { title: "账户", dataIndex: "name" },
                       {
-                        title: "类型",
-                        dataIndex: "kind",
-                        render: (v) => accountKinds[v] || v,
+                        title: "账户",
+                        render: (_, r: any) => (
+                          <div className="cell-name">
+                            <strong>{r.name}</strong>
+                            <small>{accountKinds[r.kind] || r.kind}</small>
+                          </div>
+                        ),
                       },
                       {
                         title: "资产金额",
+                        width: 195,
                         render: (_, r: any) => (
                           <div className="cell-name">
                             <Money
@@ -319,20 +321,47 @@ export default function Home() {
                               currency={r.currency}
                               compact
                             />
-                            {r.available_estimated && (
-                              <small>
-                                {r.available_message ||
-                                  "未录入持仓，按权益推算可提取金额"}
-                              </small>
-                            )}
-                            {r.has_estimate && (
-                              <small>含盘中 / 手工参考值，非正式结算</small>
-                            )}
-                            {r.reference_partial && (
-                              <small>已知部分，仍有数据待核对</small>
-                            )}
-                            {r.value_basis === "recorded_cash" && (
-                              <small>已记录资金，需补机构总权益</small>
+                            {(r.available_estimated ||
+                              r.has_estimate ||
+                              r.reference_partial ||
+                              r.value_basis === "recorded_cash") && (
+                              <Tooltip
+                                title={
+                                  hidden
+                                    ? "内容已隐藏"
+                                    : [
+                                        r.available_estimated
+                                          ? r.available_message ||
+                                            "未录入持仓，按权益推算可提取金额"
+                                          : "",
+                                        r.has_estimate
+                                          ? "含盘中或手工参考值，非正式结算"
+                                          : "",
+                                        r.reference_partial
+                                          ? "已知部分，仍有数据待核对"
+                                          : "",
+                                        r.value_basis === "recorded_cash"
+                                          ? "已记录资金，需补机构总权益"
+                                          : "",
+                                      ]
+                                        .filter(Boolean)
+                                        .join("；")
+                                }
+                              >
+                                <small
+                                  className="home-account-basis"
+                                  tabIndex={0}
+                                >
+                                  {r.reference_partial
+                                    ? "部分数据"
+                                    : r.value_basis === "recorded_cash"
+                                      ? "已记录资金"
+                                      : r.has_estimate
+                                        ? "含参考估值"
+                                        : "可提取金额为推算"}
+                                  <Info size={11} />
+                                </small>
+                              </Tooltip>
                             )}
                             {r.status === "unknown" &&
                               (["future", "futures"].includes(r.kind) ? (
@@ -347,9 +376,7 @@ export default function Home() {
                                     ? "补充正式结算"
                                     : "补充机构总权益"}
                                 </LinkButton>
-                              ) : (
-                                <small>请补充机构总权益</small>
-                              ))}
+                              ) : null)}
                             {r.display_base_value == null &&
                               r.display_value != null && (
                                 <small>缺汇率，暂未计入汇总</small>
@@ -359,6 +386,7 @@ export default function Home() {
                       },
                       {
                         title: "状态",
+                        width: 92,
                         dataIndex: "status",
                         render: (v, r: any) =>
                           r.reference_partial ? (
@@ -379,11 +407,7 @@ export default function Home() {
                   />
                 )}
               </Panel>
-              <Panel
-                title="需要留意"
-                subtitle="异常与到期事项优先展示"
-                action={<Tag>{todos.length} 项</Tag>}
-              >
+              <Panel title="待处理" action={<Tag>{todos.length} 项</Tag>}>
                 {todos.length ? (
                   <div className="todo-list">
                     {todos.slice(0, 5).map((t: any, i: number) => (
@@ -407,18 +431,13 @@ export default function Home() {
                 ) : (
                   <Blank
                     title="暂无待处理事项"
-                    description="缺失数据、待核对扣款和到期计划会在这里列出。"
+                    description="定投按计划自动进行，异常会集中显示。"
                   />
                 )}
               </Panel>
             </div>
             <div className="three-column">
               <Panel title="业务日历" action={<CalendarDays size={18} />}>
-                <div className="mini-week">
-                  {["一", "二", "三", "四", "五", "六", "日"].map((d) => (
-                    <span key={d}>{d}</span>
-                  ))}
-                </div>
                 {calendar.loading ? (
                   <div className="quiet-empty">正在读取日历…</div>
                 ) : calendar.error ? (
@@ -516,7 +535,7 @@ export default function Home() {
           </>
         )}
       </LoadState>
-    </>
+    </div>
   );
 }
 function Metric({

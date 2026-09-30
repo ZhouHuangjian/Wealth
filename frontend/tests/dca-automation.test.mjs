@@ -9,6 +9,7 @@ import {
   dcaAutomationSummary,
   dcaPlanPayload,
   eligibleDcaHolding,
+  eligibleDcaInstrument,
   validDcaDate,
 } from "../src/dca-automation.ts";
 
@@ -70,7 +71,7 @@ test("reopening a saved plan preserves rate and funding without enabling a disab
   assert.equal(initial.automatic_fee_amount, "0.12");
 });
 
-test("new or disabled automation begins today, never silently from an old plan start", () => {
+test("existing unconfigured or disabled plans are not silently backfilled from an old start", () => {
   assert.equal(
     dcaAutomationInitial(plan, "2026-09-28").automatic_start_date,
     "2026-09-28",
@@ -93,6 +94,67 @@ test("new or disabled automation begins today, never silently from an old plan s
     "2026-10-08",
   );
   assert.throws(() => dcaAutomationInitial(plan, "2026-02-30"));
+});
+
+test("a new plan automates once from its visible first date without changing an explicit opt-out", () => {
+  const initial = dcaAutomationInitial(plan, "2026-09-30", { newPlan: true });
+  assert.equal(initial.automatic_enabled, true);
+  assert.equal(initial.automatic_start_date, plan.start_date);
+  assert.equal(initial.automatic_fee_mode, "unknown");
+  assert.equal(initial.holiday_policy, "skip");
+  assert.equal(
+    dcaAutomationInitial({ ...plan, frequency: "monthly" }, "2026-09-30", {
+      newPlan: true,
+    }).holiday_policy,
+    "next_open",
+  );
+  assert.equal(
+    dcaAutomationInitial(
+      { ...plan, frequency: "monthly", holiday_policy: "skip" },
+      "2026-09-30",
+      { newPlan: true },
+    ).holiday_policy,
+    "skip",
+  );
+  assert.equal(
+    dcaAutomationInitial(
+      { ...plan, automation: { enabled: false } },
+      "2026-09-30",
+      { newPlan: true },
+    ).automatic_enabled,
+    false,
+  );
+  const payload = dcaPlanPayload({
+    ...plan,
+    ...initial,
+    target_account_id: "fund-account",
+  });
+  assert.equal(payload.automation.enabled, true);
+  assert.equal(payload.automation.start_date, plan.start_date);
+  assert.equal(payload.holiday_policy, "skip");
+  assert.throws(
+    () => dcaPlanPayload({ ...form, holiday_policy: "discard" }),
+    /非开放日/,
+  );
+});
+
+test("only OTC non-money funds default to automatic NAV-based installments", () => {
+  const fund = { kind: "fund", name: "纳斯达克100 QDII A", specification: {} };
+  assert.equal(eligibleDcaInstrument(fund), true);
+  for (const kind of ["stock", "etf", "future", "option", "gold"])
+    assert.equal(eligibleDcaInstrument({ ...fund, kind }), false);
+  for (const specification of [
+    { trading_channel: "exchange" },
+    { is_derivative: true },
+    { is_money_fund: true },
+    { is_money_market: true },
+    { fund_type: "货币型" },
+    { fund_type: "005" },
+    { fund_type: "MONEY_MARKET" },
+  ])
+    assert.equal(eligibleDcaInstrument({ ...fund, specification }), false);
+  assert.equal(eligibleDcaInstrument({ ...fund, name: "现金宝货币A" }), false);
+  assert.equal(eligibleDcaInstrument({ ...fund, archived: true }), false);
 });
 
 test("an enabled saved configuration retains its actual start, fees and exclusions", () => {
@@ -329,7 +391,10 @@ test("human statuses distinguish automatic estimates, existing facts and missing
   assert.equal(dcaAutomationStatusLabel("already_recorded"), "已有记录");
   assert.equal(dcaAutomationStatusLabel("waiting_cash"), "资金不足");
   assert.equal(dcaAutomationStatusLabel("waiting_nav"), "等待正式净值");
-  assert.equal(dcaAutomationStatusLabel("waiting_fee"), "等待费用设置");
+  assert.equal(
+    dcaAutomationStatusLabel("waiting_fee"),
+    "完善费用规则（设置一次）",
+  );
   assert.equal(dcaAutomationStatusLabel("external_future_state"), "状态待核实");
   assert.equal(
     dcaAutomationSummary({
@@ -343,7 +408,7 @@ test("human statuses distinguish automatic estimates, existing facts and missing
       enabled: true,
       summary: { recorded_estimate: "20", waiting_cash: -1 },
     }),
-    "暂无到期待办",
+    "等待下一期自动执行",
   );
   assert.equal(
     dcaAutomationSummary({ enabled: false, summary: {} }),

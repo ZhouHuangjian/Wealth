@@ -101,15 +101,15 @@ def run(book, plan):
     return run_plan(book.space, book.user, plan.pk)
 
 
-def test_disabled_and_explicit_start_do_not_silently_import_all_past(book):
+def test_disabled_stays_disabled_and_new_plan_start_is_reused(book):
     value = plan(book, automation={"enabled": False})
     assert run(book, value)["processed"] == 0
     assert Event.objects.filter(tenant=book.space).count() == 1
-    with pytest.raises(DomainError, match="起始日"):
-        plan(
-            book,
-            automation={"enabled": True, "holding_account_id": str(book.holding.pk)},
-        )
+    inherited = plan(
+        book,
+        automation={"enabled": True, "holding_account_id": str(book.holding.pk)},
+    )
+    assert inherited.data["automation"]["start_date"] == "2026-09-23"
     value = plan(
         book,
         automation={

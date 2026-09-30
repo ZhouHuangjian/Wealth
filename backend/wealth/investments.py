@@ -853,8 +853,20 @@ def _calendar_item(
     opening = _latest_quote(prices, prior)
     if q_after and (not closing or closing.economic_date != when):
         return base
-    if q_before and (not opening or (when - opening.economic_date).days > 7):
-        return {**base, "message": "缺少上一有效净值或收盘价"}
+    from .valuation_calendar import open_days_between, valuation_calendar
+
+    opening_lag = (
+        open_days_between(
+            opening.economic_date,
+            when,
+            valuation_calendar(instrument),
+            include_end=False,
+        )
+        if opening
+        else None
+    )
+    if q_before and (not opening or opening_lag is None or opening_lag != 0):
+        return {**base, "message": "缺少交易日行情、上一有效价格或日历覆盖"}
     # Multi-day gaps are disclosed. Intervening actual trades require a daily
     # quote on their date, otherwise a later observation cannot move that P&L.
     if q_before and opening.economic_date < prior:

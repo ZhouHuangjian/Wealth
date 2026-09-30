@@ -28,25 +28,7 @@ CURRENCY_POLICY = "local_profit_converted_daily_excludes_fx"
 EXTERNAL_FLOWS = {"transfer", "fx", "income", "expense", "refund"}
 
 
-def _calendar_id(instrument):
-    specification = instrument.specification or {}
-    # NAV valuation days are not the fund's order-acceptance intersection.
-    # In particular a US QDII NAV can move while the Chinese market is closed.
-    if instrument.kind == "fund" and specification.get("trading_channel") != "exchange":
-        from .subscription_calendar import subscription_rule
-
-        ids = subscription_rule(instrument)["calendar_ids"]
-        if "US_EQUITIES" in ids:
-            return "US_EQUITIES"
-        if "HKEX" in ids:
-            return "HKEX"
-    return (
-        (specification.get("metadata_overrides") or {}).get("calendar_id")
-        or specification.get("calendar_id")
-        or {"CN": "CN_EXCHANGE", "US": "US_EQUITIES", "HK": "HKEX"}.get(
-            instrument.market
-        )
-    )
+from .valuation_calendar import valuation_calendar as _calendar_id
 
 
 def _continuous_baseline(start, end, calendar_id):
@@ -323,6 +305,8 @@ class ReturnEvidence:
             return None
         item.update(
             observation_kind="reference" if reference else "formal",
+            price_basis="estimate" if reference else "formal",
+            quantity_source="recorded",
             published_at=(reference or formal_today).published_at
             if reference or formal_today
             else None,
@@ -391,7 +375,10 @@ class ReturnEvidence:
             item.update(
                 status="estimated",
                 contains_automatic_estimates=True,
-                message="收益包含按计划自动推算的份额，尚未核实机构成交记录",
+                quantity_source="automatic_estimate",
+                message="正式净值与自动推算份额计算"
+                if not reference
+                else "盘中估值与自动推算份额计算",
             )
         return item
 

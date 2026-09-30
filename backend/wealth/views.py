@@ -974,8 +974,8 @@ def dispatch_space(request, space, role, path, body):
         and (action in {"deletion", "restore"} or request.method == "DELETE")
     ):
         from .catalog_lifecycle import (
-            deletion_preview,
             delete_catalog_item,
+            deletion_preview,
             restore_catalog_item,
         )
 
@@ -1260,9 +1260,21 @@ def dispatch_space(request, space, role, path, body):
                     space,
                     resource,
                     body,
-                    lambda: record(save_resource(space, user, resource, body)),
+                    lambda: record(
+                        save_resource(
+                            space,
+                            user,
+                            resource,
+                            body,
+                            run_automatic=resource == "plans",
+                        )
+                    ),
                 )
-            return record(save_resource(space, user, resource, body, obj))
+            return record(
+                save_resource(
+                    space, user, resource, body, obj, run_automatic=resource == "plans"
+                )
+            )
     if resource in {"occurrences", "installments"}:
         from .planning import confirm_occurrence
 
@@ -1274,8 +1286,8 @@ def dispatch_space(request, space, role, path, body):
             )
             if resource == "installments":
                 qs = qs.filter(plan__kind="loans")
-            from .subscription_calendar import subscription_rule, subscription_day
             from .planning import today
+            from .subscription_calendar import subscription_day, subscription_rule
 
             instruments = {
                 str(i.pk): i for i in m.Instrument.objects.filter(tenant=space)
@@ -1283,12 +1295,18 @@ def dispatch_space(request, space, role, path, body):
             rules = {}
 
             def occurrence_record(o):
+                from .dca_automation import occurrence_processing
+
                 row = {
                     **o.details,
                     **record(o),
                     "name": o.plan.data.get("name"),
                     "plan_kind": o.plan.kind,
                     "operation_kind": o.plan.data.get("kind", "loan"),
+                    "automation_enabled": (o.plan.data.get("automation") or {}).get(
+                        "enabled", False
+                    ),
+                    "automation": occurrence_processing(o),
                 }
                 if (
                     not o.event_id

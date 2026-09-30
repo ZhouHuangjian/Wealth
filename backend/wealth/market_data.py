@@ -250,7 +250,29 @@ def _quote(
             now.astimezone(NEW_YORK if inst["market"] == "US" else SHANGHAI).date()
             - economic
         ).days
-        if lag > (7 if kind == "official_nav" else 4):
+        from .valuation_calendar import (
+            nav_freshness_calendar,
+            open_days_between,
+            valuation_calendar,
+        )
+
+        calendar_id = (
+            nav_freshness_calendar(inst)
+            if kind == "official_nav"
+            else valuation_calendar(inst)
+        )
+        market_now = now.astimezone(
+            NEW_YORK if calendar_id == "US_EQUITIES" else SHANGHAI
+        ).date()
+        open_lag = open_days_between(economic, market_now, calendar_id)
+        if open_lag is None:
+            state, message = (
+                "calendar_unknown" if calendar_id else "latest_available",
+                "交易日历尚未覆盖此日期，保留原始行情日期"
+                if calendar_id
+                else "最新已公布净值；按原净值日期展示",
+            )
+        elif open_lag > (5 if kind == "official_nav" else 3):
             status, state, message = "stale", "stale", "价格较旧，请核对行情日期"
         elif lag > 0:
             state = "previous_session"
