@@ -1,13 +1,12 @@
 """Cash-only futures withdrawal estimates never certify missing equity evidence."""
 
+import uuid
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
-import uuid
 
 import pytest
 from django.contrib.auth import get_user_model
-
 from wealth.account_opening import initialize_account
 from wealth.common import tenant_context
 from wealth.ledger import post_event, reverse_event
@@ -224,7 +223,7 @@ def test_latest_zero_margin_and_zero_quantity_supersede_older_restrictions(book)
     assert D(reported(book)[1]["available"]) == D("10000")
 
 
-def test_roll_forward_estimate_preserves_stale_gap_and_is_not_allocatable(book):
+def test_cash_only_roll_forward_is_available_without_invented_settlement_gap(book):
     snapshot(book, when=PRIOR)
     bank = Account.objects.create(tenant=book.space, name="入金银行", kind="bank")
     post_event(
@@ -251,10 +250,10 @@ def test_roll_forward_estimate_preserves_stale_gap_and_is_not_allocatable(book):
     report, row = reported(book)
     assert D(row["value"]) == D(row["available"]) == D("10500")
     assert D(row["roll_forward"]) == D("500")
-    assert row["available_estimated"] and not row["available_eligible"]
-    assert report["completeness"] == "partial"
-    assert D(report["available_cash"]) == 0
-    assert any("尚缺后续" in gap for gap in report["gaps"])
+    assert row["available_estimated"] and row["available_eligible"]
+    assert report["completeness"] == "complete"
+    assert D(report["available_cash"]) == D("10500")
+    assert not any("尚缺后续" in gap for gap in report["gaps"])
 
 
 def test_unverified_coverage_does_not_become_complete_or_allocatable(book):
@@ -307,9 +306,9 @@ def test_stale_explicit_zero_is_never_replaced_by_equity_estimate(book):
     report, row = reported(book)
     assert D(row["available"]) == 0
     assert row["available_basis"] == "reported"
-    assert not row["available_estimated"]
-    assert not row["available_eligible"]
-    assert report["completeness"] == "partial"
+    assert row["available_estimated"]
+    assert row["available_eligible"]
+    assert report["completeness"] == "complete"
 
 
 def test_legacy_cash_only_record_without_equity_is_not_upgraded(book):
@@ -343,10 +342,10 @@ def test_intraday_equity_remains_reference_only(book):
     assert reference["local_value"] == D("10000")
 
 
-def test_nonfutures_snapshot_account_keeps_existing_behaviour(book):
+def test_empty_broker_snapshot_gets_same_cash_only_default_as_futures(book):
     book.account.kind = "broker"
     book.account.save(update_fields=["kind"])
     snapshot(book)
     report, row = reported(book)
-    assert "available_estimated" not in row
-    assert D(row["available"]) == D(report["available_cash"]) == 0
+    assert row["available_estimated"] and row["available_eligible"]
+    assert D(row["available"]) == D(report["available_cash"]) == D("10000")

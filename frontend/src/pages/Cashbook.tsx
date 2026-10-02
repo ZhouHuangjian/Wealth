@@ -277,7 +277,7 @@ function EventList({ investmentOnly = false }: { investmentOnly?: boolean }) {
                 r.reversed ? (
                   <Status value="reversed" />
                 ) : r.payload?.automatic_estimate ? (
-                  <Tag color="gold">推算待核实</Tag>
+                  <Tag color="blue">自动记账 · 推算</Tag>
                 ) : r.kind === "fund_debit" && r.next_stage ? (
                   <Tag>已扣款，待份额</Tag>
                 ) : (
@@ -312,27 +312,29 @@ function EventList({ investmentOnly = false }: { investmentOnly?: boolean }) {
                         修改
                       </Button>
                     )}
-                  {r.next_stage && space.role !== "viewer" && (
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() =>
-                        requestReveal(() =>
-                          openEvent({
-                            id: "",
-                            ...r.next_stage,
-                            related_event_id: r.id,
-                            currency: r.currency,
-                            economic_date: dateToday(),
-                          }),
-                        )
-                      }
-                    >
-                      {r.next_stage.kind === "fund_confirm"
-                        ? "确认份额"
-                        : "记录交收"}
-                    </Button>
-                  )}
+                  {r.next_stage &&
+                    !r.payload?.automatic_estimate &&
+                    space.role !== "viewer" && (
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() =>
+                          requestReveal(() =>
+                            openEvent({
+                              id: "",
+                              ...r.next_stage,
+                              related_event_id: r.id,
+                              currency: r.currency,
+                              economic_date: dateToday(),
+                            }),
+                          )
+                        }
+                      >
+                        {r.next_stage.kind === "fund_confirm"
+                          ? "确认份额"
+                          : "记录交收"}
+                      </Button>
+                    )}
                   <Button
                     type="link"
                     size="small"
@@ -1151,7 +1153,11 @@ export function Occurrences({
             ? "逐期还款与实际匹配"
             : "计划期次与到期待办"
         }
-        subtitle="到期不会自动扣款。选择已核实的真实事项进行关联；可直接记录实际发生的收支，凭证选填。"
+        subtitle={
+          resource === "installments"
+            ? "关联实际还款，保留每期进度。"
+            : "定投按设置自动记账；其他计划可关联实际收支。"
+        }
       >
         <LoadState {...state}>
           <Table
@@ -1191,6 +1197,7 @@ export function Occurrences({
                 render: (v, r) => (
                   <span title={r.subscription_day?.reason}>
                     <Status value={v} />
+                    {r.automation_enabled && <small>自动记账</small>}
                     {r.auto_skip && <small>休市</small>}
                   </span>
                 ),
@@ -1206,7 +1213,15 @@ export function Occurrences({
                 title: "处理",
                 fixed: "right",
                 render: (_, r) =>
-                  r.event_id ? (
+                  r.automation_enabled ? (
+                    <span className="muted" title={r.automation?.message}>
+                      {r.automation?.requires_action
+                        ? r.automation.action_label
+                        : r.event_id
+                          ? "已自动记账"
+                          : "系统自动处理"}
+                    </span>
+                  ) : r.event_id ? (
                     <Tag color="green">已关联实账</Tag>
                   ) : space.role !== "viewer" &&
                     !["skipped", "cancelled"].includes(r.status) ? (

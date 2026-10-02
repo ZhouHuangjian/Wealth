@@ -333,7 +333,7 @@ export default function FundBuy({
           <Form.Item
             name="auto_estimate"
             label="正式净值公布后推算份额"
-            tooltip="须有明确费用规则；只推算账簿份额，不操作机构账户，结果始终标记待核实。"
+            tooltip="设置一次费用规则，净值公布后自动入账；保留推算来源，可随时更正。"
             valuePropName="checked"
           >
             <Switch checkedChildren="开启" unCheckedChildren="关闭" />
@@ -447,8 +447,8 @@ export function FundOrders({
   return (
     <>
       <Panel
-        title={pending ? "基金待核实" : "基金申购进度"}
-        subtitle="申请、扣款、份额分阶段记录；推算结果始终保留来源。"
+        title={pending ? "基金待处理" : "基金申购进度"}
+        subtitle={pending ? "仅显示需要补充信息或处理的异常。" : undefined}
       >
         <LoadState {...state}>
           <Table
@@ -512,7 +512,7 @@ export function FundOrders({
                   <>
                     <Tag
                       color={
-                        r.status === "confirmed"
+                        ["confirmed", "estimated"].includes(r.status)
                           ? "green"
                           : r.status === "cancelled"
                             ? "default"
@@ -522,8 +522,8 @@ export function FundOrders({
                       {r.status_label}
                     </Tag>
                     <div className="muted">{r.note}</div>
-                    {r.expected_confirmation_date && (
-                      <small>预计确认 {r.expected_confirmation_date}</small>
+                    {r.status === "paid" && r.expected_confirmation_date && (
+                      <small>预计入账 {r.expected_confirmation_date}</small>
                     )}
                   </>
                 ),
@@ -541,7 +541,7 @@ export function FundOrders({
                           size="small"
                           onClick={() => requestReveal(() => setEditing(r))}
                         >
-                          {r.status === "submitted" ? "补充 / 修改" : "核实"}
+                          {r.status === "estimated" ? "更正" : "补充 / 修改"}
                         </Button>
                       )}
                       <Button

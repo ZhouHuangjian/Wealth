@@ -23,6 +23,7 @@ import { useDebounced, useResource, useWorkspace } from "../state";
 import { dcaAutomationInitial, dcaPlanPayload } from "../dca-automation";
 import DcaAutomationFields from "./DcaAutomationFields";
 import DcaPlanAutomationStatus from "./DcaPlanAutomationStatus";
+import "./fund-experience.css";
 
 export default function DcaPlanManager({
   fields,
@@ -41,6 +42,9 @@ export default function DcaPlanManager({
   const { message, modal } = App.useApp();
   const [form] = Form.useForm(),
     formId = useId();
+  const automaticEnabled = Form.useWatch("automatic_enabled", form) === true;
+  const frequency = Form.useWatch("frequency", form);
+  const currency = Form.useWatch("currency", form) || "CNY";
   const [page, setPage] = useState(1),
     [pageSize, setPageSize] = useState(10),
     [query, setQuery] = useState("");
@@ -75,8 +79,17 @@ export default function DcaPlanManager({
     ...queryParams,
   });
   const state = useResource("plans", `?${params}`);
+  const instrumentState = useResource("instruments");
+  const instruments = listOf<Item>(instrumentState.data);
   const rows = listOf<Item>(state.data);
   const canWrite = space.role !== "viewer";
+  useEffect(() => {
+    if (open && !editing && frequency && !form.isFieldTouched("holiday_policy"))
+      form.setFieldValue(
+        "holiday_policy",
+        frequency === "monthly" ? "next_open" : "skip",
+      );
+  }, [frequency, editing, open, form]);
   async function loadPlan(plan: Item) {
     const seq = ++loadSequence.current;
     setLoading(true);
@@ -112,7 +125,7 @@ export default function DcaPlanManager({
         setInitial({
           name: "我的定投",
           ...values,
-          ...dcaAutomationInitial(values, dateToday()),
+          ...dcaAutomationInitial(values, dateToday(), { newPlan: true }),
         });
       }
     });
@@ -139,13 +152,22 @@ export default function DcaPlanManager({
     setBusy(true);
     setError("");
     try {
+      const product = instruments.find(
+        (item) => item.id === values.instrument_id,
+      );
+      if (!editing && values.name === "我的定投" && product)
+        values.name = `${product.name} · ${({ daily: "每日", weekly: "每周", monthly: "每月" } as Record<string, string>)[values.frequency] || "定期"}定投`;
       await send(
         `/spaces/${space.id}/plans${editing ? `/${editing.id}` : ""}`,
         dcaPlanPayload(values, editing || undefined),
         editing ? "PATCH" : "POST",
       );
       if (!live.current) return;
-      message.success("定投计划已保存");
+      message.success(
+        values.automatic_enabled
+          ? "已保存，后续按计划自动记账"
+          : "定投计划已保存",
+      );
       setOpen(false);
       setDirty(false);
       reload();
@@ -162,183 +184,221 @@ export default function DcaPlanManager({
     }
   }
   return (
-    <Panel
-      title="定投计划"
-      subtitle="开启自动补录后，按计划检查扣款与正式净值；历史估算可单独预览并补录以前的定投。"
-      action={
-        <Space>
-          <Button
-            aria-label="刷新定投计划"
-            icon={<RefreshCw size={14} />}
-            onClick={() => state.retry()}
-          />
-          {canWrite && (
+    <div className="dca-plan-workspace">
+      <Panel
+        title="定投计划"
+        subtitle="一次设置，自动记账与计算份额。"
+        action={
+          <Space>
             <Button
-              type="primary"
-              icon={<Plus size={15} />}
-              onClick={() => openForm()}
-            >
-              新增定投计划
-            </Button>
-          )}
-        </Space>
-      }
-    >
-      <div className="table-toolbar">
-        <Input
-          prefix={<Search size={15} />}
-          placeholder="搜索定投计划"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          allowClear
-          style={{ maxWidth: 300 }}
-        />
-      </div>
-      <LoadState {...state}>
-        <Table<Item>
-          rowKey="id"
-          size="middle"
-          dataSource={rows}
-          columns={helpColumns([
-            ...columns,
-            {
-              title: "补录方式与进度",
-              width: 285,
-              render: (_, plan) =>
-                plan.automation ? (
-                  <DcaPlanAutomationStatus
-                    key={`${space.id}:${plan.id}:${plan.version}`}
-                    plan={plan}
-                  />
-                ) : (
-                  <Tag>手工确认</Tag>
-                ),
-            },
-            {
-              title: "操作",
-              key: "action",
-              fixed: "right",
-              width: 150,
-              render: (_, plan) => (
-                <Space size={4}>
-                  <Button
-                    size="small"
-                    type="link"
-                    onClick={() =>
-                      canWrite ? openForm(plan) : showDetail(plan)
-                    }
-                  >
-                    {canWrite ? "编辑" : "详情"}
-                  </Button>
-                  <Button
-                    size="small"
-                    type="link"
-                    onClick={() => onHistory(plan)}
-                  >
-                    历史估算
-                  </Button>
-                </Space>
-              ),
-            },
-          ])}
-          scroll={{ x: "max-content" }}
-          pagination={{
-            current: page,
-            pageSize,
-            total: state.data?.count ?? rows.length,
-            onChange: (next, size) => {
-              setPage(next);
-              setPageSize(size);
-            },
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
-          }}
-          locale={{ emptyText: "尚未添加定投计划" }}
-        />
-      </LoadState>
-      <Modal
-        open={open}
-        title={editing ? "编辑定投计划" : "新增定投计划"}
-        width={680}
-        onCancel={closeForm}
-        onOk={() => form.submit()}
-        okText="保存"
-        cancelText="取消"
-        confirmLoading={busy}
-        okButtonProps={{ disabled: loading || !!loadError }}
-        cancelButtonProps={{ disabled: busy }}
-        maskClosable={!busy}
-        keyboard={!busy}
-        closable={!busy}
-        destroyOnHidden
-      >
-        <div data-dirty={dirty}>
-          {loading ? (
-            <Spin tip="正在读取计划…">
-              <div style={{ minHeight: 120 }} />
-            </Spin>
-          ) : loadError ? (
-            <Alert
-              type="error"
-              showIcon
-              message={hidden ? "计划暂时无法读取" : loadError}
-              action={
-                <Button onClick={() => editing && void loadPlan(editing)}>
-                  重试
-                </Button>
-              }
+              aria-label="刷新定投计划"
+              icon={<RefreshCw size={14} />}
+              onClick={() => state.retry()}
             />
-          ) : (
-            <Form
-              form={form}
-              name={formId}
-              initialValues={initial}
-              clearOnDestroy
-              layout="vertical"
-              disabled={busy}
-              onValuesChange={() => setDirty(true)}
-              onFinish={save}
-            >
-              {error && (
-                <Alert
-                  type="error"
-                  showIcon
-                  className="form-alert"
-                  message={
-                    hidden ? "保存未完成，请显示金额后查看详细原因。" : error
-                  }
-                />
-              )}
-              <Fields
-                fields={fields.filter(
-                  (f) =>
-                    !["name", "kind", "currency", "status"].includes(f.name),
-                )}
-              />
-              <DcaAutomationFields accounts={accounts} useDefaults={!editing} />
-              <Collapse
-                ghost
-                items={[
-                  {
-                    key: "more",
-                    forceRender: true,
-                    label: "计划名称、币种与状态",
-                    children: (
-                      <Fields
-                        fields={fields.filter((f) =>
-                          ["name", "kind", "currency", "status"].includes(
-                            f.name,
-                          ),
-                        )}
-                      />
-                    ),
-                  },
-                ]}
-              />
-            </Form>
-          )}
+            {canWrite && (
+              <Button
+                type="primary"
+                icon={<Plus size={15} />}
+                onClick={() => openForm()}
+              >
+                新增定投计划
+              </Button>
+            )}
+          </Space>
+        }
+      >
+        <div className="table-toolbar">
+          <Input
+            prefix={<Search size={15} />}
+            placeholder="搜索定投计划"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            allowClear
+            style={{ maxWidth: 300 }}
+          />
         </div>
-      </Modal>
-    </Panel>
+        <LoadState {...state}>
+          <Table<Item>
+            rowKey="id"
+            size="middle"
+            dataSource={rows}
+            columns={helpColumns([
+              ...columns.filter(
+                (column) =>
+                  !("dataIndex" in column && column.dataIndex === "status"),
+              ),
+              {
+                title: "运行进度",
+                width: 230,
+                render: (_, plan) =>
+                  plan.automation ? (
+                    <DcaPlanAutomationStatus
+                      key={`${space.id}:${plan.id}:${plan.version}`}
+                      plan={plan}
+                    />
+                  ) : (
+                    <Tag>{plan.status === "paused" ? "已暂停" : "仅提醒"}</Tag>
+                  ),
+              },
+              {
+                title: "操作",
+                key: "action",
+                fixed: "right",
+                width: 150,
+                render: (_, plan) => (
+                  <Space size={4}>
+                    <Button
+                      size="small"
+                      type="link"
+                      onClick={() =>
+                        canWrite ? openForm(plan) : showDetail(plan)
+                      }
+                    >
+                      {canWrite ? "编辑" : "详情"}
+                    </Button>
+                    {plan.frequency === "daily" &&
+                      plan.holiday_policy !== "next_open" && (
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() => onHistory(plan)}
+                        >
+                          历史估算
+                        </Button>
+                      )}
+                  </Space>
+                ),
+              },
+            ])}
+            scroll={{ x: "max-content" }}
+            pagination={{
+              current: page,
+              pageSize,
+              total: state.data?.count ?? rows.length,
+              onChange: (next, size) => {
+                setPage(next);
+                setPageSize(size);
+              },
+              showSizeChanger: true,
+              showTotal: (total) => `共 ${total} 条`,
+            }}
+            locale={{ emptyText: "尚未添加定投计划" }}
+          />
+        </LoadState>
+        <Modal
+          open={open}
+          title={editing ? "编辑定投计划" : "新增定投计划"}
+          width={720}
+          className="dca-plan-modal"
+          onCancel={closeForm}
+          onOk={() => form.submit()}
+          okText={automaticEnabled ? "保存自动记账计划" : "保存"}
+          cancelText="取消"
+          confirmLoading={busy}
+          okButtonProps={{ disabled: loading || !!loadError }}
+          cancelButtonProps={{ disabled: busy }}
+          maskClosable={!busy}
+          keyboard={!busy}
+          closable={!busy}
+          destroyOnHidden
+        >
+          <div data-dirty={dirty}>
+            {loading ? (
+              <Spin tip="正在读取计划…">
+                <div style={{ minHeight: 120 }} />
+              </Spin>
+            ) : loadError ? (
+              <Alert
+                type="error"
+                showIcon
+                message={hidden ? "计划暂时无法读取" : loadError}
+                action={
+                  <Button onClick={() => editing && void loadPlan(editing)}>
+                    重试
+                  </Button>
+                }
+              />
+            ) : (
+              <Form
+                form={form}
+                name={formId}
+                initialValues={initial}
+                clearOnDestroy
+                layout="vertical"
+                disabled={busy}
+                onValuesChange={() => setDirty(true)}
+                onFinish={save}
+              >
+                {error && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    className="form-alert"
+                    message={
+                      hidden ? "保存未完成，请显示金额后查看详细原因。" : error
+                    }
+                  />
+                )}
+                <Fields
+                  fields={[
+                    ...fields
+                      .filter(
+                        (f) =>
+                          ![
+                            "name",
+                            "kind",
+                            "currency",
+                            "status",
+                            "account_id",
+                          ].includes(f.name),
+                      )
+                      .map((f) =>
+                        f.name === "amount"
+                          ? { ...f, label: `每期金额（${currency}）` }
+                          : f,
+                      ),
+                    {
+                      name: "holiday_policy",
+                      label: "遇到非开放日",
+                      type: "select",
+                      required: true,
+                      options: [
+                        { value: "skip", label: "跳过本期" },
+                        { value: "next_open", label: "顺延至下个开放日" },
+                      ],
+                      help: "按该基金的申购日历处理，后续计划仍按原定日期执行。",
+                    },
+                  ]}
+                />
+                <DcaAutomationFields
+                  accounts={accounts}
+                  instruments={instruments}
+                  useDefaults={!editing}
+                />
+                <Collapse
+                  ghost
+                  items={[
+                    {
+                      key: "more",
+                      forceRender: true,
+                      label: `计划名称 · ${currency} · 状态设置`,
+                      children: (
+                        <Fields
+                          fields={fields.filter((f) =>
+                            ["name", "kind", "currency", "status"].includes(
+                              f.name,
+                            ),
+                          )}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              </Form>
+            )}
+          </div>
+        </Modal>
+      </Panel>
+    </div>
   );
 }

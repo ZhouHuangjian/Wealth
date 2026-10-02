@@ -795,6 +795,12 @@ def _calendar_item(
     payouts = [event for event in dividends if event.economic_date == when]
     if not q_before and not q_after and not changes and not payouts:
         return None
+    from .return_dates import has_automatic_shares
+
+    closing = _latest_quote(prices, when)
+    opening = _latest_quote(prices, prior)
+    reference = bool(closing and closing.kind in REFERENCE_KINDS)
+    automatic = has_automatic_shares(space, movements, when)
     base = {
         "account_id": str(account.pk),
         "account_name": account.name,
@@ -804,12 +810,37 @@ def _calendar_item(
         "kind": instrument.kind,
         "currency": instrument.currency,
         "date": str(when),
+        "return_date": when,
+        "nav_date": closing.economic_date
+        if closing and instrument.kind == "fund" and not reference
+        else None,
+        "published_at": closing.published_at if closing else None,
+        "observed_at": closing.created_at if closing else None,
+        "price_basis": "estimate" if reference else "formal",
+        "observation_kind": "reference" if reference else "formal",
+        "quantity_source": "automatic_estimate" if automatic else "recorded",
+        "contains_automatic_estimates": automatic,
+        "history_reconstructed": any(row["reconstructed"] for row in movements),
+        "uses_trade_nav_dates": any(
+            row.get("date_basis") == "nav_date" and row["date"] <= when
+            for row in movements
+        ),
         "amount": None,
         "return_rate": None,
         "source": None,
         "status": "unavailable",
         "message": "缺少正式价格",
     }
+    date_error = next(
+        (
+            row["date_error"]
+            for row in movements
+            if row["date"] <= when and row.get("date_error")
+        ),
+        None,
+    )
+    if date_error:
+        return {**base, "message": date_error}
     from .holding_checks import read_holding_check
 
     read_check = check_reader or read_holding_check
@@ -849,12 +880,22 @@ def _calendar_item(
         }
     if is_derivative_instrument(instrument) or account.valuation_mode == "snapshot":
         return {**base, "message": "期货期权收益须按机构权益与真实入出金计算"}
-    closing = _latest_quote(prices, when)
-    opening = _latest_quote(prices, prior)
     if q_after and (not closing or closing.economic_date != when):
         return base
-    if q_before and (not opening or (when - opening.economic_date).days > 7):
-        return {**base, "message": "缺少上一有效净值或收盘价"}
+    from .valuation_calendar import open_days_between, return_calendar
+
+    opening_lag = (
+        open_days_between(
+            opening.economic_date,
+            when,
+            return_calendar(instrument, estimated=reference),
+            include_end=False,
+        )
+        if opening
+        else None
+    )
+    if q_before and (not opening or opening_lag is None or opening_lag != 0):
+        return {**base, "message": "缺少交易日行情、上一有效价格或日历覆盖"}
     # Multi-day gaps are disclosed. Intervening actual trades require a daily
     # quote on their date, otherwise a later observation cannot move that P&L.
     if q_before and opening.economic_date < prior:
@@ -912,14 +953,19 @@ def _calendar_item(
         "amount": amount,
         "return_rate": amount / basis if basis else None,
         "basis": basis,
-        "status": "confirmed",
-        "message": "",
+        "status": "estimated" if automatic or reference else "confirmed",
+        "message": (
+            "正式净值与自动推算份额计算"
+            if not reference
+            else "盘中估值与自动推算份额计算"
+        )
+        if automatic
+        else "",
         "source": closing.source
         if closing
         else (opening.source if opening else "ledger"),
         "price_date": closing.economic_date if closing else None,
         "interval_start": opening.economic_date if opening and q_before else when,
-        "history_reconstructed": any(row["reconstructed"] for row in movements),
         "capital_flow": capital,
         "dividends": distributions,
     }
@@ -1037,6 +1083,8 @@ def _aggregate_days(rows):
         if missing and known_values
         else "unavailable"
         if missing
+        else "estimated"
+        if any(row["status"] == "estimated" for row in values)
         else "confirmed"
         if values
         else "no_position"
@@ -1072,6 +1120,9 @@ def profit_calendar(
     selected = day(selected_day) if selected_day else min(end, timezone.localdate())
     accounts, instruments = _selected_rows(space, account_id, instrument_id, kind)
     movement_groups = defaultdict(list)
+    from .return_dates import analytical_movement
+
+    known_on = timezone.localdate()
     for row in (
         PositionMovement.objects.filter(
             tenant=space,
@@ -1080,27 +1131,13 @@ def profit_calendar(
             event__reversal__isnull=True,
             event__reverses__isnull=True,
         )
-        .select_related("event")
+        .select_related("event__related")
         .order_by("event__economic_date", "event__created_at")
     ):
-        event = row.event
-        reconstructed = (
-            event.kind == "opening"
-            and event.payload.get("history_mode") == "unchanged_holding"
-        )
-        effective = (
-            day(event.payload["purchase_date"])
-            if reconstructed
-            else event.economic_date
-        )
         movement_groups[(str(row.account_id), str(row.instrument_id))].append(
-            {
-                "date": effective,
-                "quantity": row.quantity,
-                "cost": row.cost,
-                "event": event,
-                "reconstructed": reconstructed,
-            }
+            analytical_movement(
+                row, instruments[str(row.instrument_id)], known_on=known_on
+            )
         )
     prices = defaultdict(list)
     for quote in Price.objects.filter(
@@ -1228,6 +1265,8 @@ def profit_calendar(
         status = (
             "future"
             if when > today
+            else "estimated"
+            if complete and any(row["status"] == "estimated" for row in items)
             else "confirmed"
             if complete
             else "partial"
@@ -1280,9 +1319,11 @@ def profit_calendar(
             "data_revision": space.revision,
             "return_basis": "daily_opening_value_plus_positive_capital",
             "currency_policy": "local_profit_converted_daily_excludes_fx",
+            "knowledge_basis": "currently_recorded_facts",
             "history_warnings": [
                 "持有收益为当前持仓市值减剩余取得成本，不等同于累计总投资收益。",
                 "历史回算仅适用于已确认份额不变的持仓；现金分红、红利再投、拆分及买卖须另行录入。",
+                "已确认基金份额按记录中的成交净值日回溯计算收益；扣款、确认和在途仍保留原日期。",
                 "收益日历只计入已记录且关联产品的股息分红；未记录的分配不会自动计为收入。",
                 "跨币种汇总按当日汇率折算产品收益，不包含独立的汇兑损益。",
             ],

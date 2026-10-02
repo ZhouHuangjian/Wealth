@@ -3,7 +3,11 @@ import { Button, Drawer, Table, Tag } from "antd";
 import { ChevronRight } from "lucide-react";
 import { dateToday } from "../api";
 import { Blank, Money } from "../components";
-import { dailyReturnDisplay, dailyReturnLabels } from "../daily-return";
+import {
+  dailyReturnDisplay,
+  dailyReturnLabels,
+  returnDateDisplay,
+} from "../daily-return";
 import { HelpText } from "../help";
 import { profitTone } from "../investment";
 import { useWorkspace } from "../state";
@@ -146,6 +150,22 @@ export default function DailyReturnCard({
                         currency={displayCurrency}
                         sign
                       />
+                      {row.base_amount == null &&
+                        row.latest_formal_return?.base_amount != null && (
+                          <small>
+                            最近净值收益{" "}
+                            <Money
+                              value={row.latest_formal_return.base_amount}
+                              currency={displayCurrency}
+                              sign
+                            />
+                            {" · "}
+                            {
+                              returnDateDisplay(row.latest_formal_return)
+                                .returnDate
+                            }
+                          </small>
+                        )}
                       {row.currency && row.currency !== displayCurrency && (
                         <small>
                           原币{" "}
@@ -167,8 +187,15 @@ export default function DailyReturnCard({
                         {dailyReturnLabels[row.status] ||
                           row.status ||
                           "待更新"}
-                        {row.price_date ? ` · ${row.price_date}` : ""}
+                        {returnDateDisplay(row).returnDate
+                          ? ` · 收益归属 ${returnDateDisplay(row).returnDate}`
+                          : ""}
                       </span>
+                      {returnDateDisplay(row).navDate && (
+                        <small>
+                          净值 / 价格归属 {returnDateDisplay(row).navDate}
+                        </small>
+                      )}
                       {row.interval_start && (
                         <small>计算基准 {row.interval_start}</small>
                       )}
@@ -189,7 +216,7 @@ export default function DailyReturnCard({
               </p>
               <p>
                 基金待确认申购计入在途；期货、期权使用可核对的账户权益，合约参考市值不重复加总。QDII
-                最近确认日可能早于今天，实际日期在持仓列表单独展示。
+                最近净值收益可能属于更早的交易日，在净值公布后回填该日。系统获取时间与净值归属日分别展示，不把延迟公布的收益再次计入今天。
               </p>
             </details>
           </>

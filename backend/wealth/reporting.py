@@ -4,8 +4,7 @@ from decimal import Decimal
 
 from django.db.models import Q, Sum
 
-from .common import catalog_queryset
-from .common import day, dec, record, serial
+from .common import catalog_queryset, day, dec, record, serial
 from .ledger import LIABILITIES, cash_code, position
 from .models import (
     Account,
@@ -125,7 +124,7 @@ def _position_entry_basis(space, account, instrument, when):
         "entry_basis": "mixed" if "institution" in sources else "preview_confirmed",
         "contains_automatic_estimates": automatic,
         "entry_basis_label": "含自动推算" if automatic else "含按预览补录",
-        "entry_basis_description": "持仓含按计划自动推算的扣款或份额，尚未按机构成交资料核实；不会向银行或基金平台发起交易。"
+        "entry_basis_description": "持仓含按计划与正式净值自动记账的扣款或份额，保留推算来源，可按机构记录更正；无需逐期确认。"
         if automatic
         else "持仓记录包含按预览补录的扣款或份额，未全部按机构成交资料核实；行情来源与此标记分开显示",
     }
@@ -221,8 +220,8 @@ def positions(space, when=None):
 
 
 def overview(space, when=None, currency=None, account_ids=None):
-    from .portfolio import _institution_value, _snapshot_account
     from .pending_purchases import PendingPurchases
+    from .portfolio import _institution_value, _snapshot_account
 
     when = day(when)
     currency = currency or space.base_currency
@@ -385,9 +384,26 @@ def overview(space, when=None, currency=None, account_ids=None):
         else:
             gaps.append("预留资金缺折算汇率")
     todos = []
-    for o in Occurrence.objects.filter(
-        tenant=space, due_date__lte=when, status__in=["scheduled", "pending"]
-    ).select_related("plan")[:30]:
+    for o in (
+        Occurrence.objects.filter(
+            tenant=space, due_date__lte=when, status__in=["scheduled", "pending"]
+        )
+        .select_related("plan")
+        .iterator(chunk_size=100)
+    ):
+        from .dca_automation import occurrence_processing
+
+        progress = occurrence_processing(o)
+        if progress is not None and not progress["requires_action"]:
+            continue
+        if (
+            progress
+            and progress.get("action_scope") == "plan"
+            and any(item.get("plan_id") == str(o.plan_id) for item in todos)
+        ):
+            continue
+        if len(todos) >= 30:
+            break
         todos.append(
             {
                 "id": str(o.pk),
@@ -397,15 +413,17 @@ def overview(space, when=None, currency=None, account_ids=None):
                 "currency": o.currency,
                 "status": o.status,
                 "kind": "occurrence",
+                "plan_id": str(o.plan_id),
+                "automation": progress,
             }
         )
     for r in Resource.objects.filter(tenant=space, kind="todos")[:30]:
         if r.data.get("status") not in {"done", "ignored"}:
             todos.append(record(r))
+    from .fund_orders import action_filter
+
     for order in Resource.objects.filter(
-        tenant=space,
-        kind="fund_orders",
-        data__status__in=["submitted", "paid", "estimated"],
+        action_filter(), tenant=space, kind="fund_orders"
     )[:30]:
         todos.append(
             {

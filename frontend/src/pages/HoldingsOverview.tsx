@@ -8,6 +8,8 @@ import type { HoldingRow } from "../holding-display";
 import { useWorkspace } from "../state";
 import { percentText, profitTone } from "../investment";
 import PendingPurchaseDetails from "./PendingPurchaseDetails";
+import { dateToday } from "../api";
+import { returnDateDisplay } from "../daily-return";
 
 export function HoldingDailyReturn({
   row,
@@ -21,8 +23,21 @@ export function HoldingDailyReturn({
   const { hidden } = useWorkspace();
   if (row.pending_only === true) return <span className="unknown">—</span>;
   const data = latest ? row.latest_confirmed_return : row.daily_return;
+  const dates = returnDateDisplay(data);
+  const recent = row.latest_confirmed_return;
+  const recentValue =
+    !latest &&
+    recent?.observation_kind === "formal" &&
+    ["confirmed", "estimated"].includes(recent.status) &&
+    recent.currency === row.currency &&
+    row.status !== "needs_reconciliation" &&
+    !row.is_reference_position &&
+    row.contributes !== false
+      ? recent.amount
+      : null;
   const value = latest
-    ? data?.status === "confirmed" &&
+    ? data?.observation_kind === "formal" &&
+      ["confirmed", "estimated"].includes(data.status) &&
       data.currency === row.currency &&
       row.status !== "needs_reconciliation" &&
       !row.is_reference_position &&
@@ -30,33 +45,64 @@ export function HoldingDailyReturn({
       ? data.amount
       : null
     : holdingDailyAmount(row, asOf);
-  const detail = hidden
+  const description = hidden
     ? "显示金额后可查看收益说明"
     : data?.message ||
       (value != null
-        ? `${data?.status === "confirmed" ? "按正式价格计算" : "参考估值，尚非最终结算"}${data?.interval_start ? `；计算基准 ${data.interval_start}` : ""}`
+        ? `${latest && data?.status === "estimated" ? "按正式净值与推算份额计算" : data?.status === "confirmed" ? "按正式价格计算" : "参考估值，尚非最终结算"}${data?.interval_start ? `；计算基准 ${data.interval_start}` : ""}`
         : row.is_reference_position || row.contributes === false
           ? "参考持仓或已由机构权益覆盖，不重复计算日收益"
           : "缺少对应日期的行情或收益基准");
+  const detail = hidden
+    ? description
+    : [
+        description,
+        dates.returnDate ? `收益归属 ${dates.returnDate}` : "",
+        dates.navDate ? `净值归属 ${dates.navDate}` : "",
+        dates.publishedAt ? `数据源公布 ${dates.publishedAt}（北京时间）` : "",
+        dates.observedAt
+          ? `系统获取 ${dates.observedAt}（北京时间）；获取时间不改变收益归属日`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("；");
   return (
     <Tooltip title={detail}>
       <div className={`cell-name ${hidden ? "" : profitTone(value)}`}>
         <Money value={value} currency={row.currency} precision={2} sign />
-        {value != null && (
-          <small>
-            {hidden
-              ? "••••••"
-              : percentText(data?.return_rate) || "收益率待补全"}
-          </small>
+        {value != null && (hidden || percentText(data?.return_rate)) && (
+          <small>{hidden ? "••••••" : percentText(data?.return_rate)}</small>
         )}
         <small className="holdings-daily-date">
-          {data?.date || (latest ? "尚无确认日期" : asOf)} ·{" "}
+          {latest && dates.returnDate ? "归属 " : ""}
+          {dates.returnDate || (latest ? "" : asOf)}
+          {dates.returnDate || !latest ? " · " : ""}
           {value == null
-            ? "待补全"
-            : data?.status === "confirmed"
-              ? "已确认"
-              : "估算"}
+            ? latest
+              ? "等待正式净值"
+              : "待更新"
+            : latest
+              ? data?.quantity_source === "estimated" ||
+                data?.status === "estimated"
+                ? "净值收益 · 含推算份额"
+                : "净值收益"
+              : data?.status === "confirmed"
+                ? "正式收益"
+                : "估算"}
         </small>
+        {value == null && recentValue != null && (
+          <small>
+            最近净值收益{" "}
+            <Money
+              value={recentValue}
+              currency={row.currency}
+              precision={2}
+              sign
+            />
+            {" · "}
+            {returnDateDisplay(recent).returnDate}
+          </small>
+        )}
       </div>
     </Tooltip>
   );
@@ -73,7 +119,17 @@ export default function HoldingsOverview({
   filtered: boolean;
   truncated?: boolean;
 }) {
+  const { hidden } = useWorkspace();
   const summary = summarizeHoldings(rows, asOf);
+  const notes = [
+    summary.referenceCount > 0
+      ? `另有 ${summary.referenceCount} 项机构权益覆盖明细或期权参考持仓，未重复汇总。`
+      : "",
+    summary.unknownCurrencyCount > 0
+      ? `${summary.unknownCurrencyCount} 项币种待核对，暂未汇总。`
+      : "",
+    truncated ? "列表尚未加载完整，汇总仅包含已加载记录。" : "",
+  ].filter(Boolean);
   return (
     <div className="holdings-overview" aria-label="持仓概览">
       <div className="holdings-overview-heading">
@@ -126,7 +182,11 @@ export default function HoldingsOverview({
                     ]
                   : []),
                 { key: "profit", label: "持有收益", value: group.profit },
-                { key: "daily", label: "今日估算收益", value: group.daily },
+                {
+                  key: "daily",
+                  label: asOf === dateToday() ? "今日估算收益" : "当日估算收益",
+                  value: group.daily,
+                },
               ] as const
             ).map((metric) => (
               <div className="holdings-metric" key={metric.key}>
@@ -136,7 +196,13 @@ export default function HoldingsOverview({
                     <small> · 已知部分</small>
                   )}
                 </span>
-                <strong>
+                <strong
+                  className={
+                    !hidden && ["profit", "daily"].includes(metric.key)
+                      ? profitTone(metric.value.amount)
+                      : undefined
+                  }
+                >
                   {metric.key === "pending" ? (
                     <PendingPurchaseDetails
                       items={group.pendingItems}
@@ -161,10 +227,12 @@ export default function HoldingsOverview({
                     ? "尚无已确认份额"
                     : metric.value.complete
                       ? metric.key === "value"
-                        ? "各项数据日期见列表"
+                        ? "按最近有效价格"
                         : metric.key === "pending"
-                          ? "仅剩余在途款 · 点击明细"
-                          : `${metric.value.known} 项数据齐备`
+                          ? "在途金额 · 查看明细"
+                          : metric.key === "profit"
+                            ? "当前持有部分"
+                            : "按对应日期行情"
                       : `${metric.value.total - metric.value.known} 项待补全`}
                 </small>
               </div>
@@ -172,21 +240,15 @@ export default function HoldingsOverview({
           </section>
         );
       })}
-      {summary.referenceCount > 0 && (
-        <p className="holdings-overview-note">
-          另有 {summary.referenceCount}{" "}
-          项机构权益覆盖明细或期权参考持仓，单独展示，不重复汇总。
-        </p>
-      )}
-      {summary.unknownCurrencyCount > 0 && (
-        <p className="holdings-overview-note">
-          {summary.unknownCurrencyCount} 项币种待核对，暂未汇总。
-        </p>
-      )}
-      {truncated && (
-        <p className="holdings-overview-note">
-          列表尚未加载完整，汇总仅包含已加载记录。
-        </p>
+      {notes.length > 0 && (
+        <details className="holdings-overview-note">
+          <summary>
+            汇总范围说明{notes.length > 1 ? ` · ${notes.length} 项` : ""}
+          </summary>
+          {notes.map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+        </details>
       )}
     </div>
   );

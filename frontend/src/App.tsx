@@ -56,6 +56,12 @@ import { NavigationProvider, useNavigation } from "./navigation";
 import { GlossaryProvider } from "./help";
 import { navigationHidden, orderedNavigation } from "./navigation-model";
 import {
+  ThemePreferences,
+  ThemeSwitcher,
+  useWealthTheme,
+} from "./ThemeProvider";
+import { ThemeCharacter, ThemeScene } from "./theme-character";
+import {
   InviteResult,
   WorkspaceActions,
   WorkspaceTrash,
@@ -85,6 +91,7 @@ const nav = [
   { path: "analytics", name: "分析复盘", simple: "分析", icon: ClipboardList },
 ];
 export default function App() {
+  const { setIdentity } = useWealthTheme();
   const [auth, setAuth] = useState<Auth | null>(null),
     [error, setError] = useState("");
   async function load() {
@@ -100,6 +107,9 @@ export default function App() {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    setIdentity(auth?.user?.id);
+  }, [auth?.user?.id, setIdentity]);
   if (error)
     return (
       <div className="auth-scene">
@@ -167,10 +177,11 @@ export default function App() {
   );
 }
 function Brand() {
+  const { name } = useWealthTheme();
   return (
     <div className="brand">
       <span className="brand-symbol">
-        <Sprout size={25} strokeWidth={1.7} />
+        <ThemeCharacter name={name} />
       </span>
       <div>
         <strong>拾财</strong>
@@ -186,6 +197,7 @@ function AuthPage({
   initial: boolean;
   onSuccess: () => void;
 }) {
+  const { name: themeName } = useWealthTheme();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [join, setJoin] = useState(false),
@@ -197,6 +209,7 @@ function AuthPage({
       <div className="auth-aside">
         <Brand />
         <div>
+          <ThemeScene name={themeName} />
           <h1>拾财</h1>
           <p>个人与家庭财务管理</p>
         </div>
@@ -657,7 +670,10 @@ function WorkspaceApp({
             >
               <Avatar
                 size={30}
-                style={{ background: "#d8e1cb", color: "#45614b" }}
+                style={{
+                  background: "var(--theme-primary-soft)",
+                  color: "var(--theme-primary-ink)",
+                }}
               >
                 {auth.user?.username[0]?.toUpperCase()}
               </Avatar>
@@ -738,6 +754,7 @@ function WorkspaceApp({
               </span>
             </div>
             <div className="topbar-actions">
+              <ThemeSwitcher />
               <Tooltip title="搜索当前空间">
                 <Button
                   type="text"
@@ -892,6 +909,7 @@ function WorkspaceApp({
           onClose={() => setSettingsOpen(false)}
           width={360}
         >
+          <ThemePreferences />
           <div className="preference-item">
             <div>
               <strong>低装饰模式</strong>

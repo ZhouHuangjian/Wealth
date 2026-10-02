@@ -219,8 +219,9 @@ def test_missing_observation_is_null_and_period_reports_partial(book):
     assert result["days"][1]["amount"] is None
     assert result["summary"]["status"] == "partial"
     assert result["summary"]["amount"] is None
-    assert D(result["summary"]["known_amount"]) == D("10")
-    assert result["days"][2]["items"][0]["interval_start"] == "2026-05-06"
+    # A missing open-day NAV cannot turn two days of movement into one day's earnings.
+    assert D(result["summary"]["known_amount"]) == D("0")
+    assert result["days"][2]["amount"] is None
 
 
 def test_reversed_holding_removes_manual_asset_and_historical_analytics(book):

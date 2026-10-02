@@ -7,10 +7,9 @@ from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.utils import timezone
-
 from finance_math.calculations import add_months, available_cash, loan_schedule
-from .common import catalog_queryset
-from .common import DomainError, audit, day, dec, get_obj, serial
+
+from .common import DomainError, audit, catalog_queryset, day, dec, get_obj, serial
 from .ledger import LIABILITIES, balance, position
 from .models import (
     Account,
@@ -39,7 +38,7 @@ KINDS = {
     "todos",
     "watchlist",
 }
-ZERO = Decimal("0")
+ZERO = Decimal(0)
 MONEY_FIELDS = {
     "amount",
     "principal",
@@ -231,7 +230,11 @@ def _schedule_rows(space, resource, horizon_date):
     amount = dec(data["amount"], nonnegative=True)
     interval = _integer(data.get("interval", 1), "间隔", 365)
     count = _integer(data.get("count", 10000), "期数")
-    from .subscription_calendar import subscription_rule, subscription_day
+    from .subscription_calendar import (
+        next_subscription_day,
+        subscription_day,
+        subscription_rule,
+    )
 
     rule = (
         subscription_rule(get_obj(Instrument, space, data["instrument_id"]))
@@ -253,8 +256,33 @@ def _schedule_rows(space, resource, horizon_date):
             break
         row = {"sequence": index + 1, "due_date": due, "amount": amount}
         if rule:
-            row["subscription_day"] = subscription_day(due, rule=rule)
-            row["auto_skip"] = row["subscription_day"]["is_open"] is False
+            from .dca_automation import _excluded
+
+            policy = data.get("holiday_policy") or (
+                "next_open" if frequency == "monthly" else "skip"
+            )
+            availability = subscription_day(due, rule=rule)
+            row.update(scheduled_date=due, holiday_policy=policy)
+            excluded = _excluded(data.get("automation") or {}, due)
+            if (
+                policy == "next_open"
+                and availability["is_open"] is False
+                and not excluded
+            ):
+                shifted = next_subscription_day(due, rule)
+                if shifted:
+                    row["due_date"] = shifted
+                    row["shifted_from"] = due
+                    availability = subscription_day(shifted, rule=rule)
+                else:
+                    availability = {
+                        **availability,
+                        "is_open": None,
+                        "status": "unknown",
+                        "reason": "等待下一开放日的日历数据，系统会自动重试",
+                    }
+            row["subscription_day"] = availability
+            row["auto_skip"] = excluded or availability["is_open"] is False
         rows.append(row)
     else:
         if "count" not in data and rows and rows[-1]["due_date"] < last:
@@ -313,7 +341,7 @@ def _reconcile(space, data):
 
 
 @transaction.atomic
-def save_resource(space, user, kind, data, obj=None):
+def save_resource(space, user, kind, data, obj=None, *, run_automatic=False):
     if kind not in KINDS or not isinstance(data, dict):
         raise DomainError("不支持的资源或数据格式")
     Workspace.objects.select_for_update().get(pk=space.pk)
@@ -374,8 +402,18 @@ def save_resource(space, user, kind, data, obj=None):
             raise DomainError("结束日期不能早于首期日期")
         if clean.get("kind") == "dca" and not clean.get("instrument_id"):
             raise DomainError("定投计划须关联具体产品身份")
-        from .dca_automation import validate_configuration
+        if clean.get("holiday_policy") not in (None, "skip", "next_open"):
+            raise DomainError("非开放日处理请选择跳过或顺延至下一开放日")
+        if clean.get("kind") == "dca" and not obj:
+            clean.setdefault(
+                "holiday_policy",
+                "next_open"
+                if clean.get("frequency", "monthly") == "monthly"
+                else "skip",
+            )
+        from .dca_automation import initialize_configuration, validate_configuration
 
+        initialize_configuration(space, clean, existing=bool(obj))
         validate_configuration(space, clean)
     if kind == "loans":
         liability = get_obj(Account, space, clean.get("liability_account_id"))
@@ -572,6 +610,14 @@ def save_resource(space, user, kind, data, obj=None):
     bump(space, user, invalidate_reconciliations=False)
     if kind == "plans" and clean["status"] == "active":
         generate_schedule(space, user, obj)
+        if (
+            run_automatic
+            and clean.get("kind") == "dca"
+            and (clean.get("automation") or {}).get("enabled")
+        ):
+            from .dca_automation import run_plan
+
+            run_plan(space, user, obj.pk)
     return obj
 
 
