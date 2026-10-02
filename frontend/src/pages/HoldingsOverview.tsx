@@ -9,6 +9,7 @@ import { useWorkspace } from "../state";
 import { percentText, profitTone } from "../investment";
 import PendingPurchaseDetails from "./PendingPurchaseDetails";
 import { dateToday } from "../api";
+import { returnDateDisplay } from "../daily-return";
 
 export function HoldingDailyReturn({
   row,
@@ -22,6 +23,18 @@ export function HoldingDailyReturn({
   const { hidden } = useWorkspace();
   if (row.pending_only === true) return <span className="unknown">—</span>;
   const data = latest ? row.latest_confirmed_return : row.daily_return;
+  const dates = returnDateDisplay(data);
+  const recent = row.latest_confirmed_return;
+  const recentValue =
+    !latest &&
+    recent?.observation_kind === "formal" &&
+    ["confirmed", "estimated"].includes(recent.status) &&
+    recent.currency === row.currency &&
+    row.status !== "needs_reconciliation" &&
+    !row.is_reference_position &&
+    row.contributes !== false
+      ? recent.amount
+      : null;
   const value = latest
     ? data?.observation_kind === "formal" &&
       ["confirmed", "estimated"].includes(data.status) &&
@@ -32,7 +45,7 @@ export function HoldingDailyReturn({
       ? data.amount
       : null
     : holdingDailyAmount(row, asOf);
-  const detail = hidden
+  const description = hidden
     ? "显示金额后可查看收益说明"
     : data?.message ||
       (value != null
@@ -40,6 +53,19 @@ export function HoldingDailyReturn({
         : row.is_reference_position || row.contributes === false
           ? "参考持仓或已由机构权益覆盖，不重复计算日收益"
           : "缺少对应日期的行情或收益基准");
+  const detail = hidden
+    ? description
+    : [
+        description,
+        dates.returnDate ? `收益归属 ${dates.returnDate}` : "",
+        dates.navDate ? `净值归属 ${dates.navDate}` : "",
+        dates.publishedAt ? `数据源公布 ${dates.publishedAt}（北京时间）` : "",
+        dates.observedAt
+          ? `系统获取 ${dates.observedAt}（北京时间）；获取时间不改变收益归属日`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("；");
   return (
     <Tooltip title={detail}>
       <div className={`cell-name ${hidden ? "" : profitTone(value)}`}>
@@ -48,8 +74,9 @@ export function HoldingDailyReturn({
           <small>{hidden ? "••••••" : percentText(data?.return_rate)}</small>
         )}
         <small className="holdings-daily-date">
-          {data?.date || (latest ? "" : asOf)}
-          {data?.date || !latest ? " · " : ""}
+          {latest && dates.returnDate ? "归属 " : ""}
+          {dates.returnDate || (latest ? "" : asOf)}
+          {dates.returnDate || !latest ? " · " : ""}
           {value == null
             ? latest
               ? "等待正式净值"
@@ -63,6 +90,19 @@ export function HoldingDailyReturn({
                 ? "正式收益"
                 : "估算"}
         </small>
+        {value == null && recentValue != null && (
+          <small>
+            最近净值收益{" "}
+            <Money
+              value={recentValue}
+              currency={row.currency}
+              precision={2}
+              sign
+            />
+            {" · "}
+            {returnDateDisplay(recent).returnDate}
+          </small>
+        )}
       </div>
     </Tooltip>
   );

@@ -62,6 +62,20 @@ def nav_freshness_calendar(instrument):
     return valuation_calendar(instrument)
 
 
+def return_calendar(instrument, *, estimated=False):
+    """A reference market calendar does not prove a QDII's formal NAV cadence.
+
+    Actual adjacent NAV observations need no guessed closure. Longer gaps need
+    an explicit product rule before they can be called a single day's return.
+    Overseas intraday references retain their existing market-day checks.
+    """
+    return (
+        valuation_calendar(instrument)
+        if estimated
+        else nav_freshness_calendar(instrument)
+    )
+
+
 def open_days_between(start, end, calendar_id, *, include_end=True):
     """Count published open dates after start; None never means a guessed weekday."""
     start, end = parse_date(start), parse_date(end)

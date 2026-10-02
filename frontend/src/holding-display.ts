@@ -6,7 +6,7 @@ export const holdingColumnDefinitions = [
   { key: "pending", label: "买入待确认", width: 150 },
   { key: "profit", label: "持有收益 / 毛浮盈", width: 150 },
   { key: "daily", label: "今日估算收益", width: 160 },
-  { key: "latest", label: "最近确认日收益", width: 170 },
+  { key: "latest", label: "最近净值收益", width: 190 },
   { key: "kind", label: "类型", width: 80 },
   { key: "cost", label: "数量 / 成本", width: 150 },
   { key: "estimate", label: "盘中估值 / 结算参考", width: 170 },

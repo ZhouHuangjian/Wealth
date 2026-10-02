@@ -228,7 +228,7 @@ def test_missing_formal_can_be_priced_in_estimate_without_inventing_reference_de
     assert result["change"]["known_amount"] is None
 
 
-def test_futures_roll_forward_stays_partial_and_never_adds_contract_quote(book):
+def test_empty_futures_roll_forward_never_adds_unheld_contract_quote(book):
     post(book, "opening", amount="1000")
     futures = Account.objects.create(
         tenant=book.space, name="银河期货", kind="futures", valuation_mode="snapshot"
@@ -252,11 +252,11 @@ def test_futures_roll_forward_stays_partial_and_never_adds_contract_quote(book):
     )
     result = net_worth_comparison(book.space, TODAY)
     assert D(result["previous"]["net_assets"]) == D("2000")
-    assert result["estimated"]["net_assets"] is None
+    assert D(result["estimated"]["net_assets"]) == D("2000")
     assert D(result["estimated"]["known_net_assets"]) == D("2000")
-    assert result["change"]["amount"] is None
+    assert D(result["change"]["amount"]) == D("0")
     allocation = portfolio_analysis(book.space, TODAY)
-    assert allocation["total_value"] is None
+    assert D(allocation["total_value"]) == D("1500")
     assert D(allocation["known_total_value"]) == D("1500")
     assert allocation["items"][0]["instrument_id"] is None
     assert allocation["items"][0]["primary_tag_id"] is None
@@ -295,7 +295,7 @@ def test_institution_cash_income_and_expense_need_statement_coverage(
     )
     event = post(book, event_kind, futures, when=TODAY, amount="50")
     rolled = net_worth_comparison(book.space, TODAY)
-    assert rolled["estimated"]["net_assets"] is None
+    assert D(rolled["estimated"]["net_assets"]) == D(expected)
     assert D(rolled["estimated"]["known_net_assets"]) == D(expected)
     assert D(portfolio_analysis(book.space, TODAY)["known_total_value"]) == D(expected)
     statement = Snapshot.objects.create(

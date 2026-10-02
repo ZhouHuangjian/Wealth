@@ -37,6 +37,7 @@ import {
 } from "../api";
 import type { Item } from "../api";
 import { HelpText, helpColumns } from "../help";
+import { useWealthTheme } from "../ThemeProvider";
 import "./fund-experience.css";
 export function Chart({
   items,
@@ -53,6 +54,7 @@ export function Chart({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const { hidden } = useWorkspace();
+  const { palette } = useWealthTheme();
   useEffect(() => {
     if (!ref.current || hidden || !items.length) return;
     const chart = echarts.init(ref.current);
@@ -61,6 +63,9 @@ export function Chart({
       tooltip: {
         trigger: "axis",
         confine: true,
+        backgroundColor: palette.elevated,
+        borderColor: palette.border,
+        textStyle: { color: palette.text },
         valueFormatter: (value: unknown) =>
           typeof value === "number" && Number.isFinite(value)
             ? value.toLocaleString("en-US", {
@@ -73,13 +78,13 @@ export function Chart({
         type: "category",
         data: items.map((r) => r[xKey]),
         boundaryGap: false,
-        axisLine: { lineStyle: { color: "#d7ddd0" } },
-        axisLabel: { color: "#7b7c70" },
+        axisLine: { lineStyle: { color: palette.border } },
+        axisLabel: { color: palette.muted },
       },
       yAxis: {
         type: "value",
-        splitLine: { lineStyle: { color: "#eaece4", type: "dashed" } },
-        axisLabel: { color: "#7b7c70" },
+        splitLine: { lineStyle: { color: palette.grid, type: "dashed" } },
+        axisLabel: { color: palette.muted },
       },
       series: [
         {
@@ -88,12 +93,12 @@ export function Chart({
           connectNulls: false,
           smooth: false,
           symbolSize: 5,
-          lineStyle: { width: 3, color: "#437665" },
-          itemStyle: { color: "#437665" },
+          lineStyle: { width: 3, color: palette.chart },
+          itemStyle: { color: palette.chart },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: "rgba(107,154,117,.22)" },
-              { offset: 1, color: "rgba(107,154,117,0)" },
+              { offset: 0, color: `${palette.chartArea}66` },
+              { offset: 1, color: `${palette.chartArea}00` },
             ]),
           },
         },
@@ -105,7 +110,7 @@ export function Chart({
       ro.disconnect();
       chart.dispose();
     };
-  }, [items, hidden, xKey, yKey, precision]);
+  }, [items, hidden, xKey, yKey, precision, palette]);
   return hidden ? (
     <div className="chart-hidden">图表金额已遮挡</div>
   ) : (
