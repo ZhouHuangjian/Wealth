@@ -623,8 +623,14 @@ def save_resource(space, user, kind, data, obj=None, *, run_automatic=False):
 
 @transaction.atomic
 def generate_schedule(space, user, resource, horizon_date=None):
+    from .dca_schedule import is_dca_plan, prune_future_occurrences
+
     Workspace.objects.select_for_update().get(pk=space.pk)
     resource = get_obj(Resource, space, resource.pk, kind__in={"plans", "loans"})
+    current_day = today(space)
+    due_only = is_dca_plan(resource)
+    if due_only:
+        prune_future_occurrences(space, user, resource, current_day)
     if resource.data.get("status", "active") != "active":
         return list(resource.occurrences.filter(tenant=space).order_by("sequence"))
     horizon = (
@@ -633,10 +639,20 @@ def generate_schedule(space, user, resource, horizon_date=None):
         else (
             day("9999-12-31")
             if resource.kind == "loans"
-            else today(space) + timedelta(days=365)
+            else current_day
+            if due_only
+            else current_day + timedelta(days=365)
         )
     )
+    if due_only:
+        # An explicit API horizon must not recreate the old year of persisted
+        # intentions. Forecasts call _schedule_rows separately without writes.
+        horizon = min(horizon, current_day)
     rows = _schedule_rows(space, resource, horizon)
+    if due_only:
+        # A monthly anchor can be due today but its actual application may have
+        # shifted to the next opening day. Persist it only on that actual day.
+        rows = [row for row in rows if row["due_date"] <= horizon]
     current = {row.sequence: row for row in resource.occurrences.filter(tenant=space)}
     included = set()
     changed = 0
@@ -647,7 +663,7 @@ def generate_schedule(space, user, resource, horizon_date=None):
         if old and (
             old.event_id
             or (old.status == "skipped" and not old.details.get("auto_skip"))
-            or old.due_date < today(space)
+            or old.due_date < current_day
             or old.details.get("permanently_removed") is True
         ):
             continue
@@ -671,7 +687,7 @@ def generate_schedule(space, user, resource, horizon_date=None):
             "status": "skipped"
             if row.get("auto_skip")
             else "pending"
-            if due <= today(space)
+            if due <= current_day
             else "scheduled",
         }
         if old:
@@ -694,7 +710,7 @@ def generate_schedule(space, user, resource, horizon_date=None):
         if (
             sequence not in included
             and old.due_date <= horizon
-            and old.due_date >= today(space)
+            and old.due_date >= current_day
             and not old.event_id
             and old.status != "cancelled"
         ):

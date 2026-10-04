@@ -14,6 +14,7 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
 } from "antd";
 import { ArrowDown, ArrowUp, LogOut, Plus, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -22,6 +23,7 @@ import type { Item } from "../api";
 import { LoadState, PageTitle, Panel } from "../components";
 import { NavigationTabs } from "../navigation";
 import { useDebounced } from "../state";
+import { adminAccessRequired, canDelegate } from "../admin-access";
 import AdminTemplates from "./AdminTemplates";
 import AdminGlossary from "./AdminGlossary";
 import { WorkspaceTrash } from "./ManagementExtras";
@@ -39,7 +41,10 @@ function useAdminResource(path: string) {
       const result = await api(`/admin/${path}`);
       if (current === sequence.current) setData(result);
     } catch (e) {
-      if (current === sequence.current) setError((e as Error).message);
+      if (current === sequence.current) {
+        setError((e as Error).message);
+        setData(null);
+      }
     } finally {
       if (current === sequence.current) setLoading(false);
     }
@@ -89,7 +94,7 @@ export default function AdminConsole({
         type="info"
         showIcon
         message={`当前管理员：${user.username}`}
-        description="管理员没有个人账簿。可管理用户和空间、进入用户空间帮助配置，并维护平台公共设置；管理操作保留审计记录。"
+        description="管理员没有个人账簿。仅在空间所有者允许代管后，才可进入账簿、修改配置或导出数据；平台用户与空间生命周期管理仍在此处理。管理操作保留审计记录。"
       />
       <NavigationTabs
         group="admin"
@@ -421,6 +426,13 @@ function AdminSpaces({ onChanged }: { onChanged: () => Promise<void> }) {
   const state = useAdminResource(
     `spaces?${new URLSearchParams({ q, offset: String((page - 1) * 20), limit: "20" })}`,
   );
+  useEffect(() => {
+    const refresh = () => {
+      void state.retry();
+    };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [state.retry]);
   const navigate = useNavigate();
   const { message } = App.useApp();
   const [memberSpace, setMemberSpace] = useState<Item | null>(null);
@@ -461,6 +473,9 @@ function AdminSpaces({ onChanged }: { onChanged: () => Promise<void> }) {
           }}
           allowClear
         />
+        <p className="data-caption">
+          未授权时仅显示空间基础资料。{adminAccessRequired}
+        </p>
         <LoadState {...state}>
           <Table<Item>
             rowKey="id"
@@ -485,20 +500,45 @@ function AdminSpaces({ onChanged }: { onChanged: () => Promise<void> }) {
               },
               { title: "时区", dataIndex: "timezone" },
               {
+                title: "代管授权",
+                render: (_, r) => (
+                  <Tooltip
+                    title={
+                      canDelegate(r)
+                        ? "空间所有者已允许管理员代管"
+                        : adminAccessRequired
+                    }
+                  >
+                    <Tag color={canDelegate(r) ? "green" : undefined}>
+                      {canDelegate(r) ? "已授权" : "未授权"}
+                    </Tag>
+                  </Tooltip>
+                ),
+              },
+              {
                 title: "操作",
                 render: (_, r) => (
                   <Space>
                     <Button
                       type="link"
+                      disabled={!canDelegate(r)}
+                      title={!canDelegate(r) ? adminAccessRequired : undefined}
                       onClick={() => navigate(`/spaces/${r.id}/home`)}
                     >
                       代管空间
                     </Button>
-                    <Button type="link" onClick={() => setMemberSpace(r)}>
+                    <Button
+                      type="link"
+                      disabled={!canDelegate(r)}
+                      title={!canDelegate(r) ? adminAccessRequired : undefined}
+                      onClick={() => setMemberSpace(r)}
+                    >
                       成员权限
                     </Button>
                     <Button
                       type="link"
+                      disabled={!canDelegate(r)}
+                      title={!canDelegate(r) ? adminAccessRequired : undefined}
                       onClick={() => {
                         setEditing(r);
                         form.resetFields();
@@ -537,6 +577,7 @@ function AdminSpaces({ onChanged }: { onChanged: () => Promise<void> }) {
         onCancel={() => setOpen(false)}
         onOk={() => form.submit()}
         confirmLoading={busy}
+        okButtonProps={{ disabled: !!editing && !canDelegate(editing) }}
       >
         <Form
           form={form}
@@ -561,6 +602,10 @@ function AdminSpaces({ onChanged }: { onChanged: () => Promise<void> }) {
               message.success("空间已保存");
             } catch (e) {
               setError((e as Error).message);
+              if (e instanceof ApiError && e.status === 403 && editing) {
+                setEditing({ ...editing, can_delegate: false });
+                await state.retry();
+              }
             } finally {
               setBusy(false);
             }
@@ -635,6 +680,7 @@ function SpaceMembers({
       setError("");
     } catch (e) {
       setError((e as Error).message);
+      setMembers([]);
     } finally {
       setLoading(false);
     }
@@ -649,6 +695,10 @@ function SpaceMembers({
       await onChanged();
     } catch (e) {
       message.error((e as Error).message);
+      if (e instanceof ApiError && e.status === 403) {
+        setMembers([]);
+        setError(adminAccessRequired);
+      }
       throw e;
     }
   }
@@ -676,6 +726,7 @@ function SpaceMembers({
             render: (_, r) => (
               <Select
                 value={r.role}
+                disabled={loading || busy || !!error}
                 aria-label="修改成员角色"
                 options={["owner", "editor", "viewer"].map((v) => ({
                   value: v,
@@ -704,6 +755,7 @@ function SpaceMembers({
               <Button
                 type="link"
                 danger
+                disabled={loading || busy || !!error}
                 onClick={() =>
                   modal.confirm({
                     title: "移除该成员？",
@@ -726,6 +778,7 @@ function SpaceMembers({
       <Form
         form={form}
         layout="vertical"
+        disabled={loading || busy || !!error}
         initialValues={{ role: "viewer" }}
         className="form-alert"
         onFinish={async (v) => {

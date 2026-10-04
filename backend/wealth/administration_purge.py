@@ -272,6 +272,9 @@ def purge(request, space, category, ident, body):
     from .administration_data import _target, _guard
 
     require_admin(request.user)
+    from .admin_access import require_delegation
+
+    space = require_delegation(request.user, space)
     space = m.Workspace.objects.select_for_update().get(pk=space.pk)
     if space.deleted_at:
         raise DomainError("空间已删除", "not_found", 404)

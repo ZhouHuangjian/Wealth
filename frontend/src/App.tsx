@@ -47,7 +47,20 @@ import {
   ChevronDown,
   SlidersHorizontal,
 } from "lucide-react";
-import { api, currencyOptions, dateToday, listOf, send, setCsrf } from "./api";
+import {
+  api,
+  currencyOptions,
+  dateToday,
+  listOf,
+  send,
+  setCsrf,
+  subscribeApiFailures,
+} from "./api";
+import {
+  adminAccessRequired,
+  canDelegate,
+  isDelegationDenied,
+} from "./admin-access";
 import type { Item } from "./api";
 import { DetailDrawer, EventModal, Fields } from "./components";
 import { WorkspaceContext, useWorkspace } from "./state";
@@ -451,38 +464,96 @@ function WorkspaceGate({
   auth: Auth;
   onAuthChange: () => void;
 }) {
-  const location = useLocation();
-  const spaceId = location.pathname.split("/")[2];
+  const location = useLocation(),
+    spaceId = location.pathname.split("/")[2];
   const memberSpace = auth.spaces.find((s) => s.id === spaceId);
-  const [managedSpace, setManagedSpace] = useState<Workspace | null>(null);
-  const [error, setError] = useState("");
+  const [managedSpace, setManagedSpace] = useState<Workspace | null>(null),
+    [error, setError] = useState(""),
+    [attempt, setAttempt] = useState(0);
+  const sequence = useRef(0);
   useEffect(() => {
-    let active = true;
+    let active = true,
+      pending = false;
     setManagedSpace(null);
     setError("");
-    if (auth.user?.is_platform_admin) {
-      api<Workspace>(`/admin/spaces/${spaceId}`)
-        .then((result) => {
-          if (active) setManagedSpace(result);
-        })
-        .catch((e) => {
-          if (active) setError((e as Error).message);
-        });
-    }
+    if (!auth.user?.is_platform_admin) return;
+    const check = async () => {
+      if (pending) return;
+      pending = true;
+      const current = ++sequence.current;
+      try {
+        const result = await api<Workspace>("/admin/spaces/" + spaceId);
+        if (active && current === sequence.current) {
+          if (canDelegate(result)) {
+            setManagedSpace({ ...result, administration: true });
+            setError("");
+          } else {
+            Modal.destroyAll();
+            setManagedSpace(null);
+            setError(adminAccessRequired);
+          }
+        }
+      } catch (e) {
+        if (active && current === sequence.current) {
+          Modal.destroyAll();
+          setManagedSpace(null);
+          setError((e as Error).message);
+        }
+      } finally {
+        pending = false;
+      }
+    };
+    const unsubscribe = subscribeApiFailures((failure) => {
+      if (active && isDelegationDenied(failure.path, failure.status, spaceId)) {
+        sequence.current++;
+        Modal.destroyAll();
+        setManagedSpace(null);
+        setError(
+          failure.code === "admin_access_required"
+            ? adminAccessRequired
+            : "代管访问已被拒绝，请重新检查空间所有者的授权。",
+        );
+      }
+    });
+    void check();
+    const onFocus = () => {
+      void check();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void check();
+    }, 15000);
+    window.addEventListener("focus", onFocus);
     return () => {
       active = false;
+      sequence.current++;
+      unsubscribe();
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
     };
-  }, [spaceId, auth]);
-  if (auth.user?.is_platform_admin && managedSpace?.id !== spaceId)
+  }, [spaceId, auth, attempt]);
+  if (
+    auth.user?.is_platform_admin &&
+    (!canDelegate(managedSpace) || managedSpace?.id !== spaceId)
+  )
     return (
       <main className="admin-console">
         {error ? (
           <Alert
-            type="error"
+            type="warning"
             showIcon
-            message="无法代管此空间"
+            message="当前不能代管此空间"
             description={error}
-            action={<NavLink to="/admin">返回管理工作台</NavLink>}
+            action={
+              <Space>
+                <Button
+                  size="small"
+                  onClick={() => setAttempt((value) => value + 1)}
+                >
+                  重新检查
+                </Button>
+                <NavLink to="/admin">返回管理工作台</NavLink>
+              </Space>
+            }
           />
         ) : (
           <Spin />
@@ -497,7 +568,7 @@ function WorkspaceGate({
           auth.user?.is_platform_admin
             ? "/admin"
             : auth.spaces.length
-              ? `/spaces/${auth.spaces[0].id}/home`
+              ? "/spaces/" + auth.spaces[0].id + "/home"
               : "/"
         }
         replace

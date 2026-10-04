@@ -15,6 +15,9 @@ export type Space = {
   base_currency: string;
   administration?: boolean;
   membership_role?: string | null;
+  admin_access_enabled?: boolean;
+  admin_access_version?: number;
+  can_delegate?: boolean;
 };
 type AppState = {
   space: Space;

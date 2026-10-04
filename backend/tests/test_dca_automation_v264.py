@@ -463,6 +463,9 @@ def test_runtime_cursor_does_not_block_admin_plan_deletion_and_is_in_purge_scope
     runtime = Resource.objects.get(tenant=book.space, kind="dca_automation_runtime")
     assert Event.objects.filter(tenant=book.space).count() == 1
     administrator = get_user_model().objects.create_superuser("auto-dca-delete-admin")
+    from wealth.admin_access import update_access
+
+    update_access(book.user, book.space, {"enabled": True, "version": 0})
     client = Client()
     client.force_login(administrator)
     book.space.refresh_from_db()

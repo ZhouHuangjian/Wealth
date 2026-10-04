@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from . import models as m
 from .common import catalog_queryset
 from .common import DomainError, serial, digest, tenant_context, audit
@@ -10,6 +11,15 @@ from .platform_models import ConfigurationTemplate, NavigationPreference
 from . import insights
 
 SECTIONS = {"navigation", "dashboard", "tags", "watchlist"}
+
+
+def available_templates():
+    # A captured source configuration must not outlive its owner's permission
+    # through a public template or a platform-administration list.
+    return ConfigurationTemplate.objects.filter(
+        source_workspace__deleted_at__isnull=True,
+        source_workspace__admin_access_enabled=True,
+    )
 
 
 def template_record(obj, administrative=False):
@@ -36,15 +46,16 @@ def template_record(obj, administrative=False):
     return result
 
 
-def snapshot(user_id, space_id, *, lock=False):
+@transaction.atomic
+def snapshot(user_id, space_id, *, actor):
+    from .admin_access import require_delegation
+
+    space = require_delegation(actor, space_id)
     users = get_user_model().objects
-    if lock:
-        users = users.select_for_update()
+    # Consent and the space are locked above. Do not lock the source user after
+    # that: an owner revokes under user->space ordering. The snapshot only reads
+    # their navigation and the caller verifies its complete content digest.
     user = users.filter(pk=user_id, is_active=True).first()
-    spaces = m.Workspace.objects
-    if lock:
-        spaces = spaces.select_for_update()
-    space = spaces.filter(pk=space_id, deleted_at__isnull=True).first()
     if (
         not user
         or not space
@@ -137,7 +148,9 @@ def admin_write(actor, ident, method, body):
         if not title or len(title) > 100 or len(description) > 500:
             raise DomainError("模板名称须为 1–100 字，说明不超过 500 字")
         snap = snapshot(
-            body.get("source_user_id"), body.get("source_space_id"), lock=True
+            body.get("source_user_id"),
+            body.get("source_space_id"),
+            actor=actor,
         )
         if body.get("preview_digest") != snap["preview_digest"]:
             raise DomainError(
@@ -169,6 +182,9 @@ def admin_write(actor, ident, method, body):
     )
     if not obj:
         raise DomainError("模板不存在", "not_found", 404)
+    from .admin_access import require_delegation
+
+    require_delegation(actor, obj.source_workspace_id)
     if method != "PATCH":
         raise DomainError("仅支持发布与上下架模板", "method_not_allowed", 405)
     expected_version(body, obj.version)
@@ -185,7 +201,8 @@ def admin_write(actor, ident, method, body):
 
 def apply_template(space, user, ident, body, role):
     obj = (
-        ConfigurationTemplate.objects.select_for_update()
+        available_templates()
+        .select_for_update()
         .filter(pk=ident, published=True)
         .first()
     )

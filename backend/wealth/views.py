@@ -301,15 +301,15 @@ def api(request, route):
                 serial(dispatch_admin(request, route.split("/")[1:], body))
             )
         if route == "configuration-templates" and request.method == "GET":
-            from .configuration_templates import template_record
+            from .configuration_templates import template_record, available_templates
 
             return JsonResponse(
                 serial(
                     page(
                         request,
-                        m.ConfigurationTemplate.objects.filter(published=True).order_by(
-                            "-created_at"
-                        ),
+                        available_templates()
+                        .filter(published=True)
+                        .order_by("-created_at"),
                         template_record,
                     )
                 )
@@ -417,13 +417,16 @@ def api(request, route):
                     and parts[4:] == ["history-import", "validate"]
                 )
             )
-            if request.method not in {"GET", "HEAD"} and not readonly_dca_preview:
+            if administrator or (
+                request.method not in {"GET", "HEAD"} and not readonly_dca_preview
+            ):
                 actor = User.objects.select_for_update().get(pk=request.user.pk)
                 if not actor.is_active:
                     raise DomainError("账号已停用", "forbidden", 403)
                 if administrator:
                     if not is_platform_admin(actor):
                         raise DomainError("管理员授权已撤销", "forbidden", 403)
+                request.user = actor
                 space = m.Workspace.objects.select_for_update().get(pk=space.pk)
                 if space.deleted_at:
                     raise DomainError("此空间已移入回收站", "not_found", 404)
@@ -434,6 +437,10 @@ def api(request, route):
                     role = membership.role
                     if role == "viewer":
                         raise DomainError("只读成员不能修改账目", "forbidden", 403)
+            if administrator:
+                from .admin_access import require_delegation
+
+                space = require_delegation(request.user, space)
             response = dispatch_space(request, space, role, parts[2:], body)
             if administrator and not readonly_dca_preview:
                 log_admin(
@@ -539,6 +546,23 @@ def page(request, qs, serialize=record, default=100):
 
 def dispatch_space(request, space, role, path, body):
     resource = path[0]
+    if resource == "admin-access" and len(path) == 1:
+        from .admin_access import access_record, require_consent_owner, update_access
+
+        if request.method == "GET":
+            return access_record(request.user, space)
+        if request.method == "PUT":
+            # Authorize before idempotency replay; delegated admins cannot reuse
+            # an old owner's result or the synthetic owner role to self-authorize.
+            require_consent_owner(request.user, space)
+            return write_command(
+                request,
+                space,
+                "workspace.admin_access",
+                body,
+                lambda: update_access(request.user, space, body),
+            )
+        raise DomainError("不支持此方法", "method_not_allowed", 405)
     if resource == "profile" and len(path) == 1:
         if request.method == "GET":
             return dict(record(space), version=space.revision)
@@ -1422,11 +1446,11 @@ def model_resource(request, space, kind, ident, body):
         def model_record(x):
             r = record(x)
             if kind == "accounts":
+                from .account_balances import account_balance_projection
                 from .recording_coverage import coverage
 
                 r.update(coverage(space, x))
-                r["balance"] = str(balance(space, x))
-                r["cash_balance"] = str(balance(space, x, "cash"))
+                r.update(account_balance_projection(space, x))
             elif kind == "instruments":
                 linked = set(x.specification.get("account_ids", []))
                 linked.update(

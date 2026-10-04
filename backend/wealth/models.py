@@ -60,6 +60,8 @@ class Workspace(models.Model):
     base_currency = models.CharField(max_length=3, default="CNY")
     timezone = models.CharField(max_length=64, default="Asia/Shanghai")
     revision = models.PositiveBigIntegerField(default=0)
+    admin_access_enabled = models.BooleanField(default=False)
+    admin_access_version = models.PositiveBigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 

@@ -187,7 +187,7 @@ export default function DcaPlanManager({
     <div className="dca-plan-workspace">
       <Panel
         title="定投计划"
-        subtitle="一次设置，自动记账与计算份额。"
+        subtitle="按到期日逐日记账，净值公布后自动计算份额。"
         action={
           <Space>
             <Button

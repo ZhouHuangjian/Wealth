@@ -48,7 +48,7 @@ def books(settings):
     for key, user in users.items():
         clients[key] = Client()
         clients[key].force_login(user)
-    source = m.Workspace.objects.create(name="管理验收来源")
+    source = m.Workspace.objects.create(name="管理验收来源", admin_access_enabled=True)
     target = m.Workspace.objects.create(name="管理验收目标")
     for key in ["owner", "editor", "viewer"]:
         m.Membership.objects.create(workspace=source, user=users[key], role=key)

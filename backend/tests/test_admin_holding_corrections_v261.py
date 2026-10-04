@@ -25,7 +25,9 @@ def book(monkeypatch):
     monkeypatch.setattr("wealth.market_sync.enabled", lambda: False)
     admin = get_user_model().objects.create_superuser("holding-admin-v261")
     owner = get_user_model().objects.create_user("holding-owner-v261")
-    space = m.Workspace.objects.create(name="管理员完整更正合成账簿")
+    space = m.Workspace.objects.create(
+        name="管理员完整更正合成账簿", admin_access_enabled=True
+    )
     m.Membership.objects.create(workspace=space, user=owner, role="owner")
     clients = {}
     for name, user in (("admin", admin), ("owner", owner)):

@@ -113,7 +113,7 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
             {plan.status === "paused"
               ? "定投已暂停，已有记录保留"
               : enabled
-                ? "后续自动执行，无需逐期确认"
+                ? "每天处理到期计划，无需逐期确认"
                 : "自动记账已关闭"}
           </strong>
           <p>{dcaAutomationNotice}</p>

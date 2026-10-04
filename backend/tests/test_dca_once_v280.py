@@ -13,7 +13,7 @@ from wealth.dca_automation import (
 )
 from wealth.ledger import balance, position
 from wealth.models import Event, Occurrence, Price, Resource
-from wealth.planning import save_resource
+from wealth.planning import generate_schedule, save_resource
 
 pytestmark = pytest.mark.django_db
 book = shared_book
@@ -138,7 +138,9 @@ def test_unknown_fee_requires_one_plan_setting_then_all_periods_finish(book):
     assert Event.objects.filter(tenant=book.space, kind="fund_debit").count() == 1
 
 
-def test_monthly_closed_date_rolls_forward_without_drifting_next_anchor(book):
+def test_monthly_closed_date_rolls_forward_without_drifting_next_anchor(
+    book, monkeypatch
+):
     plan = save(
         book,
         data(
@@ -154,16 +156,20 @@ def test_monthly_closed_date_rolls_forward_without_drifting_next_anchor(book):
         Occurrence.objects.filter(tenant=book.space, plan=plan).order_by("sequence")
     )
     assert plan.data["holiday_policy"] == "next_open"
-    assert [row.details["scheduled_date"] for row in rows] == [
-        "2026-08-29",
-        "2026-09-29",
-    ]
-    assert [str(row.due_date) for row in rows] == ["2026-08-31", "2026-09-29"]
+    assert [row.details["scheduled_date"] for row in rows] == ["2026-08-29"]
+    assert [str(row.due_date) for row in rows] == ["2026-08-31"]
     run_plan(book.space, book.user, plan.pk)
     debit = Event.objects.get(tenant=book.space, kind="fund_debit")
     assert debit.economic_date == date(2026, 8, 31)
     assert debit.payload["dca_import_date"] == "2026-08-29"
     assert debit.stage_key.endswith(":2026-08-29:debit")
+    monkeypatch.setattr("wealth.planning.today", lambda space: date(2026, 9, 29))
+    rows = generate_schedule(book.space, book.user, plan)
+    assert [row.details["scheduled_date"] for row in rows] == [
+        "2026-08-29",
+        "2026-09-29",
+    ]
+    assert [str(row.due_date) for row in rows] == ["2026-08-31", "2026-09-29"]
 
 
 @pytest.mark.parametrize("frequency", ["daily", "weekly"])
