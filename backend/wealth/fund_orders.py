@@ -44,7 +44,7 @@ LABELS = {
     "submitted": "已提交，未确认扣款",
     "paid": "已扣款，待确认份额",
     "confirmed": "已按机构记录确认",
-    "estimated": "份额已推算，待核实",
+    "estimated": "已自动入账 · 份额推算",
     "cancelled": "已撤销",
 }
 
@@ -142,11 +142,26 @@ def _save_defaults(space, user, data):
 
 
 def detail(row):
+    d = row.data
+    requires_action = d["status"] == "submitted" or (
+        d["status"] == "paid"
+        and (
+            not d.get("auto_estimate")
+            or d.get("fee_mode", "unknown") == "unknown"
+            or d.get("needs_review", False)
+        )
+    )
     return {
         "id": str(row.pk),
         "version": row.version,
         **row.data,
         "status_label": LABELS[row.data["status"]],
+        "requires_action": bool(requires_action),
+        "processing_state": "attention"
+        if requires_action
+        else "waiting"
+        if d["status"] == "paid"
+        else "complete",
     }
 
 
@@ -156,7 +171,7 @@ def list_orders(space, **filters):
         if filters.get(name):
             rows = rows.filter(**{f"data__{name}": filters[name]})
     if filters.get("pending"):
-        rows = rows.filter(data__status__in=["submitted", "paid", "estimated"])
+        rows = rows.filter(action_filter())
     try:
         offset = max(0, int(filters.get("offset") or 0))
         limit = min(100, max(1, int(filters.get("limit") or 20)))
@@ -170,6 +185,16 @@ def list_orders(space, **filters):
         "limit": limit,
         "has_more": offset + limit < count,
     }
+
+
+def action_filter():
+    return Q(data__status="submitted") | Q(data__status="paid") & (
+        Q(data__auto_estimate=False)
+        | Q(data__auto_estimate__isnull=True)
+        | Q(data__fee_mode="unknown")
+        | Q(data__fee_mode__isnull=True)
+        | Q(data__needs_review=True)
+    )
 
 
 def _update(row, user, **data):
@@ -280,7 +305,10 @@ def _confirm(
         price=str(nav),
         confirmation_date=str(when),
         nav_date=nav_date or str(when),
-        note="推算结果待核对机构记录" if estimated else "已按手工填写的机构记录确认",
+        note="按申购日正式净值与费用规则计算；可随时更正"
+        if estimated
+        else "已按手工填写的机构记录确认",
+        needs_review=False,
     )
 
 
@@ -345,11 +373,11 @@ def estimate(space, user, row):
         dates.get("expected_confirmation_date"),
     )
     if not nav_date or not confirmation:
-        _update(row, user, note="交易日或确认周期待核实")
+        _update(row, user, note="交易日或确认周期待配置", needs_review=True)
         return
     _update(row, user, expected_confirmation_date=confirmation, nav_date=nav_date)
     if day(confirmation) > today(space):
-        _update(row, user, note="等待预计确认日")
+        _update(row, user, note="等待份额入账日，系统将自动继续", needs_review=False)
         return
     with localcontext() as ctx:
         ctx.prec = 160
@@ -369,7 +397,9 @@ def estimate(space, user, row):
             .first()
         )
         if not quote or quote.value <= 0:
-            _update(row, user, note="等待申购日正式净值")
+            _update(
+                row, user, note="等待申购日净值，公布后自动入账", needs_review=False
+            )
             return
         precision = instrument.specification.get("share_precision", 2)
         if type(precision) is not int or not 0 <= precision <= 8:

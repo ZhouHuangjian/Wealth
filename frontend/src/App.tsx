@@ -47,7 +47,20 @@ import {
   ChevronDown,
   SlidersHorizontal,
 } from "lucide-react";
-import { api, currencyOptions, dateToday, listOf, send, setCsrf } from "./api";
+import {
+  api,
+  currencyOptions,
+  dateToday,
+  listOf,
+  send,
+  setCsrf,
+  subscribeApiFailures,
+} from "./api";
+import {
+  adminAccessRequired,
+  canDelegate,
+  isDelegationDenied,
+} from "./admin-access";
 import type { Item } from "./api";
 import { DetailDrawer, EventModal, Fields } from "./components";
 import { WorkspaceContext, useWorkspace } from "./state";
@@ -55,6 +68,12 @@ import type { Space as Workspace } from "./state";
 import { NavigationProvider, useNavigation } from "./navigation";
 import { GlossaryProvider } from "./help";
 import { navigationHidden, orderedNavigation } from "./navigation-model";
+import {
+  ThemePreferences,
+  ThemeSwitcher,
+  useWealthTheme,
+} from "./ThemeProvider";
+import { ThemeCharacter, ThemeScene } from "./theme-character";
 import {
   InviteResult,
   WorkspaceActions,
@@ -85,6 +104,7 @@ const nav = [
   { path: "analytics", name: "分析复盘", simple: "分析", icon: ClipboardList },
 ];
 export default function App() {
+  const { setIdentity } = useWealthTheme();
   const [auth, setAuth] = useState<Auth | null>(null),
     [error, setError] = useState("");
   async function load() {
@@ -100,6 +120,9 @@ export default function App() {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    setIdentity(auth?.user?.id);
+  }, [auth?.user?.id, setIdentity]);
   if (error)
     return (
       <div className="auth-scene">
@@ -167,10 +190,11 @@ export default function App() {
   );
 }
 function Brand() {
+  const { name } = useWealthTheme();
   return (
     <div className="brand">
       <span className="brand-symbol">
-        <Sprout size={25} strokeWidth={1.7} />
+        <ThemeCharacter name={name} />
       </span>
       <div>
         <strong>拾财</strong>
@@ -186,6 +210,7 @@ function AuthPage({
   initial: boolean;
   onSuccess: () => void;
 }) {
+  const { name: themeName } = useWealthTheme();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [join, setJoin] = useState(false),
@@ -197,6 +222,7 @@ function AuthPage({
       <div className="auth-aside">
         <Brand />
         <div>
+          <ThemeScene name={themeName} />
           <h1>拾财</h1>
           <p>个人与家庭财务管理</p>
         </div>
@@ -438,38 +464,96 @@ function WorkspaceGate({
   auth: Auth;
   onAuthChange: () => void;
 }) {
-  const location = useLocation();
-  const spaceId = location.pathname.split("/")[2];
+  const location = useLocation(),
+    spaceId = location.pathname.split("/")[2];
   const memberSpace = auth.spaces.find((s) => s.id === spaceId);
-  const [managedSpace, setManagedSpace] = useState<Workspace | null>(null);
-  const [error, setError] = useState("");
+  const [managedSpace, setManagedSpace] = useState<Workspace | null>(null),
+    [error, setError] = useState(""),
+    [attempt, setAttempt] = useState(0);
+  const sequence = useRef(0);
   useEffect(() => {
-    let active = true;
+    let active = true,
+      pending = false;
     setManagedSpace(null);
     setError("");
-    if (auth.user?.is_platform_admin) {
-      api<Workspace>(`/admin/spaces/${spaceId}`)
-        .then((result) => {
-          if (active) setManagedSpace(result);
-        })
-        .catch((e) => {
-          if (active) setError((e as Error).message);
-        });
-    }
+    if (!auth.user?.is_platform_admin) return;
+    const check = async () => {
+      if (pending) return;
+      pending = true;
+      const current = ++sequence.current;
+      try {
+        const result = await api<Workspace>("/admin/spaces/" + spaceId);
+        if (active && current === sequence.current) {
+          if (canDelegate(result)) {
+            setManagedSpace({ ...result, administration: true });
+            setError("");
+          } else {
+            Modal.destroyAll();
+            setManagedSpace(null);
+            setError(adminAccessRequired);
+          }
+        }
+      } catch (e) {
+        if (active && current === sequence.current) {
+          Modal.destroyAll();
+          setManagedSpace(null);
+          setError((e as Error).message);
+        }
+      } finally {
+        pending = false;
+      }
+    };
+    const unsubscribe = subscribeApiFailures((failure) => {
+      if (active && isDelegationDenied(failure.path, failure.status, spaceId)) {
+        sequence.current++;
+        Modal.destroyAll();
+        setManagedSpace(null);
+        setError(
+          failure.code === "admin_access_required"
+            ? adminAccessRequired
+            : "代管访问已被拒绝，请重新检查空间所有者的授权。",
+        );
+      }
+    });
+    void check();
+    const onFocus = () => {
+      void check();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void check();
+    }, 15000);
+    window.addEventListener("focus", onFocus);
     return () => {
       active = false;
+      sequence.current++;
+      unsubscribe();
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
     };
-  }, [spaceId, auth]);
-  if (auth.user?.is_platform_admin && managedSpace?.id !== spaceId)
+  }, [spaceId, auth, attempt]);
+  if (
+    auth.user?.is_platform_admin &&
+    (!canDelegate(managedSpace) || managedSpace?.id !== spaceId)
+  )
     return (
       <main className="admin-console">
         {error ? (
           <Alert
-            type="error"
+            type="warning"
             showIcon
-            message="无法代管此空间"
+            message="当前不能代管此空间"
             description={error}
-            action={<NavLink to="/admin">返回管理工作台</NavLink>}
+            action={
+              <Space>
+                <Button
+                  size="small"
+                  onClick={() => setAttempt((value) => value + 1)}
+                >
+                  重新检查
+                </Button>
+                <NavLink to="/admin">返回管理工作台</NavLink>
+              </Space>
+            }
           />
         ) : (
           <Spin />
@@ -484,7 +568,7 @@ function WorkspaceGate({
           auth.user?.is_platform_admin
             ? "/admin"
             : auth.spaces.length
-              ? `/spaces/${auth.spaces[0].id}/home`
+              ? "/spaces/" + auth.spaces[0].id + "/home"
               : "/"
         }
         replace
@@ -657,7 +741,10 @@ function WorkspaceApp({
             >
               <Avatar
                 size={30}
-                style={{ background: "#d8e1cb", color: "#45614b" }}
+                style={{
+                  background: "var(--theme-primary-soft)",
+                  color: "var(--theme-primary-ink)",
+                }}
               >
                 {auth.user?.username[0]?.toUpperCase()}
               </Avatar>
@@ -738,6 +825,7 @@ function WorkspaceApp({
               </span>
             </div>
             <div className="topbar-actions">
+              <ThemeSwitcher />
               <Tooltip title="搜索当前空间">
                 <Button
                   type="text"
@@ -892,6 +980,7 @@ function WorkspaceApp({
           onClose={() => setSettingsOpen(false)}
           width={360}
         >
+          <ThemePreferences />
           <div className="preference-item">
             <div>
               <strong>低装饰模式</strong>

@@ -35,7 +35,7 @@ def books():
     )
     owner = User.objects.create_user("owner-v25")
     other = User.objects.create_user("other-v25")
-    space = m.Workspace.objects.create(name="可清理账簿")
+    space = m.Workspace.objects.create(name="可清理账簿", admin_access_enabled=True)
     untouched = m.Workspace.objects.create(name="不可误删账簿")
     m.Membership.objects.create(workspace=space, user=owner, role="owner")
     m.Membership.objects.create(workspace=untouched, user=other, role="owner")

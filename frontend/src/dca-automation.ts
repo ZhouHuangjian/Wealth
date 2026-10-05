@@ -2,7 +2,7 @@ type Values = Record<string, any>;
 
 export const dcaHoldingKinds = ["fund", "broker", "securities"];
 export const dcaAutomationNotice =
-  "只补记账，不向银行或基金平台发起扣款；按计划和正式净值推算，保留自动推算标记，可后续核对。";
+  "保存一次，后续按计划自动记账；净值公布后自动计算份额，保留自动推算标记。不向银行或基金平台发起扣款。";
 
 export function validDcaDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
@@ -13,7 +13,11 @@ export function validDcaDate(value: unknown): value is string {
   );
 }
 
-export function dcaAutomationInitial(plan: Values, today: string): Values {
+export function dcaAutomationInitial(
+  plan: Values,
+  today: string,
+  options: { newPlan?: boolean } = {},
+): Values {
   if (!validDcaDate(today)) throw new Error("无法确定今天的日期，请刷新页面");
   const automation = plan.automation || {};
   const earliest =
@@ -21,11 +25,20 @@ export function dcaAutomationInitial(plan: Values, today: string): Values {
       ? plan.start_date
       : today;
   return {
-    automatic_enabled: automation.enabled === true,
+    holiday_policy: ["skip", "next_open"].includes(plan.holiday_policy)
+      ? plan.holiday_policy
+      : plan.frequency === "monthly"
+        ? "next_open"
+        : "skip",
+    automatic_enabled:
+      automation.enabled === true ||
+      (options.newPlan === true && automation.enabled !== false),
     automatic_start_date:
       automation.enabled === true && validDcaDate(automation.start_date)
         ? automation.start_date
-        : earliest,
+        : options.newPlan && validDcaDate(plan.start_date)
+          ? plan.start_date
+          : earliest,
     target_account_id: automation.holding_account_id || plan.account_id,
     automatic_fee_mode: automation.fee_mode || "unknown",
     automatic_fee_amount: ["fixed", "rate"].includes(automation.fee_mode)
@@ -127,6 +140,11 @@ export function dcaAutomationConfiguration(
 }
 
 export function dcaPlanPayload(values: Values, previous?: Values): Values {
+  if (
+    values.holiday_policy !== undefined &&
+    !["skip", "next_open"].includes(values.holiday_policy)
+  )
+    throw new Error("请选择有效的非开放日处理方式");
   const fields = [
     "name",
     "kind",
@@ -136,6 +154,7 @@ export function dcaPlanPayload(values: Values, previous?: Values): Values {
     "currency",
     "start_date",
     "frequency",
+    "holiday_policy",
     "status",
   ];
   return {
@@ -160,18 +179,19 @@ export function dcaAutomationRunRequest(plan: Values) {
 }
 
 const statusLabels: Record<string, string> = {
-  scheduled: "等待自动检查",
+  scheduled: "按计划执行",
   disabled: "自动补录已关闭",
   paused: "计划已暂停",
   excluded: "已排除",
-  waiting_calendar: "交易日待核实",
+  waiting_calendar: "等待申购日历",
   waiting_cash: "资金不足",
   waiting_nav: "等待正式净值",
-  waiting_confirmation: "等待确认日",
-  waiting_fee: "等待费用设置",
+  waiting_confirmation: "等待份额生效日",
+  waiting_fee: "完善费用规则（设置一次）",
   recorded_estimate: "已自动推算入账",
   already_recorded: "已有记录",
   needs_review: "需要核对",
+  configuration_required: "完善自动记账设置",
 };
 
 export function dcaAutomationStatusLabel(status: unknown): string {
@@ -185,6 +205,7 @@ export function dcaAutomationSummary(data: Values | null): string {
     "needs_review",
     "waiting_cash",
     "waiting_calendar",
+    "configuration_required",
     "waiting_fee",
     "waiting_nav",
     "waiting_confirmation",
@@ -198,7 +219,8 @@ export function dcaAutomationSummary(data: Values | null): string {
   const states = priorities.filter(
     (status) => Number.isSafeInteger(summary[status]) && summary[status] > 0,
   );
-  if (!states.length) return data.enabled ? "暂无到期待办" : "自动补录已关闭";
+  if (!states.length)
+    return data.enabled ? "等待下一期自动执行" : "自动补录已关闭";
   const text = states
     .slice(0, 2)
     .map(
@@ -215,5 +237,23 @@ export function eligibleDcaHolding(account: Values, currency: string): boolean {
     account.currency === currency &&
     account.valuation_mode !== "snapshot" &&
     dcaHoldingKinds.includes(account.kind)
+  );
+}
+
+/** Only OTC unit-NAV subscriptions can infer units without an execution report. */
+export function eligibleDcaInstrument(instrument: Values): boolean {
+  const spec = instrument.specification || {};
+  const fundType = String(spec.fund_type || "").toLowerCase();
+  return (
+    instrument.kind === "fund" &&
+    !instrument.archived &&
+    !instrument.deleted_at &&
+    !spec.is_derivative &&
+    spec.trading_channel !== "exchange" &&
+    !String(instrument.name || "").includes("货币") &&
+    !fundType.includes("货币") &&
+    !["005", "money", "money_market", "money-market"].includes(fundType) &&
+    !spec.is_money_fund &&
+    !spec.is_money_market
   );
 }

@@ -11,7 +11,6 @@ from .common import DomainError, bump, tenant_context
 from .models import Membership, Occurrence, Outbox, Projection, Resource, Workspace
 from .reporting import overview
 
-
 DELIVERY_LEASE = timedelta(minutes=5)
 
 
@@ -178,6 +177,7 @@ def dispatch_all(inline=False):
 
 @shared_task(name="wealth.tasks.scan_all")
 def scan_all():
+    from .dca_schedule import is_dca_plan, prune_future_occurrences
     from .planning import generate_schedule, today
 
     count = 0
@@ -203,9 +203,21 @@ def scan_all():
             from .fund_orders import scan_orders
 
             scan_orders(space, owner.user)
+            # Old versions pre-created a year of intentions, including for
+            # plans now paused. Retire only provably untouched projections;
+            # manual skips, pending records and financial history stay intact.
+            for plan in Resource.objects.filter(
+                tenant=space, kind="plans", data__kind="dca"
+            ).exclude(active):
+                prune_future_occurrences(space, owner.user, plan, current_day)
             for plan in plans:
                 generate_schedule(
-                    space, owner.user, plan, current_day + timedelta(days=365)
+                    space,
+                    owner.user,
+                    plan,
+                    current_day
+                    if is_dca_plan(plan)
+                    else current_day + timedelta(days=365),
                 )
             due = Occurrence.objects.filter(
                 tenant=space,

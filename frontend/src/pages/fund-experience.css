@@ -1,0 +1,335 @@
+.dca-plan-workspace .paper-panel {
+  border-radius: 14px;
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--theme-shadow) 2%, transparent);
+}
+.dca-plan-workspace .table-toolbar {
+  margin-bottom: 16px;
+}
+.dca-plan-workspace .ant-table-cell {
+  padding: 14px 12px !important;
+  vertical-align: middle;
+}
+.dca-plan-workspace .ant-table-tbody .ant-table-cell:first-child {
+  max-width: 300px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dca-plan-workspace .ant-table-thead .ant-table-cell {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--theme-text-secondary);
+}
+.dca-plan-modal .ant-modal-body {
+  max-height: min(76vh, 820px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 3px;
+  scrollbar-gutter: stable;
+}
+.dca-plan-modal .ant-form-item {
+  margin-bottom: 16px;
+}
+.dca-plan-modal .ant-collapse-header,
+.dca-plan-modal .ant-collapse-content-box {
+  padding-inline: 0 !important;
+}
+.dca-plan-modal .ant-collapse-header-text {
+  font-size: 12px;
+  color: var(--theme-text-secondary);
+  overflow-wrap: anywhere;
+}
+.dca-automation-fields {
+  border-top: 1px solid var(--theme-border);
+  margin-top: 4px;
+  padding-top: 18px;
+}
+.dca-automation-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  color: var(--theme-text-secondary);
+}
+.dca-automation-heading > div:first-of-type {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.dca-automation-heading strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--theme-text);
+}
+.dca-automation-heading small {
+  font-size: 11px;
+  color: var(--theme-muted);
+  line-height: 1.5;
+}
+.dca-automation-heading .holdings-info {
+  display: inline-flex;
+  background: none;
+  border: 0;
+  padding: 3px;
+  color: var(--theme-muted);
+  cursor: help;
+}
+.dca-account-fields > .form-grid {
+  display: block;
+  min-width: 0;
+}
+.dca-setting-note {
+  color: var(--theme-text-secondary);
+  font-size: 11px;
+  margin: -5px 0 12px;
+}
+.dca-progress-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.dca-progress-heading small {
+  color: var(--theme-muted);
+  font-size: 10px;
+}
+.dca-progress-intro {
+  background: var(--theme-surface-alt);
+  border: 1px solid var(--theme-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.dca-progress-intro strong {
+  color: var(--theme-text-secondary);
+  font-size: 14px;
+}
+.dca-progress-intro p,
+.dca-progress-help p {
+  font-size: 12px;
+  color: var(--theme-muted);
+  line-height: 1.7;
+  margin: 6px 0 0;
+}
+.dca-progress-summary {
+  color: var(--theme-text-secondary);
+  font-size: 12px;
+  margin: 0 0 14px;
+}
+.dca-progress-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border: 1px solid var(--theme-border);
+  border-radius: 10px;
+  padding: 13px 16px;
+  margin-bottom: 18px;
+}
+.dca-progress-counts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.dca-progress-counts small {
+  color: var(--theme-muted);
+  font-size: 11px;
+}
+.dca-progress-counts strong {
+  font-size: 20px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.dca-status-explanation {
+  max-width: 205px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+.dca-progress-help {
+  border-top: 1px solid var(--theme-border);
+  padding-top: 14px;
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--theme-text-secondary);
+}
+.dca-progress-help summary {
+  cursor: pointer;
+}
+.home-dashboard .net-worth-cards {
+  gap: 14px;
+}
+.home-dashboard .net-worth-card {
+  padding: 21px;
+  border-radius: 15px;
+  background: var(--theme-surface);
+  border-color: var(--theme-border);
+}
+.home-dashboard .net-worth-card.estimated {
+  background: linear-gradient(
+    145deg,
+    var(--theme-surface-alt),
+    var(--theme-surface-alt)
+  );
+  border-color: var(--theme-border);
+}
+.home-dashboard .net-worth-card.daily-return-card {
+  background: var(--theme-surface-alt);
+}
+.home-dashboard .net-worth-heading {
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+.home-dashboard .net-worth-card > strong {
+  font-size: clamp(24px, 2.1vw, 32px);
+  letter-spacing: -0.025em;
+}
+.home-dashboard .net-worth-caption {
+  margin-top: 15px;
+  font-size: 11px;
+}
+.home-dashboard .net-worth-change {
+  font-size: 12px;
+  padding-top: 12px;
+}
+.home-dashboard .metric-grid {
+  gap: 14px;
+  margin: 18px 0;
+}
+.home-dashboard .metric-card {
+  padding: 17px 20px;
+  border-radius: 12px;
+  box-shadow: none;
+  border-color: var(--theme-border);
+  background: var(--theme-surface);
+}
+.home-dashboard .metric-card > strong {
+  font-family: inherit;
+  font-size: 23px;
+  letter-spacing: -0.025em;
+}
+.home-dashboard .metric-top {
+  margin-bottom: 8px;
+}
+.home-dashboard .paper-panel {
+  border-radius: 14px;
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--theme-shadow) 2%, transparent);
+  border-color: var(--theme-border);
+  padding: 21px;
+}
+.home-dashboard .panel-heading {
+  margin-bottom: 16px;
+}
+.home-dashboard .two-column,
+.home-dashboard .three-column {
+  gap: 16px;
+}
+.home-dashboard .ant-table-cell {
+  overflow-wrap: anywhere;
+  padding-block: 12px !important;
+}
+.home-dashboard .ant-table-thead .ant-table-cell {
+  font-size: 11px;
+  font-weight: 500;
+}
+.home-dashboard .todo-list button {
+  padding-block: 14px;
+}
+.home-dashboard .todo-list strong {
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.home-dashboard .todo-list p {
+  font-size: 11px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+.home-data-notice {
+  border: 1px solid var(--theme-border);
+  background: var(--theme-surface-alt);
+  border-radius: 9px;
+  margin: 0 0 18px;
+  padding: 11px 14px;
+  color: var(--theme-text-secondary);
+  font-size: 12px;
+}
+.home-data-notice summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.home-data-notice summary::-webkit-details-marker {
+  display: none;
+}
+.home-data-notice summary span {
+  margin-left: auto;
+  font-size: 11px;
+}
+.home-data-notice ul {
+  padding-left: 22px;
+  line-height: 1.8;
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+.home-account-basis {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+}
+@media (max-width: 1050px) {
+  .home-dashboard .two-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 700px) {
+  .dca-plan-workspace .panel-heading {
+    flex-wrap: wrap;
+  }
+  .dca-plan-modal .ant-modal-body {
+    max-height: 72vh;
+  }
+  .dca-automation-heading {
+    gap: 8px;
+  }
+  .dca-automation-heading > svg {
+    display: none;
+  }
+  .dca-progress-drawer .ant-drawer-body {
+    padding: 16px;
+  }
+  .home-dashboard .net-worth-card,
+  .home-dashboard .paper-panel {
+    padding: 17px;
+  }
+  .home-dashboard .metric-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+  .home-dashboard .metric-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    column-gap: 12px;
+    padding: 14px 17px;
+  }
+  .home-dashboard .metric-top {
+    margin-bottom: 0;
+  }
+  .home-dashboard .metric-icon {
+    display: none;
+  }
+  .home-dashboard .metric-card > strong {
+    font-size: 21px;
+    text-align: right;
+  }
+  .home-dashboard .metric-card p {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+  }
+}

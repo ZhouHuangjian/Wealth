@@ -19,6 +19,7 @@ import { Panel } from "../components";
 import { HelpText, helpColumns } from "../help";
 import { useDebounced } from "../state";
 import { ConfigurationPreview } from "./ManagementExtras";
+import { adminAccessRequired, canDelegate } from "../admin-access";
 
 type Option = { value: string; label: string };
 type Preview = {
@@ -35,7 +36,13 @@ type Template = Item & {
   created_at: string;
 };
 
-function useSourceOptions(path: string, enabled: boolean, labelKey: string) {
+function useSourceOptions(
+  path: string,
+  enabled: boolean,
+  labelKey: string,
+  delegatedOnly = false,
+  revision = 0,
+) {
   const [options, setOptions] = useState<Option[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -55,10 +62,12 @@ function useSourceOptions(path: string, enabled: boolean, labelKey: string) {
       .then((result) => {
         if (!active) return;
         setOptions(
-          listOf<Item>(result).map((row) => ({
-            value: String(row.id),
-            label: String(row[labelKey]),
-          })),
+          listOf<Item>(result)
+            .filter((row) => !delegatedOnly || canDelegate(row))
+            .map((row) => ({
+              value: String(row.id),
+              label: String(row[labelKey]),
+            })),
         );
         setCount(result.count || 0);
       })
@@ -72,7 +81,7 @@ function useSourceOptions(path: string, enabled: boolean, labelKey: string) {
       active = false;
       controller.abort();
     };
-  }, [path, enabled, labelKey]);
+  }, [path, enabled, labelKey, delegatedOnly, revision]);
   return { options, loading, error, count };
 }
 
@@ -91,6 +100,7 @@ export default function AdminTemplates() {
   const [space, setSpace] = useState<Option>();
   const [userQuery, setUserQuery] = useState("");
   const [spaceQuery, setSpaceQuery] = useState("");
+  const [sourceRevision, setSourceRevision] = useState(0);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [publishError, setPublishError] = useState("");
@@ -109,8 +119,16 @@ export default function AdminTemplates() {
     `/admin/spaces?${new URLSearchParams({ user_id: user?.value || "", q: debouncedSpace, offset: "0", limit: "100" })}`,
     open && !!user,
     "name",
+    true,
+    sourceRevision,
   );
   const reload = useCallback(() => setRevision((value) => value + 1), []);
+  useEffect(() => {
+    if (!open || !user) return;
+    const refresh = () => setSourceRevision((value) => value + 1);
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [open, user?.value]);
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -118,11 +136,21 @@ export default function AdminTemplates() {
     api(`/admin/configuration-templates?limit=20&offset=${(page - 1) * 20}`)
       .then((result) => {
         if (!active) return;
-        setRows(listOf<Template>(result));
+        const currentRows = listOf<Template>(result);
+        setRows(currentRows);
+        setDetail((current) =>
+          current && !currentRows.some((row) => row.id === current.id)
+            ? null
+            : current,
+        );
         setCount(result.count || 0);
       })
       .catch((e) => {
-        if (active) setListError((e as Error).message);
+        if (active) {
+          setListError((e as Error).message);
+          setRows([]);
+          setDetail(null);
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -131,6 +159,16 @@ export default function AdminTemplates() {
       active = false;
     };
   }, [page, revision]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") reload();
+    }, 15000);
+    window.addEventListener("focus", reload);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", reload);
+    };
+  }, [reload]);
   useEffect(
     () => () => {
       previewSequence.current++;
@@ -145,6 +183,37 @@ export default function AdminTemplates() {
     setReviewed(false);
     setPublishError("");
   }
+  useEffect(() => {
+    if (!open || !space) return;
+    let active = true;
+    const check = async () => {
+      try {
+        const result = await api(`/admin/spaces/${space.value}`);
+        if (active && !canDelegate(result)) {
+          invalidatePreview();
+          setSpace(undefined);
+          setPublishError(adminAccessRequired);
+          setSourceRevision((value) => value + 1);
+        }
+      } catch (e) {
+        if (active) {
+          invalidatePreview();
+          setSpace(undefined);
+          setPublishError((e as Error).message);
+          setSourceRevision((value) => value + 1);
+        }
+      }
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void check();
+    }, 15000);
+    window.addEventListener("focus", check);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+    };
+  }, [open, space?.value]);
   function start() {
     setUser(undefined);
     setSpace(undefined);
@@ -162,13 +231,25 @@ export default function AdminTemplates() {
     setPreviewing(true);
     setPublishError("");
     try {
+      if (!canDelegate(await api(`/admin/spaces/${space.value}`))) {
+        if (current === previewSequence.current) {
+          setSpace(undefined);
+          setSourceRevision((value) => value + 1);
+        }
+        throw new Error(adminAccessRequired);
+      }
       const result = await api<Preview>(
         `/admin/configuration-templates/preview?${new URLSearchParams({ user_id: user.value, space_id: space.value })}`,
       );
       if (current === previewSequence.current) setPreview(result);
     } catch (e) {
-      if (current === previewSequence.current)
+      if (current === previewSequence.current) {
         setPublishError((e as Error).message);
+        if (e instanceof ApiError && e.status === 403) {
+          setSpace(undefined);
+          setSourceRevision((value) => value + 1);
+        }
+      }
     } finally {
       if (current === previewSequence.current) setPreviewing(false);
     }
@@ -191,9 +272,13 @@ export default function AdminTemplates() {
       reload();
       message.success("配置参考已发布，平台登录用户可以预览选用");
     } catch (e) {
-      if (e instanceof ApiError && e.status === 412) {
+      if (e instanceof ApiError && [403, 412].includes(e.status)) {
         setPreview(null);
         setReviewed(false);
+        if (e.status === 403) {
+          setSpace(undefined);
+          setSourceRevision((value) => value + 1);
+        }
       }
       setPublishError((e as Error).message);
     } finally {
@@ -221,7 +306,10 @@ export default function AdminTemplates() {
           );
         } catch (e) {
           message.error((e as Error).message);
-          if (e instanceof ApiError && e.status === 412) reload();
+          if (e instanceof ApiError && [403, 412].includes(e.status)) {
+            setDetail(null);
+            reload();
+          }
           throw e;
         } finally {
           setBusyId(null);
@@ -254,7 +342,7 @@ export default function AdminTemplates() {
           type="info"
           showIcon
           message="分享可参考的设置，发布后平台登录用户都可查看"
-          description="模板仅包含菜单、首页显示、标签名称与目标占比、市场自选。不会复制账号、交易、余额、持仓数量或私人笔记；发布前仍需检查自定义标签等内容是否适合公开。模板是发布时的快照，来源之后的调整不会自动同步。"
+          description="仅可选用所有者已允许代管的空间。模板仅包含菜单、首页显示、标签名称与目标占比、市场自选，不复制账号、交易、余额、持仓数量或私人笔记；发布前需核对自定义内容是否适合公开。模板为发布时快照。"
         />
         {listError && (
           <Alert
@@ -396,7 +484,7 @@ export default function AdminTemplates() {
               extra={
                 spaces.count > 100
                   ? "结果超过 100 个，请输入空间名称缩小范围"
-                  : undefined
+                  : "仅显示所有者已允许管理员代管的空间"
               }
             >
               <Select
@@ -409,14 +497,16 @@ export default function AdminTemplates() {
                 loading={spaces.loading}
                 disabled={!user || publishing}
                 options={spaces.options}
-                placeholder={user ? "选择其已加入的空间" : "请先选择用户"}
+                placeholder={user ? "选择已授权的空间" : "请先选择用户"}
                 onSearch={setSpaceQuery}
                 onChange={(value) => {
                   setSpace(value);
                   invalidatePreview();
                 }}
                 notFoundContent={
-                  spaces.loading ? "正在读取空间…" : "该用户没有匹配的有效空间"
+                  spaces.loading
+                    ? "正在读取空间…"
+                    : "没有匹配的已授权空间；请由空间所有者先开启代管授权"
                 }
               />
             </Form.Item>

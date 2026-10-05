@@ -10,8 +10,7 @@ from decimal import Decimal
 
 from django.db.models import Max, Q, Sum
 
-from .common import catalog_queryset
-from .common import DomainError, day, dec, get_obj, serial
+from .common import DomainError, catalog_queryset, day, dec, get_obj, serial
 from .investments import DERIVATIVES, holdings_summary, is_derivative_instrument
 from .models import (
     Account,
@@ -22,7 +21,6 @@ from .models import (
     PositionMovement,
     Price,
     Resource,
-    Snapshot,
 )
 from .reporting import ASSET_CODES, FORMAL_PRICE_KINDS
 
@@ -123,7 +121,11 @@ def _snapshot_account(account):
 
 def _institution_value(space, account, when, prefer_reference=False):
     from .account_opening import effective_snapshots
-    from .availability import FUTURES_ACCOUNTS, institution_availability
+    from .availability import (
+        CASH_INSTITUTION_ACCOUNTS,
+        cash_only_interval,
+        institution_availability,
+    )
 
     snapshots = (
         effective_snapshots(space, account)
@@ -172,7 +174,7 @@ def _institution_value(space, account, when, prefer_reference=False):
             "roll_forward": ZERO,
             "reported_available": None,
         }
-        if account.kind in FUTURES_ACCOUNTS:
+        if account.kind in CASH_INSTITUTION_ACCOUNTS:
             result.update(institution_availability(space, account, when, result))
         return result
     value = latest.equity
@@ -182,6 +184,8 @@ def _institution_value(space, account, when, prefer_reference=False):
     holiday_carry = latest.economic_date < when and settled_market_remained_closed(
         latest, when
     )
+    empty_interval = cash_only_interval(space, account, when, latest)
+    cash_carry = latest.economic_date < when and empty_interval
     if not latest.complete or latest.includes_options is None:
         gaps.append(f"{account.name} 机构权益包含范围未核实")
     if (
@@ -233,7 +237,7 @@ def _institution_value(space, account, when, prefer_reference=False):
             gaps.append(
                 f"{account.name} 机构权益尚未核对后续 {line.event.kind} 资金流水"
             )
-    if latest.economic_date < when and not holiday_carry:
+    if latest.economic_date < when and not holiday_carry and not cash_carry:
         gaps.append(f"{account.name} 权益截至 {latest.economic_date}，尚缺后续结算盈亏")
     result = {
         "local_value": value,
@@ -247,7 +251,7 @@ def _institution_value(space, account, when, prefer_reference=False):
         if valuation_basis == "settlement"
         else "institution",
         "data_state": "stale"
-        if latest.economic_date < when and not holiday_carry
+        if latest.economic_date < when and not holiday_carry and not cash_carry
         else "reference"
         if valuation_basis in {"intraday", "unknown"}
         else "institution",
@@ -257,8 +261,11 @@ def _institution_value(space, account, when, prefer_reference=False):
         "observed_at": latest.details.get("valuation_observed_at"),
         "calendar_id": latest.details.get("calendar_id"),
         "holiday_carry_forward": holiday_carry,
+        "cash_only_carry_forward": cash_carry,
+        "settlement_pnl": ZERO if empty_interval else None,
+        "settlement_pnl_basis": "no_recorded_positions" if empty_interval else None,
     }
-    if account.kind in FUTURES_ACCOUNTS:
+    if account.kind in CASH_INSTITUTION_ACCOUNTS:
         result.update(
             institution_availability(space, account, when, result, latest.details)
         )
@@ -280,6 +287,9 @@ def _observation_detail(account, instrument_id, chosen):
         "observed_at": chosen.get("observed_at"),
         "calendar_id": chosen.get("calendar_id"),
         "holiday_carry_forward": chosen.get("holiday_carry_forward", False),
+        "cash_only_carry_forward": chosen.get("cash_only_carry_forward", False),
+        "settlement_pnl": chosen.get("settlement_pnl"),
+        "settlement_pnl_basis": chosen.get("settlement_pnl_basis"),
     }
 
 

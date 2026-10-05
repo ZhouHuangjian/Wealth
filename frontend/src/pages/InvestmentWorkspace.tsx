@@ -697,7 +697,7 @@ export default function InvestmentWorkspace({
                     },
                     {
                       key: "latest",
-                      title: "最近确认日收益",
+                      title: "最近净值收益",
                       render: (_, r) => (
                         <HoldingDailyReturn row={r} asOf={asOf} latest />
                       ),

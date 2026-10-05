@@ -89,9 +89,10 @@ def _history_preview(space, plan_id, body):
     if (
         config.get("frequency", "monthly") != "daily"
         or str(config.get("interval", 1)) != "1"
+        or config.get("holiday_policy", "skip") == "next_open"
     ):
         raise DomainError(
-            "当前历史预览仅支持每个基金参考交易日一次；每周、每月及间隔扣款请按实际记录核对",
+            "此预览适用于每日、休市跳过的计划；顺延或其他周期请在定投设置中指定自动记账开始日，系统逐期处理",
             "dca_frequency_unsupported",
         )
     if config.get("count") not in (None, ""):

@@ -34,7 +34,7 @@ def platform():
         "ordinary-reader", password="Example-safe-only-55731"
     )
     own = m.Workspace.objects.create(name="自己的账簿")
-    foreign = m.Workspace.objects.create(name="他人的账簿")
+    foreign = m.Workspace.objects.create(name="他人的账簿", admin_access_enabled=True)
     m.Membership.objects.create(workspace=foreign, user=ordinary, role="owner")
     m.Membership.objects.create(workspace=foreign, user=reader, role="viewer")
     with tenant_context(foreign.pk):
@@ -251,6 +251,13 @@ def test_space_management_and_add_members(platform):
     )
     assert response.status_code == 200, response.content
     sid = response.json()["id"]
+    consent = call(
+        p.u,
+        f"spaces/{sid}/admin-access",
+        {"enabled": True, "version": 0},
+        "put",
+    )
+    assert consent.status_code == 200, consent.content
     response = call(
         p.a, f"admin/spaces/{sid}", {"version": 0, "name": "重新命名"}, "patch"
     )

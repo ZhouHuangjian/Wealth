@@ -1,4 +1,4 @@
-"""Opt-in, estimated DCA bookkeeping. No bank or broker orders are transmitted.
+"""Once-configured DCA bookkeeping. No bank or broker orders are transmitted.
 
 The same immutable plan/date/stage keys as history imports protect both paths.
 Only a published NAV for the exact application day may supply estimated units.
@@ -49,6 +49,151 @@ STATES = {
     "already_recorded": "已有记录，未重复入账",
     "needs_review": "存在记录差异，请核对",
 }
+
+
+def processing_state(status):
+    """Separate automatic waiting from exceptions that actually need attention.
+
+    Estimated shares remain attributed as estimates, but that provenance is not
+    a requirement to approve every period. A published NAV does not prove that a
+    bank debit really took place; the plan's explicit bookkeeping rule does.
+    """
+    if status in {"recorded_estimate", "already_recorded"}:
+        state, scope, label = "complete", None, None
+    elif status == "waiting_fee":
+        state, scope, label = "attention", "plan", "设置一次费用规则"
+    elif status in {"waiting_cash", "needs_review"}:
+        state, scope, label = "attention", "period", "处理异常"
+    elif status in {"disabled", "paused", "excluded"}:
+        state, scope, label = "inactive", None, None
+    else:
+        state, scope, label = "waiting", None, None
+    return {
+        "processing_state": state,
+        "requires_action": scope is not None,
+        "action_scope": scope,
+        "action_label": label,
+        "requires_confirmation": False,
+    }
+
+
+def occurrence_processing(occurrence):
+    """Read-only status shared by the pending list and the overview.
+
+    Legacy plans without automation rules need one plan-level setup. Explicitly
+    disabled rules remain disabled, rather than generating daily confirmation
+    prompts or being silently re-enabled by a deployment.
+    """
+    plan = occurrence.plan
+    if plan.kind != "plans" or plan.data.get("kind") != "dca":
+        return None
+    config = plan.data.get("automation") or {}
+    if not config:
+        if plan.data.get("status", "active") != "active":
+            return {
+                "status": "paused",
+                "message": STATES["paused"],
+                **processing_state("paused"),
+            }
+        instrument = Instrument.objects.filter(
+            tenant_id=occurrence.tenant_id,
+            pk=plan.data.get("instrument_id"),
+        ).first()
+        if instrument:
+            try:
+                _fund(instrument)
+            except DomainError:
+                return None
+        return {
+            "status": "configuration_required",
+            "message": "完善一次自动记账规则，后续各期自动处理",
+            "processing_state": "attention",
+            "requires_action": True,
+            "action_scope": "plan",
+            "action_label": "完善定投设置",
+            "requires_confirmation": False,
+        }
+    status = (occurrence.details.get("automation") or {}).get("status")
+    if not config.get("enabled"):
+        status = "disabled"
+    elif (
+        plan.data.get("status") not in {"active", "paused"}
+        or not occurrence.event_id
+        and plan.data.get("status") == "paused"
+    ):
+        status = "paused"
+    elif occurrence.status in {"cancelled", "skipped"}:
+        status = "excluded"
+    elif status is None:
+        status = "waiting_confirmation" if occurrence.event_id else "scheduled"
+    return {
+        **(occurrence.details.get("automation") or {}),
+        "status": status,
+        "message": STATES.get(status, "系统正在自动处理"),
+        **processing_state(status),
+    }
+
+
+def initialize_configuration(space, data, *, existing=False):
+    """New OTC fund plans inherit visible plan defaults only once.
+
+    Existing explicit switches and legacy missing configuration are left alone.
+    A bank account is never guessed to be a fund holding account: a stored,
+    unambiguous per-fund preference may provide it; otherwise setup asks once.
+    """
+    if existing or data.get("kind") != "dca":
+        return
+    raw = data.get("automation")
+    if isinstance(raw, dict):
+        if raw.get("enabled") is True and not raw.get("start_date"):
+            data["automation"] = {**raw, "start_date": data["start_date"]}
+        return
+    if raw is not None:
+        return
+    instrument = get_obj(Instrument, space, data.get("instrument_id"))
+    try:
+        _fund(instrument)
+    except DomainError:
+        return
+    source = get_obj(Account, space, data.get("account_id"))
+    preferences = list(
+        Resource.objects.filter(
+            tenant=space,
+            kind="fund_trade_defaults",
+            data__instrument_id=str(instrument.pk),
+        )
+    )
+    holding = source if source.kind in {"fund", "broker", "securities"} else None
+    matching = [
+        row.data
+        for row in preferences
+        if (
+            holding
+            and row.data.get("account_id") == str(holding.pk)
+            or not holding
+            and row.data.get("cash_account_id") == str(source.pk)
+        )
+    ]
+    preference = matching[0] if len(matching) == 1 else {}
+    if holding is None and preference.get("account_id"):
+        holding = get_obj(Account, space, preference["account_id"])
+    if holding is None:
+        # Legacy/API clients may not expose the holding selector yet. Keep the
+        # plan intact and surface one setup task, never invent an account.
+        return
+    funding = preference.get("funding_source", "account")
+    data["automation"] = {
+        "enabled": True,
+        "start_date": data["start_date"],
+        "holding_account_id": str(holding.pk),
+        "funding_source": funding,
+        "fee_mode": preference.get("fee_mode", "unknown"),
+        "fee_amount": preference.get("fee_value", "0"),
+    }
+    if preference.get("cash_account_id") and funding == "account":
+        data["account_id"] = preference["cash_account_id"]
+    elif funding == "untracked":
+        data["account_id"] = str(holding.pk)
 
 
 def validate_configuration(space, data):
@@ -178,7 +323,14 @@ def _excluded(config, when):
 
 
 def _state(space, user, occurrence, status, message=None, **fields):
-    values = serial({"status": status, "message": message or STATES[status], **fields})
+    values = serial(
+        {
+            "status": status,
+            "message": message or STATES[status],
+            **fields,
+            **processing_state(status),
+        }
+    )
     if occurrence.details.get("automation") != values:
         occurrence.details = {**occurrence.details, "automation": values}
         occurrence.version += 1
@@ -202,7 +354,7 @@ def automation_status(space, plan_id):
     for row in reversed(list(occurrences.order_by("-due_date", "-sequence")[:500])):
         state = row.details.get("automation") or {}
         default = (
-            "already_recorded"
+            "waiting_confirmation"
             if row.event_id
             else "disabled"
             if not config.get("enabled")
@@ -217,10 +369,13 @@ def automation_status(space, plan_id):
             not config.get("enabled") or plan.data.get("status") != "active"
         ):
             values.update(status=default, message=STATES[default])
+        values.update(processing_state(values["status"]))
         items.append(
             {
                 "occurrence_id": str(row.pk),
                 "date": str(row.due_date),
+                "scheduled_date": str(scheduled_date(row)),
+                "application_date": str(row.due_date),
                 "amount": str(row.amount),
                 "debit_event_id": str(row.event_id) if row.event_id else None,
                 "confirmation_event_id": None,
@@ -235,6 +390,14 @@ def automation_status(space, plan_id):
         "has_more": total_count > len(items),
         "items": items,
         "summary": dict(Counter(item["status"] for item in items)),
+        "requires_confirmation": False,
+        "needs_attention_count": sum(item["requires_action"] for item in items),
+        "automatically_waiting_count": sum(
+            item["processing_state"] == "waiting" for item in items
+        ),
+        "completed_count": sum(
+            item["processing_state"] == "complete" for item in items
+        ),
         "data_revision": Workspace.objects.get(pk=space.pk).revision,
         "message": "按计划假定扣款并用正式净值推算份额，仅更新本账簿，不向银行或基金平台发起交易。",
     }
@@ -242,6 +405,11 @@ def automation_status(space, plan_id):
 
 def _active(event):
     return event and not event.reverses_id and not hasattr(event, "reversal")
+
+
+def scheduled_date(occurrence):
+    """The immutable plan anchor; shifted application dates are not identities."""
+    return day(occurrence.details.get("scheduled_date") or occurrence.due_date)
 
 
 def _same_debit(event, occurrence, instrument, source):
@@ -262,7 +430,7 @@ def _period(space, plan, occurrence):
             tenant=space,
             kind="dca_import_periods",
             data__plan_id=str(plan.pk),
-            data__scheduled_date=str(occurrence.due_date),
+            data__scheduled_date=str(scheduled_date(occurrence)),
         )
     )
     if len(records) > 1:
@@ -287,7 +455,7 @@ def _write_period(
     debit_basis = debit.payload.get("entry_basis", "institution")
     data = {
         **(resource.data if resource else {}),
-        "scheduled_date": str(occurrence.due_date),
+        "scheduled_date": str(scheduled_date(occurrence)),
         "debit_date": str(debit.economic_date),
         "amount": str(occurrence.amount),
         "funding_account_id": debit.payload["account_id"],
@@ -308,17 +476,26 @@ def _process(space, user, plan, occurrence, now):
     from .dca_import import _baseline
     from .ledger import post_event
     from .planning import confirm_occurrence
-    from .subscription_calendar import subscription_day
+    from .subscription_calendar import (
+        next_subscription_day,
+        subscription_day,
+        subscription_rule,
+    )
     from .trading_calendar import preview_trade_dates
 
     config = plan.data["automation"]
+    anchor = scheduled_date(occurrence)
     if (
         occurrence.details.get("permanently_removed")
         or occurrence.status == "cancelled"
     ):
         return _state(space, user, occurrence, "excluded")
-    if _excluded(config, occurrence.due_date) or (
-        occurrence.status == "skipped" and not occurrence.details.get("auto_skip")
+    if anchor < day(config["start_date"]):
+        return _state(space, user, occurrence, "excluded", "该期早于自动记账生效日")
+    if (
+        _excluded(config, anchor)
+        or _excluded(config, occurrence.due_date)
+        or (occurrence.status == "skipped" and not occurrence.details.get("auto_skip"))
     ):
         return _state(
             space,
@@ -331,6 +508,42 @@ def _process(space, user, plan, occurrence, now):
         )
     instrument = get_obj(Instrument, space, plan.data["instrument_id"])
     _fund(instrument)
+    # An initially unknown calendar may be completed after the schedule was
+    # generated. Resolve a shifted application without changing its plan anchor.
+    policy = (
+        occurrence.details.get("holiday_policy")
+        or plan.data.get("holiday_policy")
+        or (
+            "next_open"
+            if plan.data.get("frequency", "monthly") == "monthly"
+            else "skip"
+        )
+    )
+    if not occurrence.event_id and policy == "next_open":
+        rule = subscription_rule(instrument)
+        opened = subscription_day(anchor, rule=rule)["is_open"]
+        actual = next_subscription_day(anchor, rule) if opened is False else anchor
+        if opened is None or actual is None:
+            return _state(space, user, occurrence, "waiting_calendar")
+        if _excluded(config, actual):
+            return _state(space, user, occurrence, "excluded")
+        if occurrence.due_date != actual:
+            occurrence.due_date = actual
+            occurrence.details = {
+                **occurrence.details,
+                "scheduled_date": str(anchor),
+                "shifted_from": str(anchor),
+                "holiday_policy": policy,
+                "subscription_day": subscription_day(actual, rule=rule),
+                "auto_skip": False,
+            }
+            occurrence.version += 1
+            occurrence.save(update_fields=["due_date", "details", "version"])
+            bump(space, user, invalidate_reconciliations=False)
+        if actual > now:
+            return _state(
+                space, user, occurrence, "scheduled", "已顺延，等待开放日自动处理"
+            )
     source = get_obj(Account, space, plan.data["account_id"])
     holding = get_obj(Account, space, config["holding_account_id"])
     if occurrence.details.get("instrument_id") not in (
@@ -345,7 +558,7 @@ def _process(space, user, plan, occurrence, now):
             "历史期次的产品或付款账户与当前计划不同，请核对",
         )
     period = _period(space, plan, occurrence)
-    prefix = f"{space.pk}:dca:{plan.pk}:{occurrence.due_date}"
+    prefix = f"{space.pk}:dca:{plan.pk}:{anchor}"
     debit = occurrence.event if occurrence.event_id else None
     stage_debit = Event.objects.filter(
         tenant=space, stage_key=prefix + ":debit"
@@ -494,7 +707,9 @@ def _process(space, user, plan, occurrence, now):
             reverses__isnull=True,
         )
         if any(
-            dec(event.payload["amount"]) == occurrence.amount for event in candidates
+            not event.payload.get("dca_import_plan_id")
+            and dec(event.payload["amount"]) == occurrence.amount
+            for event in candidates
         ):
             return _state(
                 space,
@@ -528,11 +743,12 @@ def _process(space, user, plan, occurrence, now):
                 "economic_date": str(occurrence.due_date),
                 "amount": str(occurrence.amount),
                 "dca_import_plan_id": str(plan.pk),
-                "dca_import_date": str(occurrence.due_date),
+                "dca_import_date": str(anchor),
+                "application_date": str(occurrence.due_date),
                 "entry_basis": "preview_confirmed",
                 "automatic_estimate": True,
                 "automation_plan_version": plan.version,
-                "description": "按定投计划自动推算扣款（未核实机构成交）",
+                "description": "按定投计划自动记账（计划推算来源）",
             },
             stage_key=prefix + ":debit",
             _untracked_funding=config.get("funding_source") == "untracked",
@@ -661,7 +877,8 @@ def _process(space, user, plan, occurrence, now):
                 "rounding_adjustment": str(adjustment),
                 "rounding_confirmed": True,
                 "dca_import_plan_id": str(plan.pk),
-                "dca_import_date": str(occurrence.due_date),
+                "dca_import_date": str(anchor),
+                "application_date": str(occurrence.due_date),
                 "entry_basis": "preview_confirmed",
                 "debit_entry_basis": debit.payload.get("entry_basis", "institution"),
                 "automatic_estimate": True,
@@ -671,7 +888,7 @@ def _process(space, user, plan, occurrence, now):
                 "nav_source": quote.source,
                 "share_precision": precision,
                 "share_rounding": "half_up",
-                "description": "按正式净值自动推算份额（未核实机构成交）",
+                "description": "按申购日正式净值自动计算份额（计划推算来源）",
             },
             stage_key=prefix + ":confirm",
             _fund_confirmation={

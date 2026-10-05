@@ -27,7 +27,9 @@ def book(monkeypatch):
     monkeypatch.setattr("wealth.planning.today", lambda _: date(2026, 9, 28))
     admin = get_user_model().objects.create_superuser("purge-v261-operator")
     owner = get_user_model().objects.create_user("purge-v261-owner")
-    space = m.Workspace.objects.create(name="彻底删除合成账簿")
+    space = m.Workspace.objects.create(
+        name="彻底删除合成账簿", admin_access_enabled=True
+    )
     m.Membership.objects.create(workspace=space, user=owner, role="owner")
     clients = {}
     for name, user in (("admin", admin), ("owner", owner)):

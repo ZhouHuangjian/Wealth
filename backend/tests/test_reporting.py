@@ -413,8 +413,9 @@ def test_overview_and_comparison_share_institution_cashflow_coverage(
         == D(expected)
     )
     assert (
-        rolled["completeness"] == comparison["estimated"]["completeness"] == "partial"
+        rolled["completeness"] == comparison["estimated"]["completeness"] == "complete"
     )
+    assert D(item_for(rolled, futures)["available"]) == D("700")
     assert D(item_for(rolled, futures)["roll_forward"]) == D(expected) - D("1000")
     statement = snapshot(book, futures, expected, "2026-01-02", available="700")
     unconfirmed = overview(book.space, "2026-01-02")

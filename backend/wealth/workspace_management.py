@@ -26,6 +26,10 @@ def update_workspace_details(space, user, body):
     if not space or space.deleted_at:
         raise DomainError("账簿不存在", "not_found", 404)
     administrator = is_platform_admin(actor)
+    if administrator:
+        from .admin_access import require_delegation
+
+        space = require_delegation(actor, space)
     if (
         not administrator
         and not m.Membership.objects.filter(

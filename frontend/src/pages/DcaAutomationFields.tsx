@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Collapse,
@@ -8,24 +8,26 @@ import {
   Select,
   Space,
   Switch,
+  Tooltip,
 } from "antd";
-import { Minus, Plus } from "lucide-react";
+import { Info, Minus, Plus, Repeat2 } from "lucide-react";
 import type { Item } from "../api";
 import { api, dateToday } from "../api";
 import { useWorkspace } from "../state";
-import { Fields } from "../components";
 import { HelpText } from "../help";
 import {
   dcaAutomationNotice,
-  dcaHoldingKinds,
   eligibleDcaHolding,
+  eligibleDcaInstrument,
 } from "../dca-automation";
 
 export default function DcaAutomationFields({
   accounts,
+  instruments,
   useDefaults = true,
 }: {
   accounts: Item[];
+  instruments: Item[];
   useDefaults?: boolean;
 }) {
   const form = Form.useFormInstance();
@@ -39,6 +41,54 @@ export default function DcaAutomationFields({
   const planStart = Form.useWatch("start_date", form);
   const instrumentId = Form.useWatch("instrument_id", form);
   const fundingMode = Form.useWatch("automatic_funding_source", form);
+  const knownInstrument = instruments.find((item) => item.id === instrumentId);
+  const [resolvedInstrument, setResolvedInstrument] = useState<Item | null>(
+    null,
+  );
+  const selectedInstrument =
+    knownInstrument ||
+    (resolvedInstrument?.id === instrumentId ? resolvedInstrument : undefined);
+  useEffect(() => {
+    if (!instrumentId || knownInstrument) return;
+    let live = true;
+    api<Item>(`/spaces/${space.id}/instruments/${instrumentId}`)
+      .then((item) => {
+        if (live) setResolvedInstrument(item);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [instrumentId, knownInstrument, space.id]);
+  const supported =
+    !selectedInstrument || eligibleDcaInstrument(selectedInstrument);
+  useEffect(() => {
+    if (!useDefaults || !selectedInstrument) return;
+    const next = eligibleDcaInstrument(selectedInstrument);
+    if (
+      !form.isFieldTouched("automatic_enabled") &&
+      form.getFieldValue("automatic_enabled") !== next
+    )
+      form.setFieldValue("automatic_enabled", next);
+    else if (!next && form.getFieldValue("automatic_enabled") === true)
+      form.setFieldValue("automatic_enabled", false);
+  }, [selectedInstrument, useDefaults, form]);
+  useEffect(() => {
+    if (
+      useDefaults &&
+      planStart &&
+      !form.isFieldTouched("automatic_start_date")
+    )
+      form.setFieldValue("automatic_start_date", planStart);
+  }, [planStart, useDefaults, form]);
+  useEffect(() => {
+    if (
+      enabled &&
+      holdingId &&
+      ((fundingMode === "untracked" && fundingId !== holdingId) || !fundingId)
+    )
+      form.setFieldValue("account_id", holdingId);
+  }, [enabled, fundingMode, holdingId, fundingId, form]);
   useEffect(() => {
     if (
       !useDefaults ||
@@ -61,12 +111,14 @@ export default function DcaAutomationFields({
             "automatic_funding_source",
           ])
         ) {
-          form.setFieldsValue({
+          const defaults = {
             account_id: d.cash_account_id || holdingId,
             automatic_funding_source: d.funding_source,
             automatic_fee_mode: d.fee_mode,
             automatic_fee_amount: d.fee_value,
-          });
+          };
+          for (const [name, value] of Object.entries(defaults))
+            form.setFieldValue(name, value);
         }
       })
       .catch(() => {});
@@ -79,72 +131,184 @@ export default function DcaAutomationFields({
     const selected = accounts.find((account) => account.id === holdingId);
     if (!holdingId || (selected && !eligibleDcaHolding(selected, currency))) {
       const funding = accounts.find((account) => account.id === fundingId);
+      const eligible = accounts.filter((account) =>
+        eligibleDcaHolding(account, currency),
+      );
       const next =
         funding && eligibleDcaHolding(funding, currency)
           ? funding.id
-          : undefined;
+          : eligible.length === 1
+            ? eligible[0].id
+            : undefined;
       if (holdingId !== next) form.setFieldValue("target_account_id", next);
     }
   }, [enabled, fundingId, holdingId, currency, accounts, form]);
   return (
     <div className="dca-automation-fields">
-      <Form.Item
-        name="automatic_enabled"
-        label={<HelpText text="按计划自动补录" />}
-        tooltip="当前支持按正式单位净值申购的场外基金；场内 ETF、股票、期货期权和货币基金请记录实际成交。"
-        valuePropName="checked"
-        style={{ marginBottom: 8 }}
-      >
-        <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-      </Form.Item>
-      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
-        {dcaAutomationNotice}
-      </p>
-      <div hidden={!enabled}>
-        <Form.Item name="automatic_funding_source" label="自动补录的资金来源">
-          <Select
-            options={[
-              { value: "account", label: "按上方资金账户扣款" },
-              { value: "untracked", label: "账外资金（不扣本账簿账户）" },
-            ]}
-            onChange={(value) => {
-              if (value === "untracked" && holdingId)
-                form.setFieldValue("account_id", holdingId);
-            }}
+      <div className="dca-automation-heading">
+        <Repeat2 size={17} aria-hidden="true" />
+        <div>
+          <strong>自动记账</strong>
+          <small>
+            {enabled
+              ? "按计划记入扣款，正式净值公布后自动计算份额"
+              : supported
+                ? "关闭后仅保留计划提醒"
+                : "此产品按实际成交记账"}
+          </small>
+        </div>
+        <Tooltip title={dcaAutomationNotice}>
+          <button
+            className="holdings-info"
+            type="button"
+            aria-label="自动记账说明"
+          >
+            <Info size={15} />
+          </button>
+        </Tooltip>
+        <Form.Item
+          name="automatic_enabled"
+          valuePropName="checked"
+          style={{ marginBottom: 0 }}
+        >
+          <Switch
+            aria-label="按计划自动记账"
+            disabled={!supported}
+            checkedChildren="开启"
+            unCheckedChildren="关闭"
           />
         </Form.Item>
-        {fundingMode === "untracked" && (
-          <p className="muted">
-            资金账户与持仓账户应选同一机构；每期记为账外追加本金，不扣减其现金。
-          </p>
-        )}
-        <Fields
-          fields={[
-            {
-              name: "target_account_id",
-              label: "持仓账户",
-              type: "select",
-              required: enabled,
-              options: accounts
+      </div>
+      <div hidden={!enabled}>
+        <div className="form-grid dca-account-fields">
+          <Form.Item
+            name="target_account_id"
+            label="持仓账户"
+            rules={
+              enabled ? [{ required: true, message: "请选择持仓账户" }] : []
+            }
+            tooltip="定投份额记入此基金或券商账户。"
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择持仓账户"
+              options={accounts
                 .filter((account) => eligibleDcaHolding(account, currency))
                 .map((account) => ({
                   value: account.id,
                   label: account.name + " · " + account.currency,
-                })),
-              referenceKinds: dcaHoldingKinds,
-              referenceCurrency: currency,
-              help: "份额记入这个基金或券商账户。上方资金账户用于记录扣款；两者可以不同。",
-              span: 2,
-            },
-          ]}
-        />
+                }))}
+            />
+          </Form.Item>
+          <Form.Item name="automatic_funding_source" label="资金来源">
+            <Select
+              options={[
+                { value: "account", label: "从账簿内账户扣款" },
+                { value: "untracked", label: "账外资金（不扣本账簿账户）" },
+              ]}
+              onChange={(value) => {
+                if (value === "untracked" && holdingId)
+                  form.setFieldValue("account_id", holdingId);
+              }}
+            />
+          </Form.Item>
+        </div>
+      </div>
+      {!enabled || fundingMode !== "untracked" ? (
+        <Form.Item
+          name="account_id"
+          label={enabled ? "扣款账户" : "计划关联账户"}
+          rules={[{ required: true, message: "请选择账户" }]}
+          tooltip={
+            enabled
+              ? "每期从此账户的可用资金中记账扣除，可与持仓账户相同。"
+              : "该计划关联的资金或投资账户。"
+          }
+        >
+          <Select
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择账户"
+            options={accounts
+              .filter(
+                (account) =>
+                  !account.archived &&
+                  !account.deleted_at &&
+                  account.currency === currency &&
+                  (!enabled ||
+                    (account.valuation_mode !== "snapshot" &&
+                      [
+                        "bank",
+                        "cash",
+                        "wallet",
+                        "fund",
+                        "broker",
+                        "securities",
+                      ].includes(account.kind))),
+              )
+              .map((account) => ({
+                value: account.id,
+                label: account.name + " · " + account.currency,
+              }))}
+          />
+        </Form.Item>
+      ) : (
+        <Form.Item name="account_id" hidden>
+          <Input />
+        </Form.Item>
+      )}
+      <div hidden={!enabled}>
+        <div className="form-grid">
+          <Form.Item
+            name="automatic_fee_mode"
+            label="申购费用"
+            tooltip="只需设置一次，之后每期使用同一规则计算。费用未知时可先记扣款。"
+          >
+            <Select
+              options={[
+                { value: "unknown", label: "暂不确定 · 稍后设置一次" },
+                { value: "zero", label: "确认无申购费" },
+                { value: "rate", label: "按折扣后费率" },
+                { value: "fixed", label: "每期固定费用" },
+              ]}
+            />
+          </Form.Item>
+          {["fixed", "rate"].includes(feeMode) && (
+            <Form.Item
+              name="automatic_fee_amount"
+              label={
+                feeMode === "rate"
+                  ? "折扣后申购费率（%）"
+                  : `每期手续费（${currency}）`
+              }
+              rules={
+                enabled ? [{ required: true, message: "请填写申购费用" }] : []
+              }
+            >
+              <InputNumber
+                stringMode
+                min="0"
+                style={{ width: "100%" }}
+                placeholder={
+                  feeMode === "rate" ? "例如 0.12" : "从每期金额中扣除"
+                }
+              />
+            </Form.Item>
+          )}
+        </div>
+        {(feeMode === "unknown" || !feeMode) && (
+          <p className="dca-setting-note">
+            费用规则补全后，份额会自动计算，无需逐期确认。
+          </p>
+        )}
         <Collapse
           ghost
           items={[
             {
               key: "settings",
               forceRender: true,
-              label: `补录设置 · ${start || "请选择生效日期"}起 · ${feeMode === "unknown" || !feeMode ? "费用待设置" : feeMode === "zero" ? "已确认零费用" : feeMode === "rate" ? "按申购费率" : "每期固定费用"}`,
+              label: `生效日 ${start || "待选择"} · 排除日期与暂停`,
               children: (
                 <>
                   <div className="form-grid">
@@ -159,50 +323,16 @@ export default function DcaAutomationFields({
                     >
                       <Input type="date" min={planStart} />
                     </Form.Item>
-                    <Form.Item name="automatic_fee_mode" label="费用规则">
-                      <Select
-                        options={[
-                          { value: "unknown", label: "暂不确定" },
-                          { value: "zero", label: "已确认零费用" },
-                          { value: "fixed", label: "每期固定费用" },
-                          { value: "rate", label: "申购费率（%）" },
-                        ]}
-                      />
-                    </Form.Item>
-                    {["fixed", "rate"].includes(feeMode) && (
-                      <Form.Item
-                        name="automatic_fee_amount"
-                        label={
-                          feeMode === "rate"
-                            ? "折扣后申购费率（%）"
-                            : `每期手续费（${currency}）`
-                        }
-                        rules={
-                          enabled
-                            ? [{ required: true, message: "请填写每期手续费" }]
-                            : []
-                        }
-                      >
-                        <InputNumber
-                          stringMode
-                          style={{ width: "100%" }}
-                          placeholder="从每期计划金额中扣除"
-                        />
-                      </Form.Item>
-                    )}
                   </div>
                   <p className="muted" style={{ fontSize: 12 }}>
-                    {feeMode === "unknown" || !feeMode
-                      ? "费用未知时先补记扣款，份额等待费用设置；不会按零费用计算。"
-                      : "份额按每期计划金额扣除费用后除以正式净值推算。"}
                     {start && start < dateToday()
-                      ? "已选择过去日期，将检查并补录该日起的到期计划。"
-                      : "生效日期之前的历史不会自动补录。"}
+                      ? `包含 ${start} 起已到期的计划；按基金可申购日自动处理。`
+                      : "按基金可申购日自动处理；生效日期之前不补记。"}
                   </p>
                   <Form.Item
                     name="automatic_excluded_dates"
                     label="排除日期"
-                    extra="失败或不想补录的计划日期，每行一个。已有扣款的期次会提示核对，不会自动撤销。"
+                    extra="扣款失败或不想补录的计划日期，每行一个。已记账的期次需单独撤销。"
                   >
                     <Input.TextArea
                       rows={2}

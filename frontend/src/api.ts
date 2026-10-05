@@ -13,6 +13,19 @@ export class ApiError extends Error {
   }
 }
 let csrf = "";
+type ApiFailure = {
+  path: string;
+  status: number;
+  code?: string;
+  message: string;
+};
+const failureListeners = new Set<(failure: ApiFailure) => void>();
+export function subscribeApiFailures(listener: (failure: ApiFailure) => void) {
+  failureListeners.add(listener);
+  return () => {
+    failureListeners.delete(listener);
+  };
+}
 const pending = new Map<string, string>();
 async function operationKey(path: string, body: string) {
   const hash = Array.from(
@@ -72,12 +85,28 @@ export async function api<T = any>(
     sessionStorage.removeItem(operation.storageKey);
     pending.delete(operation.storageKey);
   }
-  if (!response.ok)
+  if (!response.ok) {
+    for (const listener of failureListeners) {
+      try {
+        listener({
+          path,
+          status: response.status,
+          code: result.code,
+          message:
+            result.message ||
+            result.detail ||
+            `请求未成功 (${response.status})`,
+        });
+      } catch {
+        /* Observers must not hide the original request failure. */
+      }
+    }
     throw new ApiError(
       result.message || result.detail || `请求未成功 (${response.status})`,
       response.status,
       result.fields,
     );
+  }
   return result as T;
 }
 export const send = <T = any>(

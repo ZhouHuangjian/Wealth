@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -22,31 +23,15 @@ from .models import (
     Resource,
 )
 from .reporting import FORMAL_PRICE_KINDS
+from .return_dates import analytical_movement
 
 ZERO = Decimal(0)
 CURRENCY_POLICY = "local_profit_converted_daily_excludes_fx"
 EXTERNAL_FLOWS = {"transfer", "fx", "income", "expense", "refund"}
 
 
-def _calendar_id(instrument):
-    specification = instrument.specification or {}
-    # NAV valuation days are not the fund's order-acceptance intersection.
-    # In particular a US QDII NAV can move while the Chinese market is closed.
-    if instrument.kind == "fund" and specification.get("trading_channel") != "exchange":
-        from .subscription_calendar import subscription_rule
-
-        ids = subscription_rule(instrument)["calendar_ids"]
-        if "US_EQUITIES" in ids:
-            return "US_EQUITIES"
-        if "HKEX" in ids:
-            return "HKEX"
-    return (
-        (specification.get("metadata_overrides") or {}).get("calendar_id")
-        or specification.get("calendar_id")
-        or {"CN": "CN_EXCHANGE", "US": "US_EQUITIES", "HK": "HKEX"}.get(
-            instrument.market
-        )
-    )
+from .valuation_calendar import return_calendar
+from .valuation_calendar import valuation_calendar as _calendar_id
 
 
 def _continuous_baseline(start, end, calendar_id):
@@ -83,35 +68,30 @@ class ReturnEvidence:
         )
         self.movements = defaultdict(list)
         self.movements_by_event = defaultdict(list)
-        # Include all account/product movements for check validity, but never
-        # import a future opening into today's balance through reconstruction.
+        # Retrospective analytics can use confirmations already known now, with
+        # their actual NAV dates. Cash/in-transit and future openings stay intact.
+        known_on = timezone.localdate()
         for row in (
             PositionMovement.objects.filter(
                 tenant=space,
                 account_id__in=self.accounts,
                 instrument_id__in=self.instruments,
-                event__economic_date__lte=when,
                 event__reversal__isnull=True,
                 event__reverses__isnull=True,
             )
-            .select_related("event")
+            .filter(
+                Q(event__economic_date__lte=when)
+                | Q(event__kind="fund_confirm", event__economic_date__lte=known_on)
+            )
+            .select_related("event__related")
             .order_by("event__economic_date", "event__created_at")
         ):
             event = row.event
-            reconstructed = (
-                event.kind == "opening"
-                and event.payload.get("history_mode") == "unchanged_holding"
+            value = analytical_movement(
+                row, self.instruments[str(row.instrument_id)], known_on=known_on
             )
-            value = {
-                "date": day(event.payload["purchase_date"])
-                if reconstructed
-                else event.economic_date,
-                "quantity": row.quantity,
-                "cost": row.cost,
-                "event": event,
-                "reconstructed": reconstructed,
-                "created_at": row.created_at,
-            }
+            if value["date"] > when:
+                continue
             self.movements[(str(row.account_id), str(row.instrument_id))].append(value)
             self.movements_by_event[str(event.pk)].append(value)
         self.formal, self.reference = defaultdict(list), defaultdict(list)
@@ -323,15 +303,21 @@ class ReturnEvidence:
             return None
         item.update(
             observation_kind="reference" if reference else "formal",
-            published_at=(reference or formal_today).published_at
-            if reference or formal_today
-            else None,
+            price_basis="estimate" if reference else "formal",
+            return_date=when,
         )
         observed_quote = reference or (quotes[-1] if quotes else None)
         if observed_quote:
             item.setdefault("price_date", observed_quote.economic_date)
             item["source"] = item.get("source") or observed_quote.source
             item["latest_observation_date"] = observed_quote.economic_date
+            item["nav_date"] = (
+                observed_quote.economic_date
+                if not reference and instrument.kind == "fund"
+                else None
+            )
+            item["published_at"] = observed_quote.published_at
+            item["observed_at"] = observed_quote.created_at
         if any(
             move["date"] == when
             and move["event"].kind == "opening"
@@ -342,7 +328,9 @@ class ReturnEvidence:
         if item["amount"] is None:
             return item
         if item.get("interval_start") and not _continuous_baseline(
-            day(item["interval_start"]), when, _calendar_id(instrument)
+            day(item["interval_start"]),
+            when,
+            return_calendar(instrument, estimated=bool(reference)),
         ):
             return _unavailable(
                 item, "上一报价与本日之间缺少交易日行情，不能当作单日收益"
@@ -374,25 +362,6 @@ class ReturnEvidence:
             ):
                 return _unavailable(item, "盘中行情超过更新时间，待更新")
             item["status"] = "estimated"
-        automatic = any(
-            row["date"] <= when
-            and row["event"].kind == "fund_confirm"
-            and row["event"].payload.get("automatic_estimate") is True
-            and (
-                row["event"].stage_key
-                == f"{self.space.pk}:dca:{row['event'].payload.get('dca_import_plan_id')}:{row['event'].payload.get('dca_import_date')}:confirm"
-                or row["event"].stage_key.startswith(
-                    f"{self.space.pk}:fund-order:{row['event'].payload.get('fund_order_id')}:confirm:"
-                )
-            )
-            for row in self.movements[key]
-        )
-        if automatic:
-            item.update(
-                status="estimated",
-                contains_automatic_estimates=True,
-                message="收益包含按计划自动推算的份额，尚未核实机构成交记录",
-            )
         return item
 
     def snapshot(self, aid, when, *, estimated=False):
@@ -407,6 +376,7 @@ class ReturnEvidence:
             "scope": "account",
             "currency": account.currency,
             "date": str(when),
+            "return_date": when,
             "amount": None,
             "return_rate": None,
             "status": "unavailable",
@@ -438,6 +408,73 @@ class ReturnEvidence:
                 None,
             )
         previous = next((s for s in reversed(formal) if s.economic_date < when), None)
+        if not current and previous and rows[-1].pk == previous.pk:
+            # A verified, cash-only account needs no invented daily settlement.
+            # Reuse the same exposure/flow checks as the account valuation; this
+            # is explicitly an assumption, not an institution's new statement.
+            from .availability import RESTRICTED_KEYS, _zero
+            from .portfolio import _institution_value
+
+            unrestricted = not account.frozen and all(
+                _zero(previous.details.get(key)) for key in RESTRICTED_KEYS
+            )
+            if unrestricted and previous.currency == account.currency:
+                carried = _institution_value(self.space, account, when)
+                if carried.get("cash_only_carry_forward") and not carried["gaps"]:
+                    changes = [
+                        line
+                        for line in self.flows[aid]
+                        if line.event.economic_date == when
+                    ]
+                    capital = sum(
+                        (
+                            line.amount
+                            for line in changes
+                            if line.event.kind in EXTERNAL_FLOWS
+                        ),
+                        ZERO,
+                    )
+                    dividends = sum(
+                        (
+                            line.amount
+                            for line in changes
+                            if line.event.kind == "dividend"
+                        ),
+                        ZERO,
+                    )
+                    opening = carried["local_value"] - sum(
+                        (line.amount for line in changes), ZERO
+                    )
+                    basis = opening + sum(
+                        (
+                            max(line.amount, ZERO)
+                            for line in changes
+                            if line.event.kind in EXTERNAL_FLOWS
+                        ),
+                        ZERO,
+                    )
+                    return {
+                        **base,
+                        "amount": dividends,
+                        "basis": basis,
+                        "return_rate": dividends / basis if basis > ZERO else None,
+                        "capital_flow": capital,
+                        "dividends": dividends,
+                        "status": "estimated",
+                        "source": "cash_only_carry_forward",
+                        "price_basis": "estimate",
+                        "observation_kind": "reference",
+                        "quantity_source": "no_recorded_positions",
+                        "cash_only_carry_forward": True,
+                        "settlement_pnl": ZERO,
+                        "published_at": None,
+                        "observed_at": previous.details.get("valuation_observed_at")
+                        or previous.created_at,
+                        "interval_start": when - timedelta(days=1),
+                        "message": "无已记录持仓，按资金流水延续；结算盈亏按 0 推算"
+                        if not dividends
+                        else "仅含已记录分红；无持仓期间的结算盈亏按 0 推算",
+                    }
         if not current or not previous:
             return base
         base.update(
@@ -446,7 +483,9 @@ class ReturnEvidence:
             observation_kind="reference"
             if current.details.get("valuation_basis") == "intraday"
             else "formal",
-            published_at=current.details.get("valuation_observed_at"),
+            published_at=current.details.get("published_at"),
+            observed_at=current.details.get("valuation_observed_at")
+            or current.created_at,
         )
         calendar_id = current.details.get("calendar_id") or previous.details.get(
             "calendar_id"
@@ -579,6 +618,9 @@ def daily_return_overview(
                 break
         holding_items[key] = {"daily_return": today, "latest_confirmed_return": latest}
         if today:
+            # Latest formal NAV returns may be delayed. They are context only;
+            # the summary below still aggregates the requested date exclusively.
+            today["latest_formal_return"] = latest
             items.append(today)
     for aid in evidence.snapshot_accounts:
         if (
@@ -640,6 +682,7 @@ def daily_return_overview(
         "missing_count": len(items) - len(known),
         "items": items,
         "currency_policy": CURRENCY_POLICY,
+        "knowledge_basis": "currently_recorded_facts",
         "message": "按今日有效行情与上一有效收盘或结算记录计算，扣除实际净投入；不含家庭收支、申购在途本金和独立汇兑损益。缺失行情不按零收益处理。",
     }
     return serial(summary), {key: serial(value) for key, value in holding_items.items()}

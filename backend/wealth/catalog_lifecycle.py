@@ -461,9 +461,9 @@ def _write_tombstone(space, user, obj, kind, tombstone, data, action):
 @transaction.atomic
 def delete_catalog_item(space, user, kind, ident, body, *, administrative=False):
     if administrative:
-        from .platform_admin import require_admin
+        from .admin_access import require_delegation
 
-        require_admin(user)
+        require_delegation(user, space)
     locked = Workspace.objects.select_for_update().get(pk=space.pk)
     if locked.deleted_at:
         raise DomainError("空间已移入回收站", "not_found", 404)

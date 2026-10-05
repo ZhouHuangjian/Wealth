@@ -1,4 +1,5 @@
 import { WorkspaceIdentity } from "./WorkspaceIdentity";
+import AdminAccessSettings from "./AdminAccessSettings";
 import { NavigationTabs, NavigationEditor } from "../navigation";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -176,6 +177,7 @@ export default function Settings({
             children: (
               <Panel title="本空间的共享边界">
                 <div className="policy-list">
+                  <AdminAccessSettings />
                   <div>
                     <h3>当前空间：{space.name}</h3>
                     <p>
@@ -187,13 +189,13 @@ export default function Settings({
                   <div>
                     <h3>原始文件与完整导出</h3>
                     <p>
-                      默认仅空间所有者可下载。文件不会产生长期公开下载链接，每次访问都会重新检查权限。
+                      空间所有者及已获代管授权的管理员可下载。文件不会产生长期公开下载链接，每次访问都会重新检查权限。
                     </p>
                   </div>
                   <div>
                     <h3>真实记录与未来计划分开</h3>
                     <p>
-                      本系统不连接银行支付或交易下单。计划到期生成待办，确认实际发生后才更新账目。
+                      本系统不连接银行支付或交易下单。已选择自动入账的基金定投计划会按设置记账，无需每期重复确认；其他计划到期生成待办，确认实际发生后更新账目。
                     </p>
                   </div>
                   <div>

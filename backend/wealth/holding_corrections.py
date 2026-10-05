@@ -120,9 +120,9 @@ def correct_holding(space, user, opening_event_id, body, *, administrative=False
     from .ledger import reverse_event
 
     if administrative:
-        from .platform_admin import require_admin
+        from .admin_access import require_delegation
 
-        require_admin(user)
+        require_delegation(user, space)
 
     locked = Workspace.objects.select_for_update().get(pk=space.pk)
     expected = body.get("expected_revision")

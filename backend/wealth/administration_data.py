@@ -601,6 +601,9 @@ def _correct_cash_opening(space, user, event, values, reason):
 @transaction.atomic
 def command(request, space, category, ident, operation, body):
     require_admin(request.user)
+    from .admin_access import require_delegation
+
+    space = require_delegation(request.user, space)
     space = m.Workspace.objects.select_for_update().get(pk=space.pk)
     if space.deleted_at:
         raise DomainError("空间已删除", "not_found", 404)
@@ -769,6 +772,9 @@ def command(request, space, category, ident, operation, body):
 
 def dispatch(request, space, path, body):
     require_admin(request.user)
+    from .admin_access import require_delegation
+
+    space = require_delegation(request.user, space)
     from .views import page, write_command
 
     category = path[0] if path else None

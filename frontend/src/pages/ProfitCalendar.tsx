@@ -213,6 +213,7 @@ export default function ProfitCalendar() {
                       </span>
                       <strong>{text !== null ? text : value(row)}</strong>
                       {row?.status === "partial" && <small>部分数据</small>}
+                      {row?.status === "estimated" && <small>含推算份额</small>}
                     </button>
                   );
                 })}
@@ -257,7 +258,8 @@ export default function ProfitCalendar() {
           )}
         </LoadState>
         <p className="data-caption">
-          收益按价格有效日归属。手动录入的累计收益保留在持仓中，不拆分成每日收益；未来日期及缺失数据不计为零。
+          收益按净值或价格归属日记录；QDII
+          延迟公布后回填原日期，不移到刷新当天。手动录入的累计收益不拆成每日收益，缺失数据不计为零。
         </p>
       </Panel>
       <Panel

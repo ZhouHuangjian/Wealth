@@ -1,5 +1,5 @@
 import { NavigationTabs } from "../navigation";
-import { Tabs, Button, Space, Alert, Dropdown } from "antd";
+import { Tabs, Button, Space, Alert, Dropdown, Tooltip } from "antd";
 import { useState } from "react";
 import { Plus, FolderInput, MoreHorizontal } from "lucide-react";
 import { Navigate, useSearchParams } from "react-router-dom";
@@ -28,6 +28,7 @@ import {
 } from "../api";
 import type { Item } from "../api";
 import { useResource, useWorkspace } from "../state";
+import { accountBalanceCaption } from "../account-balance";
 const usesInstitutionEquity = (values: Record<string, any>) =>
   ["future", "futures", "option", "options"].includes(values.kind) ||
   values.valuation_mode === "snapshot";
@@ -291,9 +292,17 @@ export default function Assets() {
             },
             { title: "币种", dataIndex: "currency" },
             {
-              title: "当前账面余额",
+              title: "账户金额",
               render: (_, r) => (
-                <Money value={r.balance} currency={r.currency} />
+                <div className="cell-name">
+                  <Money value={r.balance} currency={r.currency} />
+                  <Tooltip
+                    title={r.balance_message}
+                    trigger={["hover", "focus", "click"]}
+                  >
+                    <small tabIndex={0}>{accountBalanceCaption(r)}</small>
+                  </Tooltip>
+                </div>
               ),
             },
             {

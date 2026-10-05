@@ -42,7 +42,7 @@ def setup():
     editor = User.objects.create_user("editor-edit-261")
     viewer = User.objects.create_user("viewer-edit-261")
     outsider = User.objects.create_user("outside-edit-261")
-    space = Workspace.objects.create(name="原账簿名")
+    space = Workspace.objects.create(name="原账簿名", admin_access_enabled=True)
     for user, role in ((owner, "owner"), (editor, "editor"), (viewer, "viewer")):
         Membership.objects.create(workspace=space, user=user, role=role)
     clients = {}

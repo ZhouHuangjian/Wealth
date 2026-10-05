@@ -275,7 +275,7 @@ def test_holiday_never_promotes_intraday_or_unknown_equity_to_settlement(book):
 
 
 def test_unknown_calendar_does_not_assume_weekends_are_verified_closed(book):
-    equity(book, basis="settlement")
+    equity(book, basis="settlement", positions=[{"quantity": "1"}])
     report = net_worth_comparison(book.space, "2026-09-27")
     assert report["estimated"]["formal_net_assets"] is None
     assert report["previous"]["net_assets"] is None

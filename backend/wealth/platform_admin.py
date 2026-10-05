@@ -67,7 +67,7 @@ def expected_version(body, current):
         raise DomainError("记录已变更，请刷新后重试", "version_conflict", 412)
 
 
-def platform_command(request, path, body, callback):
+def platform_command(request, path, body, callback, authorize=None):
     key = request.headers.get("Idempotency-Key", "")
     if not key or len(key) > 160:
         raise DomainError("提交需提供 Idempotency-Key", "idempotency_required", 400)
@@ -77,6 +77,8 @@ def platform_command(request, path, body, callback):
             cursor.execute("SELECT pg_advisory_xact_lock(812339402)")
         actor = User.objects.select_for_update().get(pk=request.user.pk)
         require_admin(actor)
+        if authorize:
+            authorize(actor)
         previous = PlatformCommand.objects.filter(
             actor=actor, command=path, key=key
         ).first()
@@ -169,6 +171,7 @@ def space_record(space):
     return dict(
         record(space),
         version=space.revision,
+        can_delegate=bool(space.admin_access_enabled and not space.deleted_at),
         members=[
             {
                 "id": row.pk,
@@ -400,11 +403,17 @@ def dispatch_admin(request, path, body):
 
             return read_glossary()
         if resource == "configuration-templates":
-            from .configuration_templates import snapshot, template_record
+            from .configuration_templates import (
+                snapshot,
+                template_record,
+                available_templates,
+            )
 
             if ident == "preview":
                 result = snapshot(
-                    request.GET.get("user_id"), request.GET.get("space_id")
+                    request.GET.get("user_id"),
+                    request.GET.get("space_id"),
+                    actor=request.user,
                 )
                 log_admin(
                     request.user,
@@ -415,7 +424,7 @@ def dispatch_admin(request, path, body):
             if not ident:
                 return list_page(
                     request,
-                    m.ConfigurationTemplate.objects.order_by("-created_at"),
+                    available_templates().order_by("-created_at"),
                     lambda x: template_record(x, True),
                 )
         if resource == "audit" and not ident:
@@ -431,7 +440,7 @@ def dispatch_admin(request, path, body):
                     "actor_reference": a.actor_reference,
                     "action": a.action,
                     "target": a.target,
-                    "detail": a.detail,
+                    "detail": audit_detail(a),
                     "created_at": a.created_at,
                 },
             )
@@ -502,4 +511,34 @@ def dispatch_admin(request, path, body):
             }
         raise DomainError("接口不存在或不支持此方法", "not_found", 404)
 
-    return platform_command(request, "/".join(path), body, save)
+    def authorize(actor):
+        # This runs inside platform_command's transaction, before replaying any
+        # previous response. A revocation also fences old successful commands.
+        from .admin_access import require_delegation
+
+        if resource == "spaces" and ident and not action and request.method == "PATCH":
+            require_delegation(actor, ident)
+        if resource == "configuration-templates":
+            source = body.get("source_space_id")
+            if ident:
+                template = m.ConfigurationTemplate.objects.filter(pk=ident).first()
+                if not template:
+                    raise DomainError("模板不存在", "not_found", 404)
+                source = template.source_workspace_id
+            require_delegation(actor, source)
+
+    return platform_command(request, "/".join(path), body, save, authorize=authorize)
+
+
+def audit_detail(entry):
+    """Keep platform audit metadata, hide delegated financial detail on revoke."""
+    detail = entry.detail
+    sid = detail.get("space_id") or detail.get("source_space_id")
+    if (
+        sid
+        and not m.Workspace.objects.filter(
+            pk=sid, deleted_at__isnull=True, admin_access_enabled=True
+        ).exists()
+    ):
+        return {"redacted": True, "reason": "admin_access_required"}
+    return detail

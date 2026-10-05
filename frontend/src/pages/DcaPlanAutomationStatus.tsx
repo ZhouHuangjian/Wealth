@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Drawer, Space, Table, Tag } from "antd";
+import { Alert, App, Button, Drawer, Space, Table, Tag, Tooltip } from "antd";
 import type { Item } from "../api";
 import { ApiError, send } from "../api";
 import { LoadState, Money } from "../components";
-import { HelpText, helpColumns } from "../help";
+import { helpColumns } from "../help";
 import { useResource, useWorkspace } from "../state";
 import {
   dcaAutomationNotice,
@@ -48,7 +48,7 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
       );
       if (!live.current) return;
       changed.current = true;
-      message.success("已检查到期计划，补录结果见下方明细");
+      message.success("已更新自动记账进度");
       await state.retry();
     } catch (e) {
       if (live.current)
@@ -65,15 +65,24 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
   const enabled = plan.automation?.enabled === true;
   return (
     <>
-      <div>
-        <Tag>{enabled ? <HelpText text="按计划自动补录" /> : "手工确认"}</Tag>
+      <div className="dca-progress-heading">
+        <Tag color={enabled && plan.status !== "paused" ? "green" : undefined}>
+          {plan.status === "paused"
+            ? "已暂停"
+            : enabled
+              ? "自动记账"
+              : "仅提醒"}
+        </Tag>
+        {enabled && plan.automation?.start_date && (
+          <small>{plan.automation.start_date} 起</small>
+        )}
       </div>
       <Button
         type="link"
         size="small"
         style={{
           paddingInline: 0,
-          maxWidth: 330,
+          maxWidth: 230,
           whiteSpace: "normal",
           height: "auto",
           textAlign: "left",
@@ -91,37 +100,44 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
       </Button>
       <Drawer
         open={open}
-        title={`自动补录 · ${plan.name}`}
+        title={`定投进度 · ${plan.name}`}
         width={850}
+        className="dca-progress-drawer"
         onClose={close}
         maskClosable={!busy}
         keyboard={!busy}
         closable={!busy}
       >
-        <p className="muted">{dcaAutomationNotice}</p>
+        <div className="dca-progress-intro">
+          <strong>
+            {plan.status === "paused"
+              ? "定投已暂停，已有记录保留"
+              : enabled
+                ? "每天处理到期计划，无需逐期确认"
+                : "自动记账已关闭"}
+          </strong>
+          <p>{dcaAutomationNotice}</p>
+        </div>
         <Space wrap style={{ marginBottom: 16 }}>
-          <Tag>{enabled ? "自动补录已开启" : "自动补录已关闭"}</Tag>
           {plan.automation?.start_date && (
             <span>生效日期：{plan.automation.start_date}</span>
           )}
-          <Button disabled={busy} onClick={() => void state.retry()}>
+          <Button
+            loading={busy}
+            disabled={busy || state.loading}
+            onClick={() => {
+              if (
+                space.role !== "viewer" &&
+                enabled &&
+                !state.error &&
+                state.data?.plan_version === plan.version
+              )
+                requestReveal(() => void run());
+              else void state.retry();
+            }}
+          >
             刷新进度
           </Button>
-          {space.role !== "viewer" && enabled && (
-            <Button
-              type="primary"
-              loading={busy}
-              disabled={
-                state.loading ||
-                !!state.error ||
-                !state.data ||
-                state.data.plan_version !== plan.version
-              }
-              onClick={() => requestReveal(() => void run())}
-            >
-              立即检查
-            </Button>
-          )}
         </Space>
         {state.data && state.data.plan_version !== plan.version && (
           <Alert
@@ -143,7 +159,25 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
           {...state}
           error={hidden && state.error ? "进度暂时无法读取" : state.error}
         >
-          <p>{dcaAutomationSummary(state.data)}</p>
+          <p className="dca-progress-summary">
+            {dcaAutomationSummary(state.data)}
+          </p>
+          {state.data && Number.isSafeInteger(state.data.completed_count) && (
+            <div className="dca-progress-counts" aria-label="定投处理进度">
+              <div>
+                <small>已完成</small>
+                <strong>{state.data.completed_count}</strong>
+              </div>
+              <div>
+                <small>自动等待</small>
+                <strong>{state.data.automatically_waiting_count ?? 0}</strong>
+              </div>
+              <div>
+                <small>需处理</small>
+                <strong>{state.data.needs_attention_count ?? 0}</strong>
+              </div>
+            </div>
+          )}
           {state.data?.has_more && (
             <p className="muted">
               仅展示最近 500 期；其他期次仍由后台继续检查。
@@ -155,78 +189,115 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
             dataSource={[...(state.data?.items || [])].sort((a, b) =>
               String(b.date).localeCompare(String(a.date)),
             )}
-            scroll={{ x: 730 }}
+            scroll={{ x: 650 }}
             pagination={{ pageSize: 10, showSizeChanger: false }}
             locale={{
               emptyText: enabled
-                ? "暂无到期待办；到期后系统会自动检查，也可使用上方立即检查。"
+                ? "等待下一期自动执行。"
                 : "暂无自动补录记录。",
             }}
             columns={helpColumns<Item>([
-              { title: "计划日期", dataIndex: "date", width: 112 },
+              {
+                title: "日期",
+                width: 128,
+                render: (_, row) => (
+                  <div className="cell-name">
+                    <strong>{row.application_date || row.date}</strong>
+                    {row.scheduled_date &&
+                    row.scheduled_date !==
+                      (row.application_date || row.date) ? (
+                      <small>原定 {row.scheduled_date} · 顺延</small>
+                    ) : (
+                      <small>计划执行日</small>
+                    )}
+                    {row.confirmation_date && (
+                      <small>份额生效 {row.confirmation_date}</small>
+                    )}
+                  </div>
+                ),
+              },
               {
                 title: "计划金额",
-                width: 130,
+                width: 110,
                 render: (_, row) => (
                   <Money value={row.amount} currency={plan.currency} />
                 ),
               },
               {
                 title: "进度",
-                width: 250,
+                width: 210,
                 render: (_, row) => (
-                  <>
+                  <div className="cell-name">
                     <div>{dcaAutomationStatusLabel(row.status)}</div>
-                    {row.status === "recorded_estimate" && (
-                      <Tag>
-                        <HelpText text="自动确认份额" />
-                      </Tag>
-                    )}
+                    {row.status === "recorded_estimate" ? (
+                      <small>推算来源 · 已完成记账</small>
+                    ) : row.requires_action === true ? (
+                      <small>
+                        {row.action_scope === "plan"
+                          ? "完善计划后自动继续"
+                          : "有异常需要处理"}
+                      </small>
+                    ) : row.processing_state === "waiting" ||
+                      [
+                        "waiting_nav",
+                        "waiting_confirmation",
+                        "waiting_calendar",
+                        "scheduled",
+                      ].includes(row.status) ? (
+                      <small>系统会自动继续</small>
+                    ) : null}
                     {row.message && (
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        {hidden ? "说明已隐藏" : row.message}
-                      </div>
+                      <Tooltip title={hidden ? "说明已隐藏" : row.message}>
+                        <small className="dca-status-explanation" tabIndex={0}>
+                          {hidden ? "说明已隐藏" : row.message}
+                        </small>
+                      </Tooltip>
                     )}
-                    {row.status === "waiting_confirmation" &&
-                      row.confirmation_date && (
-                        <div className="muted" style={{ fontSize: 12 }}>
-                          预计确认：{row.confirmation_date}
-                        </div>
-                      )}
-                  </>
+                  </div>
                 ),
               },
               {
-                title: "采用净值",
-                width: 120,
+                title: "净值 / 日期",
+                width: 130,
                 render: (_, row) =>
                   row.nav == null ? (
                     "—"
                   ) : (
                     <>
                       <Money value={row.nav} precision={6} />
-                      <div className="muted">
+                      <div className="muted" style={{ fontSize: 11 }}>
                         {row.nav_date || "日期待核实"}
                       </div>
                     </>
                   ),
               },
               {
-                title: "确认份额",
-                width: 140,
+                title: "份额",
+                width: 110,
                 render: (_, row) =>
                   row.quantity == null ? (
                     "—"
                   ) : (
-                    <Money value={row.quantity} precision={6} />
+                    <Tooltip
+                      title={
+                        hidden ? "份额已隐藏" : `完整份额：${row.quantity}`
+                      }
+                    >
+                      <span>
+                        <Money value={row.quantity} precision={2} />
+                      </span>
+                    </Tooltip>
                   ),
               },
             ])}
           />
         </LoadState>
-        <p className="muted" style={{ fontSize: 12 }}>
-          排除日期和暂停区间可在编辑计划中设置。已补记的扣款和份额不会因关闭自动补录而撤销；实际失败的已记账期次需核对并冲正。
-        </p>
+        <details className="dca-progress-help">
+          <summary>失败、暂停或实际成交有变化</summary>
+          <p>
+            在编辑计划中排除失败日期或添加暂停区间。已记入的交易可修改或撤销；关闭自动记账只影响后续处理，已有记录保留。
+          </p>
+        </details>
       </Drawer>
     </>
   );
