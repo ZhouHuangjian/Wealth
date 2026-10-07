@@ -10,8 +10,17 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .common import catalog_queryset
-from .common import DomainError, bump, day, dec, get_obj, serial, tenant_context
+from .common import (
+    DomainError,
+    bump,
+    catalog_queryset,
+    day,
+    dec,
+    get_obj,
+    serial,
+    tenant_context,
+)
+from .market_quality import updated_quarantine
 from .models import Instrument, Membership, Price, Resource, Workspace
 from .provider_policy import get_provider_config
 
@@ -160,7 +169,16 @@ def quote_list(space):
             or quote.get("message", "尚未获取行情"),
             "history_error": state.get("history_error"),
             "corporate_actions": state.get("corporate_actions", []),
+            "data_quality": state.get("last_quality") or quote.get("data_quality"),
+            "provider_observations": state.get("provider_observations")
+            or quote.get("provider_observations", []),
+            "provider_attempts": state.get("provider_attempts")
+            or quote.get("provider_attempts", []),
+            "nav_quarantine": state.get("nav_quarantine", {}),
+            "retained_previous_quote": state.get("retained_previous_quote", False),
         }
+        if (item.get("data_quality") or {}).get("status") == "conflict":
+            item["status"] = "conflict"
         observed = _time(state.get("fetched_at"))
         if (
             state.get("refresh_status") == "failed"
@@ -170,7 +188,7 @@ def quote_list(space):
                 and (timezone.now() - observed).total_seconds() > 2 * INTERVAL
                 and item["status"] == "ok"
             )
-        ):
+        ) and item["status"] != "conflict":
             item["status"] = "stale"
         items.append(item)
     attempts = [x["fetched_at"] for x in items if x.get("fetched_at")]
@@ -186,6 +204,12 @@ def _price_rows(space, instrument, quotes):
     """Only provider-declared daily observations can be formal ledger valuations."""
     rows = []
     for quote in quotes:
+        quality = quote.get("data_quality") or {}
+        if (
+            quality.get("usable_for_accounting") is False
+            and quote.get("kind") == "official_nav"
+        ):
+            continue
         if quote.get("price") is None or quote.get("status") not in {"ok", "stale"}:
             continue
         try:
@@ -400,13 +424,55 @@ def refresh_one(space_id, instrument_id, token=None):
         observations = [*history, *([quote] if quote else [])]
         if quote and quote.get("estimate"):
             observations.append(quote["estimate"])
-        fresh = _price_rows(space, instrument, observations)
+        quarantine_before = state.data.get("nav_quarantine", {})
+        quarantine = updated_quarantine(
+            quarantine_before, observations, timezone.now().isoformat()
+        )
+        accepted = [
+            q
+            for q in observations
+            if not (
+                q.get("kind") == "official_nav" and q.get("economic_date") in quarantine
+            )
+        ]
+        fresh = _price_rows(space, instrument, accepted)
         Price.objects.bulk_create(fresh)
         ok = (
             quote
             and quote.get("status") in {"ok", "stale"}
             and quote.get("price") is not None
         )
+        # A later single-source reply cannot clear a conflict seen in history
+        # or an earlier refresh. Keep the latest safe quote until independent
+        # sources agree for this NAV date.
+        if (
+            quote
+            and quote.get("kind") == "official_nav"
+            and quote.get("economic_date") in quarantine
+        ):
+            blocked = quarantine[quote["economic_date"]]
+            ok = False
+            quote = {
+                **quote,
+                "status": "conflict",
+                "price": None,
+                "message": blocked["message"],
+                "data_quality": {
+                    **(quote.get("data_quality") or {}),
+                    "status": "conflict",
+                    "usable_for_accounting": False,
+                },
+                "provider_observations": blocked.get("observations", []),
+            }
+        previous_quote = state.data.get("quote") or {}
+        if (
+            ok
+            and previous_quote.get("economic_date")
+            and quote.get("economic_date")
+            and quote["economic_date"] < previous_quote["economic_date"]
+        ):
+            ok = False
+            error = "来源返回了更早日期的数据，已保留此前有效行情"
         state.data = {
             **state.data,
             "refresh_status": "ready" if ok else "failed",
@@ -415,13 +481,22 @@ def refresh_one(space_id, instrument_id, token=None):
             if need_history
             else state.data.get("history_rows", 0),
             "error_message": error or (quote or {}).get("message", ""),
+            "nav_quarantine": quarantine,
         }
         if quote:
+            state.data["retained_previous_quote"] = bool(
+                not ok and previous_quote.get("price") is not None
+            )
+            state.data["last_quality"] = quote.get("data_quality")
+            state.data["provider_observations"] = quote.get("provider_observations", [])
+            state.data["provider_attempts"] = quote.get("provider_attempts", [])
             # On a failed refresh retain the last successful observation, visibly stale.
             if ok or not state.data.get("quote"):
                 state.data["quote"] = serial(quote)
             if ok:
-                state.data["fetched_at"] = timezone.now().isoformat()
+                state.data["fetched_at"] = (
+                    quote.get("fetched_at") or timezone.now().isoformat()
+                )
         if request_data.get("history_requested") and not history_error:
             requested_start = state.data.get("history_start")
             state.data["history_requested"] = bool(
@@ -451,7 +526,7 @@ def refresh_one(space_id, instrument_id, token=None):
                 actions.values(), key=lambda x: x["date"]
             )[-100:]
         state.save(update_fields=["data"])
-        if fresh:
+        if fresh or quarantine != quarantine_before:
             bump(space, owner.user, invalidate_reconciliations=False)
         return {
             "status": state.data["refresh_status"],

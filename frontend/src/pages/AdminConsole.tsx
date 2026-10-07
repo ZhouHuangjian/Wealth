@@ -28,6 +28,7 @@ import AdminTemplates from "./AdminTemplates";
 import AdminGlossary from "./AdminGlossary";
 import { WorkspaceTrash } from "./ManagementExtras";
 import { PasswordForm } from "./Settings";
+import ProviderCredential from "./ProviderCredential";
 function useAdminResource(path: string) {
   const [data, setData] = useState<any>(null),
     [loading, setLoading] = useState(true),
@@ -823,7 +824,11 @@ function DataSources() {
   const { message } = App.useApp();
   const [config, setConfig] = useState<any>(null),
     [busy, setBusy] = useState(false);
-  useEffect(() => setConfig(state.data?.config || null), [state.data]);
+  const [credentials, setCredentials] = useState<Record<string, any>>({});
+  useEffect(() => {
+    setConfig(state.data?.config || null);
+    setCredentials({});
+  }, [state.data]);
   const providers: any[] = Array.isArray(state.data?.providers)
     ? state.data.providers
     : Object.values(state.data?.providers || {});
@@ -839,7 +844,7 @@ function DataSources() {
   };
   return (
     <Panel
-      title="内置公开数据源"
+      title="行情数据源"
       action={
         <Space>
           <Button icon={<RefreshCw size={15} />} onClick={state.retry}>
@@ -872,7 +877,7 @@ function DataSources() {
       }
     >
       <p className="data-caption">
-        只使用内置提供方。停用会影响后续查询与刷新，已有历史记录保留。优先顺序仅在支持相同市场和操作的源之间生效。
+        停用会影响后续查询与刷新，已有历史记录保留。同日基金净值会交叉核对；来源优先顺序不代表出现差异时可直接入账。
       </p>
       <LoadState {...state}>
         {config && (
@@ -881,14 +886,41 @@ function DataSources() {
               rowKey="id"
               dataSource={providers}
               pagination={false}
+              scroll={{ x: 900 }}
               columns={helpColumns([
                 {
                   title: "提供方",
                   render: (_, r: any) => (
                     <div className="cell-name">
                       <strong>{r.name}</strong>
+                      <span className="data-caption">
+                        {(
+                          {
+                            official: "机构官方",
+                            aggregator: "公开聚合",
+                            subscription: "授权数据服务",
+                          } as Record<string, string>
+                        )[r.category] || "公开来源"}
+                      </span>
                       <small>{r.description}</small>
                     </div>
+                  ),
+                },
+                {
+                  title: "访问权限",
+                  render: (_, r: any) => (
+                    <ProviderCredential
+                      provider={{
+                        ...r,
+                        credential: credentials[r.id] || r.credential,
+                      }}
+                      onChange={(credential) =>
+                        setCredentials((current) => ({
+                          ...current,
+                          [r.id]: credential,
+                        }))
+                      }
+                    />
                   ),
                 },
                 {

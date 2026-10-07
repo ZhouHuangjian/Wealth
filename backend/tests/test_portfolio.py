@@ -696,6 +696,28 @@ def test_four_year_prices_and_fx_use_constant_query_count_and_exact_values(book)
     assert D(result["summary"]["return_percent"]) == D("14.6")
 
 
+def test_tag_history_marks_disputed_nav_incomplete_until_new_safe_observation(book):
+    hold(book)
+    price(book, "10", YESTERDAY)
+    price(book, "11", TODAY)
+    price(book, "12", "2026-05-09")
+    group = tag(book, instruments=[book.instrument])
+    Resource.objects.create(
+        tenant=book.space,
+        kind="market_quotes",
+        data={
+            "instrument_id": str(book.instrument.pk),
+            "nav_quarantine": {TODAY: {"status": "conflict"}},
+        },
+    )
+    result = tag_series(book.space, group.pk, YESTERDAY, "2026-05-09")
+    rows = result["days"]
+    assert D(rows[0]["value"]) == D("100")
+    assert rows[1]["value"] is None and rows[2]["value"] is None
+    assert any("来源差异" in gap for gap in rows[1]["gaps"])
+    assert D(rows[3]["value"]) == D("120")
+
+
 def test_price_and_inverse_fx_before_start_seed_carry_without_future_observations(book):
     usd = Account.objects.create(
         tenant=book.space, name="历史美元账户", kind="broker", currency="USD"

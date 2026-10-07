@@ -20,6 +20,10 @@ def responses():
 
 @pytest.fixture(autouse=True)
 def fixed_clock(monkeypatch):
+    from wealth import fund_sources
+
+    fund_sources._DATA_CACHE.clear()
+    fund_sources._CACHE.clear()
     monkeypatch.setattr(
         md, "_now", lambda: datetime(2026, 9, 25, 13, tzinfo=timezone.utc)
     )

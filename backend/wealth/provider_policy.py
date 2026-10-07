@@ -7,7 +7,14 @@ the database once per refresh/remote search and pass the snapshot to market_data
 from copy import deepcopy
 
 DEFAULT_PRIORITY = {
-    "fund": ["eastmoney_fund"],
+    "fund": [
+        "eastmoney_fund",
+        "gffunds_official",
+        "efunds_official",
+        "cifm_official",
+        "tushare_fund",
+        "lixinger_fund",
+    ],
     "stock": ["tencent", "yahoo", "eastmoney_search"],
     "etf": ["tencent", "yahoo", "eastmoney_search"],
     "future": ["sina"],
@@ -16,7 +23,54 @@ DEFAULT_PRIORITY = {
     "gold": ["sina", "tencent", "eastmoney_search"],
 }
 
+_NEW_PUBLIC_FUND = ("gffunds_official", "efunds_official", "cifm_official")
+_TOKEN_PROVIDERS = ("tushare_fund", "lixinger_fund")
+
 _PROVIDERS = [
+    *[
+        {
+            "id": key,
+            "name": name,
+            "description": description,
+            "hosts": hosts,
+            "requires_credentials": key in _TOKEN_PROVIDERS,
+            "capabilities": [
+                {"kind": "fund", "markets": ["CN"], "operations": ["quote", "history"]}
+            ],
+        }
+        for key, name, hosts, description in [
+            (
+                "gffunds_official",
+                "广发基金官方",
+                ["www.gffunds.com.cn"],
+                "广发旗下人民币非货币基金单位净值；核对官方产品身份。",
+            ),
+            (
+                "efunds_official",
+                "易方达基金官方",
+                ["www.efunds.com.cn", "api.efunds.com.cn"],
+                "易方达旗下人民币非货币基金单位净值；核对官网份额和净值响应。",
+            ),
+            (
+                "cifm_official",
+                "摩根基金官方",
+                ["www.cifm.com"],
+                "摩根旗下人民币非货币基金单位净值；核对官方币种、代码和份额。",
+            ),
+            (
+                "tushare_fund",
+                "Tushare 基金净值",
+                ["api.tushare.pro"],
+                "需单独配置有权限的Token；仅接受已由基金官网核实身份的产品，非实测凭证服务。",
+            ),
+            (
+                "lixinger_fund",
+                "理杏仁基金净值",
+                ["open.lixinger.com"],
+                "需单独配置有权限的Token；仅接受已由基金官网核实身份的产品，非实测凭证服务。",
+            ),
+        ]
+    ],
     {
         "id": "eastmoney_fund",
         "name": "天天基金 / 东方财富基金",
@@ -174,8 +228,8 @@ def provider_directory():
 
 def default_provider_config():
     return {
-        "schema_version": 1,
-        "enabled": {p["id"]: True for p in _PROVIDERS},
+        "schema_version": 2,
+        "enabled": {p["id"]: p["id"] not in _TOKEN_PROVIDERS for p in _PROVIDERS},
         "priority": deepcopy(DEFAULT_PRIORITY),
     }
 
@@ -189,10 +243,9 @@ def validate_provider_config(data):
         raise ValueError(
             "数据源配置只接受 schema_version、enabled 和 priority，不支持自定义URL或密钥"
         )
-    if (
-        type(data.get("schema_version", 1)) is not int
-        or data.get("schema_version", 1) != 1
-    ):
+    if type(data.get("schema_version", 1)) is not int or data.get(
+        "schema_version", 1
+    ) not in (1, 2):
         raise ValueError("不支持的数据源配置版本")
     result = default_provider_config()
     flags, priorities = data.get("enabled", {}), data.get("priority", {})
@@ -212,6 +265,14 @@ def validate_provider_config(data):
             raise ValueError("数据源优先级必须是该分类支持的内置源列表，且不能重复")
         result["priority"][kind] = list(chain)
     result["enabled"].update(flags)
+    # Version 1 did not know these public adapters. Only add genuinely new keys;
+    # explicit false flags remain false and version 2 keeps exact custom ordering.
+    if data.get("schema_version", 1) == 1 and "fund" in priorities:
+        result["priority"]["fund"].extend(
+            provider
+            for provider in (*_NEW_PUBLIC_FUND, *_TOKEN_PROVIDERS)
+            if provider not in flags and provider not in result["priority"]["fund"]
+        )
     return result
 
 

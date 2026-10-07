@@ -16,6 +16,12 @@ import { Blank, LoadState, Money, Panel } from "../components";
 import { investmentKinds } from "../investment";
 import { useResource, useWorkspace } from "../state";
 import { QuoteStatus, RefreshQuotes } from "./InvestmentWorkspace";
+import {
+  marketTime,
+  qualityPresentation,
+  quoteDetails,
+} from "../market-quality";
+import QuoteQualityDetails from "./QuoteQualityDetails";
 function quoteTime(value?: string) {
   if (!value) return "待更新";
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
@@ -199,6 +205,11 @@ export function QuotesTable() {
           dataSource={rows}
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
           scroll={{ x: 1000 }}
+          expandable={{
+            rowExpandable: (r) =>
+              !!r.data_quality || quoteDetails(r).quarantined.length > 0,
+            expandedRowRender: (r) => <QuoteQualityDetails row={r} />,
+          }}
           locale={{ emptyText: "暂无产品行情" }}
           columns={helpColumns<Item>([
             {
@@ -209,6 +220,7 @@ export function QuotesTable() {
                   <small>
                     {r.code} · {investmentKinds[r.kind] || r.kind}
                   </small>
+                  {r.retained_previous_quote && <small>上次可用值</small>}
                 </div>
               ),
             },
@@ -219,7 +231,9 @@ export function QuotesTable() {
                   <Money
                     value={r.price}
                     currency={r.kind === "index" ? "" : r.currency}
-                    precision={r.kind === "index" ? 2 : undefined}
+                    precision={
+                      r.kind === "fund" ? 6 : r.kind === "index" ? 2 : undefined
+                    }
                   />
                   {r.quote_unit && <small>{r.quote_unit}</small>}
                   <small>
@@ -253,7 +267,7 @@ export function QuotesTable() {
               ),
             },
             {
-              title: "价格有效日",
+              title: "正式净值 / 价格日",
               dataIndex: "economic_date",
               render: (v) => v || "—",
             },
@@ -262,7 +276,10 @@ export function QuotesTable() {
               render: (_, r) => (
                 <div className="cell-name">
                   <span>{r.source || "—"}</span>
-                  <small>{quoteTime(r.published_at)}</small>
+                  <small>
+                    公布：{marketTime(r.published_at || r.publication_date)}
+                  </small>
+                  <small>获取：{marketTime(r.fetched_at)}</small>
                 </div>
               ),
             },
@@ -270,8 +287,14 @@ export function QuotesTable() {
               title: "状态",
               render: (_, r) => (
                 <div className="cell-name">
-                  <QuoteStatus status={r.status} />
-                  {r.message && <small>{r.message}</small>}
+                  {qualityPresentation(r) ? (
+                    <Tag color={qualityPresentation(r)!.color}>
+                      {qualityPresentation(r)!.label}
+                    </Tag>
+                  ) : (
+                    <QuoteStatus status={r.status} />
+                  )}
+                  {r.message && !r.data_quality && <small>{r.message}</small>}
                 </div>
               ),
             },

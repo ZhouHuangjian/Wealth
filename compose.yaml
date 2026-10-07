@@ -7,6 +7,7 @@ x-backend: &backend
   init: true
   environment: &runtime-environment
     DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Create .env from .env.example}
+    DJANGO_SECRET_KEY_FALLBACKS: ${DJANGO_SECRET_KEY_FALLBACKS:-[]}
     DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
     DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
     DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}

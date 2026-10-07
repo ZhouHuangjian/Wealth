@@ -1,20 +1,22 @@
 """Explicit platform administration, with actor-preserving tenant access and audit."""
 
-import re
 import json
+import re
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from django.db import transaction, connection
 from django.contrib.sessions.models import Session
-from django.utils.crypto import salted_hmac
+from django.db import connection, transaction
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
+
 from . import models as m
-from .common import DomainError, serial, record
+from .common import DomainError, record, serial
 from .platform_models import (
+    NavigationPreference,
     PlatformAudit,
     PlatformCommand,
     PlatformSetting,
-    NavigationPreference,
     PlatformUserState,
 )
 
@@ -404,9 +406,9 @@ def dispatch_admin(request, path, body):
             return read_glossary()
         if resource == "configuration-templates":
             from .configuration_templates import (
+                available_templates,
                 snapshot,
                 template_record,
-                available_templates,
             )
 
             if ident == "preview":
@@ -445,17 +447,29 @@ def dispatch_admin(request, path, body):
                 },
             )
         if resource == "data-sources" and not ident:
-            from .provider_policy import get_provider_config, provider_directory
+            from .provider_credentials import admin_provider_directory
+            from .provider_policy import get_provider_config
 
             obj = PlatformSetting.objects.filter(pk="market_sources").first()
             return {
                 "version": obj.version if obj else 0,
                 "config": get_provider_config(),
-                "providers": provider_directory(),
+                "providers": admin_provider_directory(),
             }
         raise DomainError("接口不存在", "not_found", 404)
 
     def save(actor):
+        if (
+            resource == "data-sources"
+            and ident
+            and action == "credential"
+            and request.method in {"PUT", "DELETE"}
+        ):
+            from .provider_credentials import write_credential
+
+            return write_credential(
+                actor, ident, body, delete=request.method == "DELETE"
+            )
         if resource == "glossary" and not ident and request.method == "PUT":
             from .glossary import write_glossary
 
@@ -482,10 +496,10 @@ def dispatch_admin(request, path, body):
         if resource == "spaces" and not action:
             return space_write(actor, ident, request.method, body)
         if resource == "data-sources" and not ident and request.method == "PUT":
+            from .provider_credentials import admin_provider_directory
             from .provider_policy import (
-                validate_provider_config,
                 invalidate_provider_config_cache,
-                provider_directory,
+                validate_provider_config,
             )
 
             try:
@@ -507,7 +521,7 @@ def dispatch_admin(request, path, body):
             return {
                 "version": obj.version,
                 "config": config,
-                "providers": provider_directory(),
+                "providers": admin_provider_directory(),
             }
         raise DomainError("接口不存在或不支持此方法", "not_found", 404)
 

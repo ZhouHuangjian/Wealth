@@ -194,12 +194,17 @@ def _history_preview(space, plan_id, body):
         calendar_id,
         rule_warnings,
     )
+    from .market_quality import approved_prices
+
     prices = list(
-        Price.objects.filter(
-            tenant=space,
-            instrument=instrument,
-            kind="official_nav",
-            economic_date__lte=as_of,
+        approved_prices(
+            Price.objects.filter(
+                tenant=space,
+                instrument=instrument,
+                kind="official_nav",
+                economic_date__lte=as_of,
+            ),
+            space,
         ).order_by("economic_date", "created_at")
     )
     # A Price belongs to one immutable product/currency identity. Never fetch a
@@ -238,7 +243,7 @@ def _history_preview(space, plan_id, body):
         )
     if account.archived:
         warnings.append("该资金账户已归档，本次仍只预览历史假设。")
-    from .subscription_calendar import subscription_rule, subscription_day
+    from .subscription_calendar import subscription_day, subscription_rule
 
     subscription = subscription_rule(instrument)
     items, gaps, closed_dates = [], [], []
