@@ -13,6 +13,13 @@ from .ledger import post_event, reverse_event
 
 ADAPTERS = [
     {
+        "id": "standard_fund",
+        "name": "标准基金确认记录 CSV / XLSX",
+        "status": "synthetic_verified",
+        "version": "fund-confirmation-1",
+        "limitations": "按机构账单字段映射核对已有申购；并非广发、易方达等机构原生格式适配",
+    },
+    {
         "id": "generic",
         "name": "通用 CSV / XLSX 映射",
         "status": "synthetic_verified",
@@ -496,6 +503,10 @@ def commit_batch(space, user, batch, body):
 
 @transaction.atomic
 def reverse_batch(space, user, batch, reason):
+    if batch.parser_version == "fund-confirmation-1":
+        from .fund_reconciliation import reverse
+
+        return reverse(space, user, batch, reason)
     if batch.status not in {"committed", "partially_committed"}:
         raise DomainError("只能撤销含已提交事项的批次")
     if not reason:

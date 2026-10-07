@@ -1,15 +1,24 @@
 """User-configured allocation, market watches and observation-only condition alerts."""
 
+import re
 from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal
-import re
 
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .common import catalog_queryset
-from .common import DomainError, audit, bump, day, dec, get_obj, record, serial
+from .common import (
+    DomainError,
+    audit,
+    bump,
+    catalog_queryset,
+    day,
+    dec,
+    get_obj,
+    record,
+    serial,
+)
 from .models import Event, Instrument, Price, Resource, ResourceRevision
 
 D = Decimal
@@ -424,12 +433,17 @@ def _quote(space, inst):
 
 
 def _history(space, inst, start, end):
-    rows = Price.objects.filter(
-        tenant=space,
-        instrument=inst,
-        kind__in=FORMAL,
-        economic_date__gte=start,
-        economic_date__lte=end,
+    from .market_quality import approved_prices
+
+    rows = approved_prices(
+        Price.objects.filter(
+            tenant=space,
+            instrument=inst,
+            kind__in=FORMAL,
+            economic_date__gte=start,
+            economic_date__lte=end,
+        ),
+        space,
     ).order_by("economic_date", "created_at")
     days = {}
     for row in rows:
@@ -497,6 +511,24 @@ def instrument_metric(
     output = {k: v for k, v in current.items() if k != "quote"}
     if metric == "price":
         return output
+    if metric == "change_percent" or baseline == "rolling_high":
+        from .market_quality import nav_quarantine
+
+        # Omitting a disputed peak/previous NAV would silently change the
+        # meaning of a drawdown or daily-change rule. Keep it unresolved.
+        cutoff = when - timedelta(
+            days=4 if metric == "change_percent" else lookback_days
+        )
+        if any(
+            str(cutoff) <= date <= str(when)
+            for date in nav_quarantine(space, inst.pk).get(str(inst.pk), {})
+        ):
+            return _point(
+                None,
+                when,
+                current["source"],
+                message="比较区间内的正式净值存在来源差异，暂停此条件提醒",
+            )
     history = _history(space, inst, when - timedelta(days=lookback_days), when)
     if metric == "change_percent":
         change = current["quote"].get("change_percent")

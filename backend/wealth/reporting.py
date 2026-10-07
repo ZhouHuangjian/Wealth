@@ -6,6 +6,7 @@ from django.db.models import Q, Sum
 
 from .common import catalog_queryset, day, dec, record, serial
 from .ledger import LIABILITIES, cash_code, position
+from .market_quality import approved_prices, nav_quarantine
 from .models import (
     Account,
     Event,
@@ -36,14 +37,18 @@ FORMAL_PRICE_KINDS = {
 }
 
 
-def formal_price(space, instrument, when):
+def formal_price(space, instrument, when, *, quarantines=None):
     """Trade observations and reference estimates are not closing valuations."""
     return (
-        Price.objects.filter(
-            tenant=space,
-            instrument=instrument,
-            economic_date__lte=when,
-            kind__in=FORMAL_PRICE_KINDS,
+        approved_prices(
+            Price.objects.filter(
+                tenant=space,
+                instrument=instrument,
+                economic_date__lte=when,
+                kind__in=FORMAL_PRICE_KINDS,
+            ),
+            space,
+            quarantines=quarantines,
         )
         .order_by("-economic_date", "-created_at")
         .first()
@@ -86,8 +91,11 @@ def _position_entry_basis(space, account, instrument, when):
     This is provenance of active position records, not a claim to trace units
     remaining in an average-cost position back to a particular purchase lot.
     """
+    from .fund_reconciliation import event_evidence
+
     sources = set()
     automatic = False
+    actual_confirmations = 0
     movements = PositionMovement.objects.filter(
         tenant=space,
         account=account,
@@ -98,6 +106,10 @@ def _position_entry_basis(space, account, instrument, when):
     ).select_related("event")
     for movement in movements:
         payload = movement.event.payload
+        if event_evidence(space, movement.event)["basis"] == "actual":
+            sources.add("institution")
+            actual_confirmations += 1
+            continue
         expected_stage = (
             f"{space.pk}:dca:{payload.get('dca_import_plan_id')}:"
             f"{payload.get('dca_import_date')}:confirm"
@@ -118,9 +130,15 @@ def _position_entry_basis(space, account, instrument, when):
         else:
             sources.add("institution")
     if "preview_confirmed" not in sources:
-        return {"contains_preview_entries": False}
+        return {
+            "contains_preview_entries": False,
+            "contains_actual_confirmations": bool(actual_confirmations),
+            "actual_confirmation_count": actual_confirmations,
+        }
     return {
         "contains_preview_entries": True,
+        "contains_actual_confirmations": bool(actual_confirmations),
+        "actual_confirmation_count": actual_confirmations,
         "entry_basis": "mixed" if "institution" in sources else "preview_confirmed",
         "contains_automatic_estimates": automatic,
         "entry_basis_label": "含自动推算" if automatic else "含按预览补录",
@@ -135,6 +153,7 @@ def positions(space, when=None):
 
     when = day(when)
     result = []
+    quarantines = nav_quarantine(space)
     pairs = (
         PositionMovement.objects.filter(
             tenant=space,
@@ -151,7 +170,7 @@ def positions(space, when=None):
         q, c = position(space, account, instrument, when)
         if q == 0:
             continue
-        price = formal_price(space, instrument, when)
+        price = formal_price(space, instrument, when, quarantines=quarantines)
         from .investments import manual_position_valuation
 
         manual = manual_position_valuation(space, account, instrument, q, when, price)
@@ -216,6 +235,15 @@ def positions(space, when=None):
         result[-1] = apply_holding_check(
             result[-1], read_holding_check(space, account, instrument, q, when)
         )
+        blocked = [date for date in quarantines.get(str(iid), {}) if date <= str(when)]
+        if (
+            blocked
+            and not manual
+            and (price is None or max(blocked) >= str(price.economic_date))
+        ):
+            result[-1]["status"] = "conflict"
+            result[-1]["nav_conflict_dates"] = sorted(blocked)
+            result[-1]["price_message"] = "正式净值来源存在差异，保留更早的已核对价值"
     return result
 
 
@@ -282,6 +310,11 @@ def overview(space, when=None, currency=None, account_ids=None):
                     value += p["market_value"]
                 if p.get("valuation_status", p["status"]) == "stale":
                     gaps.append(f"{p['name']} 价格陈旧（{p['price_date']}）")
+                    status = "partial"
+                if p.get("nav_conflict_dates"):
+                    gaps.append(
+                        f"{p['name']} 正式净值来源存在差异，资产暂按此前有效价格列示"
+                    )
                     status = "partial"
                 if p["cost_status"] == "unreconciled":
                     gaps.append(

@@ -3,10 +3,12 @@ asgiref==3.12.1
 attrs==26.1.0
 billiard==4.3.0
 celery==5.6.3
+cffi==2.1.1
 click==8.5.0
 click-didyoumean==0.3.1
 click-plugins==1.1.1.2
 click-repl==0.4.0
+cryptography==50.0.2
 dj-database-url==3.1.2
 Django==5.2.17
 djangorestframework==3.16.1
@@ -26,6 +28,7 @@ pluggy==1.6.0
 prompt_toolkit==3.0.53
 psycopg==3.3.6
 psycopg-binary==3.3.6
+pycparser==3.0
 Pygments==2.21.0
 pytest==9.1.1
 pytest-django==4.14.0

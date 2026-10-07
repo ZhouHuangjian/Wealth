@@ -1114,6 +1114,20 @@ def dispatch_space(request, space, role, path, body):
                     body,
                     save_event_with_defaults,
                 )
+    if (
+        resource == "fund-reconciliation"
+        and ident == "settings"
+        and request.method == "GET"
+    ):
+        if role == "viewer":
+            raise DomainError("原始导入记录仅 Owner 和 Editor 可访问", "forbidden", 403)
+        from .fund_reconciliation import settings as fund_statement_settings
+
+        return fund_statement_settings(
+            space,
+            request.GET.get("account_id"),
+            request.GET.get("source", "standard_fund"),
+        )
     if resource == "imports":
         if role == "viewer":
             raise DomainError("原始导入记录仅 Owner 和 Editor 可访问", "forbidden", 403)
@@ -1138,6 +1152,29 @@ def dispatch_space(request, space, role, path, body):
                 )
             )
         batch = get_obj(m.ImportBatch, space, ident)
+        if action == "fund-preview":
+            from .fund_reconciliation import batch_preview as fund_batch_preview
+            from .fund_reconciliation import preview as fund_preview
+
+            if request.method == "GET":
+                return fund_batch_preview(
+                    space,
+                    batch,
+                    max(0, int(request.GET.get("offset", 0))),
+                    min(1000, max(1, int(request.GET.get("limit", 500)))),
+                )
+            if request.method == "POST":
+                return fund_preview(space, user, batch, body)
+        if action == "fund-apply" and request.method == "POST":
+            from .fund_reconciliation import apply as apply_fund_statement
+
+            return write_command(
+                request,
+                space,
+                f"imports/{ident}/fund-apply",
+                body,
+                lambda: apply_fund_statement(space, user, batch, body),
+            )
         if action == "file" and request.method == "GET":
             require_owner(role)
             audit(space, user, "import.download", batch)
@@ -1156,6 +1193,8 @@ def dispatch_space(request, space, role, path, body):
         if action == "preview":
             return preview(space, user, batch, body)
         if action == "commit":
+            if batch.parser_version == "fund-confirmation-1":
+                raise DomainError("基金确认记录请使用核对入口，不能按普通收支重复记账")
             return write_command(
                 request,
                 space,

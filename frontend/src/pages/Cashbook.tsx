@@ -2,6 +2,7 @@ import { helpColumns } from "../help";
 import { NavigationTabs } from "../navigation";
 import Dividends from "./Dividends";
 import { FundOrders } from "./FundBuy";
+import FundReconciliation from "./FundReconciliation";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -374,6 +375,8 @@ function Imports() {
     [selected, setSelected] = useState<React.Key[]>([]),
     [links, setLinks] = useState<Record<string, string>>({}),
     [mappingDefaults, setMappingDefaults] = useState<any>({});
+  const [fundBatch, setFundBatch] = useState<Item | null>(null),
+    [fundOpen, setFundOpen] = useState(false);
   const [importParams] = useSearchParams();
   useEffect(() => {
     if (importParams.get("upload") && space.role !== "viewer")
@@ -523,6 +526,20 @@ function Imports() {
       <Panel
         title="账单中心"
         subtitle="上传 → 映射 → 预览 → 确认 → 核对，上传文件不会改变余额。"
+        action={
+          space.role !== "viewer" && (
+            <Button
+              onClick={() =>
+                requestReveal(() => {
+                  setFundBatch(null);
+                  setFundOpen(true);
+                })
+              }
+            >
+              基金交易核对
+            </Button>
+          )
+        }
       >
         <LoadState {...state}>
           <Table
@@ -540,7 +557,10 @@ function Imports() {
               {
                 title: "来源",
                 dataIndex: "source",
-                render: (v) => sources.find((s) => s.value === v)?.label || v,
+                render: (v) =>
+                  v === "standard_fund"
+                    ? "标准基金 CSV / XLSX"
+                    : sources.find((s) => s.value === v)?.label || v,
               },
               {
                 title: "导入时间",
@@ -556,6 +576,21 @@ function Imports() {
                 title: "操作",
                 render: (_, r) => (
                   <Space>
+                    {r.source === "standard_fund" &&
+                      space.role !== "viewer" && (
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() =>
+                            requestReveal(() => {
+                              setFundBatch(r);
+                              setFundOpen(true);
+                            })
+                          }
+                        >
+                          查看 / 继续核对
+                        </Button>
+                      )}
                     {space.role === "owner" && (
                       <a
                         href={`/api/v1/spaces/${space.id}/imports/${r.id}/file`}
@@ -565,32 +600,35 @@ function Imports() {
                         <Download size={16} />
                       </a>
                     )}
-                    {r.status !== "committed" && space.role !== "viewer" && (
-                      <Button
-                        size="small"
-                        type="link"
-                        onClick={() =>
-                          requestReveal(() => {
-                            setBatch(r);
-                            setPreview(null);
-                            setOpen(true);
-                            setMappingDefaults({
-                              account_id: r.account_id,
-                              date: "date",
-                              amount: "amount",
-                              currency: "currency",
-                              description: "description",
-                              external_id: "external_id",
-                              type: "type",
-                              default_kind: "expense",
-                            });
-                          })
-                        }
-                      >
-                        继续预览
-                      </Button>
-                    )}
-                    {["committed", "partially_committed"].includes(r.status) &&
+                    {r.source !== "standard_fund" &&
+                      r.status !== "committed" &&
+                      space.role !== "viewer" && (
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() =>
+                            requestReveal(() => {
+                              setBatch(r);
+                              setPreview(null);
+                              setOpen(true);
+                              setMappingDefaults({
+                                account_id: r.account_id,
+                                date: "date",
+                                amount: "amount",
+                                currency: "currency",
+                                description: "description",
+                                external_id: "external_id",
+                                type: "type",
+                                default_kind: "expense",
+                              });
+                            })
+                          }
+                        >
+                          继续预览
+                        </Button>
+                      )}
+                    {r.source !== "standard_fund" &&
+                      ["committed", "partially_committed"].includes(r.status) &&
                       space.role !== "viewer" && (
                         <Button
                           danger
@@ -644,6 +682,15 @@ function Imports() {
           />
         </LoadState>
       </Panel>
+      {fundOpen && (
+        <FundReconciliation
+          initialBatch={fundBatch || undefined}
+          onClose={() => setFundOpen(false)}
+          onDone={() => {
+            void state.retry();
+          }}
+        />
+      )}
       <Panel
         title="来源适配状态"
         subtitle="通用字段映射不等于已经完成机构格式认证。"

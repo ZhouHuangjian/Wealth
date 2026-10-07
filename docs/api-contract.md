@@ -4,6 +4,18 @@
 
 **当前采用 Django 同源会话接口。虽然依赖中包含 DRF / drf-spectacular，但尚未暴露或核验覆盖这些函数视图的自动 OpenAPI schema；本文不是自动生成接口的声明。**
 
+## 2.10.0 增量契约
+
+- `GET /admin/data-sources`：来源目录增加 `category` 与安全的 `credential` 状态（required/configured/version/status），不返回 Token 或密文。
+- `PUT /admin/data-sources/{provider}/credential`：管理员提交 `{version, token}`；`DELETE` 提交 `{version}`。只支持 `tushare_fund`、`lixinger_fund`，需要 `Idempotency-Key`；普通用户不得访问。启停/排序继续用原数据源配置接口。
+- `GET /spaces/{s}/market/quotes`：增加 `data_quality`、`provider_observations`、`provider_attempts`、`nav_quarantine`、`retained_previous_quote`。差异时 price 可能为之前安全值，必须同时显示状态与其原净值日。
+- `POST /spaces/{s}/imports`：上传 `source=standard_fund` 的 CSV/XLSX。
+- `GET /spaces/{s}/fund-reconciliation/settings?account_id=...`：返回字段、别名及该账户保存的映射。
+- `POST /spaces/{s}/imports/{id}/fund-preview`：`account_id`、可选 `instrument_id`/`funding_account_id`、`mapping`/`save_mapping`；部分处理后可仅提交 `{refresh_only:true}` 重新核对。`GET` 同路径支持 `offset`/`limit`。返回上下文、版本、账簿修订、预览哈希、行及汇总。
+- `POST /spaces/{s}/imports/{id}/fund-apply`：带幂等键，提交 `preview_version`、`ledger_revision`、`preview_hash`；省略 decisions 时只绑定可自动匹配的行。显式 decisions 为 `{row_id,action:link|correct|skip,debit_event_id?,reason?}` 数组。更正需要原因与完整实际确认字段；陈旧预览 409，不完整/冲突不会部分留下金融写入。
+
+基金核对属于来源导入权限，不开放给只读成员。代管仍要求空间所有者当前授权，失效授权也不能重放过去的写入。金额、份额、净值保持精确十进制字符串；未知不是零。完整业务行为及尚未接入范围见 [2.10.0 发布说明](release-2.10.0.md)。
+
 ## 1. 基础规则
 
 - 基础前缀：`/api/v1`。空间内路径使用 `/api/v1/spaces/{space_id}/...`，UUID 来自服务端返回，不由客户端推算。

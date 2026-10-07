@@ -143,6 +143,26 @@ def _save_defaults(space, user, data):
 
 def detail(row):
     d = row.data
+    from .fund_reconciliation import event_evidence
+
+    confirmation = (
+        Event.objects.filter(
+            tenant=row.tenant, pk=d.get("confirmation_event_id")
+        ).first()
+        if d.get("confirmation_event_id")
+        else None
+    )
+    evidence = event_evidence(row.tenant, confirmation) if confirmation else None
+    if evidence and evidence["basis"] == "actual":
+        d = {
+            **d,
+            "status": "confirmed",
+            "entry_basis": "actual",
+            "trade_status": "institution_confirmed",
+            "evidence": evidence,
+            "note": "已按机构账单核实",
+            "needs_review": False,
+        }
     requires_action = d["status"] == "submitted" or (
         d["status"] == "paid"
         and (
@@ -154,8 +174,8 @@ def detail(row):
     return {
         "id": str(row.pk),
         "version": row.version,
-        **row.data,
-        "status_label": LABELS[row.data["status"]],
+        **d,
+        "status_label": LABELS[d["status"]],
         "requires_action": bool(requires_action),
         "processing_state": "attention"
         if requires_action
@@ -314,6 +334,7 @@ def _confirm(
 
 def estimate(space, user, row):
     from .dca_automation import _fund
+    from .fund_reconciliation import event_evidence
     from .trading_calendar import preview_trade_dates
 
     if row.data["status"] != "paid":
@@ -336,6 +357,7 @@ def estimate(space, user, row):
                 user,
                 status="estimated"
                 if confirmation.payload.get("automatic_estimate")
+                and event_evidence(space, confirmation)["basis"] != "actual"
                 else "confirmed",
                 confirmation_event_id=str(confirmation.pk),
                 quantity=confirmation.payload.get("quantity"),
@@ -384,6 +406,11 @@ def estimate(space, user, row):
         fee = _fee(d)
         if fee is None:
             _update(row, user, note="待补充费用规则，不推测费用")
+            return
+        from .market_quality import nav_is_blocked
+
+        if nav_is_blocked(space, str(instrument.pk), day(nav_date)):
+            _update(row, user, note="正式净值来源存在差异，等待核对", needs_review=True)
             return
         quote = (
             Price.objects.filter(

@@ -12,6 +12,10 @@ from wealth import provider_policy as policy
 
 @pytest.fixture(autouse=True)
 def offline_clock(monkeypatch):
+    from wealth import fund_sources
+
+    fund_sources._DATA_CACHE.clear()
+    fund_sources._CACHE.clear()
     monkeypatch.setattr(
         md, "_now", lambda: datetime(2026, 9, 25, 16, tzinfo=timezone.utc)
     )
@@ -37,7 +41,7 @@ def fixtures(name="index_fallback_responses.json"):
         {"url": "https://127.0.0.1"},
         {"enabled": {"custom": True}},
         {"schema_version": True},
-        {"schema_version": 2},
+        {"schema_version": 3},
         {"enabled": {"yahoo": "false"}},
         {"priority": {"fund": ["yahoo"]}},
         {"priority": {"stock": ["yahoo", "yahoo"]}},
@@ -57,7 +61,10 @@ def test_defaults_are_independent_and_capabilities_are_honest():
     config["enabled"]["sina"] = False
     assert policy.default_provider_config()["enabled"]["sina"] is True
     assert policy.provider_chain(config, "future") == []
-    assert policy.provider_chain({}, "fund") == ["eastmoney_fund"]
+    assert policy.provider_chain({}, "fund") == [
+        "eastmoney_fund",
+        *policy._NEW_PUBLIC_FUND,
+    ]
     assert policy.provider_chain({}, "option") == ["sina"]
     assert "yahoo" not in policy.provider_chain({}, "gold")
     providers = policy.provider_directory()
@@ -81,14 +88,19 @@ def test_defaults_are_independent_and_capabilities_are_honest():
     ],
 )
 def test_single_source_disabled_has_no_network_or_zero(product, source):
-    result = md.fetch_quote(product, provider_config={"enabled": {source: False}})
+    config = {
+        "schema_version": 2,
+        "priority": {product["kind"]: [source]},
+        "enabled": {source: False},
+    }
+    result = md.fetch_quote(product, provider_config=config)
     assert result["price"] is None and result["error_code"] == "provider_disabled"
     with pytest.raises(md.MarketDataError):
         md.fetch_history(
             product,
             "2026-09-01",
             "2026-09-24",
-            provider_config={"enabled": {source: False}},
+            provider_config=config,
         )
 
 

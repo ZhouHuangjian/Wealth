@@ -98,7 +98,9 @@ def _chosen_holding(row, prefer_reference=True):
             "date": row.get("price_date"),
             "source": row.get("price_source"),
             "basis": basis,
-            "data_state": "stale"
+            "data_state": "conflict"
+            if row.get("nav_conflict_dates")
+            else "stale"
             if row.get("valuation_status", row.get("status")) == "stale"
             else "manual"
             if basis in {"manual", "manual_formal"}
@@ -393,6 +395,10 @@ def _wealth_state(space, when, currency, prefer_reference=False):
             ):
                 gaps.append(f"{account.name} 存在待分类或待分配款项")
             for row in by_account[aid]:
+                if row.get("nav_conflict_dates"):
+                    gaps.append(
+                        f"{account.name} / {row['name']} 正式净值来源存在差异，暂用此前有效价值"
+                    )
                 if row.get("cost_status") == "unreconciled":
                     gaps.append(
                         f"{account.name} / {row['name']} 份额、成本或收益范围待核对；资产金额保留原记录"
@@ -575,6 +581,8 @@ def _investment_items(space, when):
         instrument = instruments[holding["instrument_id"]]
         chosen = _chosen_holding(holding)
         gaps = []
+        if holding.get("nav_conflict_dates"):
+            gaps.append("正式净值来源存在差异，暂用此前有效价值")
         if holding.get("cost_status") == "unreconciled":
             gaps.append("份额、成本或收益范围待核对；资产金额保留原记录")
         if is_derivative_instrument(instrument) or instrument.kind == "index":
@@ -841,10 +849,12 @@ def tag_series(space, tag_id, start, end):
         iid: quantity for iid, quantity in quantities.items() if quantity != ZERO
     }
     actions = []
+    quarantines = {}
     for state in Resource.objects.filter(tenant=space, kind="market_quotes"):
         iid = state.data.get("instrument_id")
         if iid not in quantities:
             continue
+        quarantines[iid] = state.data.get("nav_quarantine", {})
         for action in state.data.get("corporate_actions", []):
             if action.get("date") and start <= day(action["date"]) <= end:
                 actions.append({"instrument_id": iid, **action, "origin": "provider"})
@@ -882,8 +892,14 @@ def tag_series(space, tag_id, start, end):
         }
         for iid, quantity in quantities.items()
     ]
-    price_query = Price.objects.filter(
-        tenant=space, instrument_id__in=quantities, kind__in=FORMAL_PRICE_KINDS
+    from .market_quality import approved_prices
+
+    price_query = approved_prices(
+        Price.objects.filter(
+            tenant=space, instrument_id__in=quantities, kind__in=FORMAL_PRICE_KINDS
+        ),
+        space,
+        quarantines=quarantines,
     )
     current_prices = {
         str(row.instrument_id): row
@@ -982,6 +998,12 @@ def tag_series(space, tag_id, start, end):
             instrument = instruments[iid]
             price = current_prices.get(iid)
             exchange = exchanges[instrument.currency]
+            blocked = any(
+                (not price or date >= str(price.economic_date)) and date <= str(when)
+                for date in quarantines.get(iid, {})
+            )
+            if blocked:
+                gaps.append(f"{instrument.name} 正式净值存在来源差异")
             if not price:
                 gaps.append(f"{instrument.name} 缺正式历史价格")
             elif exchange["rate"] is None:
@@ -1001,7 +1023,9 @@ def tag_series(space, tag_id, start, end):
                     "date": price.economic_date if price else None,
                     "source": price.source if price else None,
                     "basis": "formal",
-                    "data_state": "missing"
+                    "data_state": "conflict"
+                    if blocked
+                    else "missing"
                     if not price
                     else "stale"
                     if (when - price.economic_date).days > 7

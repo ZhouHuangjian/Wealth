@@ -566,6 +566,11 @@ def _process(space, user, plan, occurrence, now):
     stage_confirmation = Event.objects.filter(
         tenant=space, stage_key=prefix + ":confirm"
     ).first()
+    from .fund_reconciliation import event_evidence, resolved_event
+
+    debit = resolved_event(space, debit)
+    stage_debit = resolved_event(space, stage_debit)
+    stage_confirmation = resolved_event(space, stage_confirmation)
     if any(
         event and not _active(event)
         for event in (debit, stage_debit, stage_confirmation)
@@ -671,6 +676,7 @@ def _process(space, user, plan, occurrence, now):
                 occurrence,
                 "recorded_estimate"
                 if confirmation.payload.get("automatic_estimate")
+                and event_evidence(space, confirmation)["basis"] != "actual"
                 else "already_recorded",
                 debit_event_id=str(debit.pk),
                 confirmation_event_id=str(confirmation.pk),
@@ -784,6 +790,17 @@ def _process(space, user, plan, occurrence, now):
         return _state(space, user, occurrence, "waiting_confirmation", **details)
     if config.get("fee_mode", "unknown") == "unknown":
         return _state(space, user, occurrence, "waiting_fee", **details)
+    from .market_quality import nav_is_blocked
+
+    if nav_is_blocked(space, str(instrument.pk), day(trade_date)):
+        return _state(
+            space,
+            user,
+            occurrence,
+            "needs_review",
+            "正式净值来源存在差异，等待核对",
+            **details,
+        )
     quote = (
         Price.objects.filter(
             tenant=space,

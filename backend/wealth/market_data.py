@@ -34,6 +34,12 @@ HOSTS = frozenset(
         "push2his.eastmoney.com",
         "cdn-api.cboe.com",
         "api.nasdaq.com",
+        "www.gffunds.com.cn",
+        "www.efunds.com.cn",
+        "api.efunds.com.cn",
+        "www.cifm.com",
+        "api.tushare.pro",
+        "open.lixinger.com",
     }
 )
 
@@ -54,7 +60,13 @@ def _now():
 
 
 def _get(
-    url, *, encoding="utf-8", referer="https://fund.eastmoney.com/", max_bytes=MAX_BYTES
+    url,
+    *,
+    encoding="utf-8",
+    referer="https://fund.eastmoney.com/",
+    max_bytes=MAX_BYTES,
+    _body=None,
+    _content_type=None,
 ):
     if not isinstance(max_bytes, int) or not 1 <= max_bytes <= 8_000_000:
         raise MarketDataError("invalid_limit", "行情响应限制无效")
@@ -69,11 +81,13 @@ def _get(
         raise MarketDataError("unsafe_url", "行情源地址不在允许列表中")
     request = Request(
         url,
+        data=_body,
         headers={
             "User-Agent": "Mozilla/5.0 Wealth/2.1",
             "Referer": referer,
             "Accept": "application/json,text/plain,*/*",
             "Accept-Encoding": "identity",
+            **({"Content-Type": _content_type} if _content_type else {}),
         },
     )
     try:
@@ -95,6 +109,21 @@ def _get(
         raise MarketDataError(
             "provider_unavailable", "行情源暂时不可用，请稍后刷新"
         ) from exc
+
+
+def _post(url, payload, *, form=False, referer="https://www.efunds.com.cn/"):
+    """Bounded HTTPS POST; tokens stay in the request body, never a URL/error."""
+    raw = urlencode(payload) if form else json.dumps(payload)
+    if len(raw.encode("utf-8")) > 32_768:
+        raise MarketDataError("invalid_request", "行情请求超出大小限制")
+    return _get(
+        url,
+        referer=referer,
+        _body=raw.encode("utf-8"),
+        _content_type="application/x-www-form-urlencoded"
+        if form
+        else "application/json",
+    )
 
 
 def _json(text):
@@ -1663,7 +1692,9 @@ def _supports_provider(provider, inst, operation):
             provider == "nasdaq" and canonical == "NDX" and operation == "history"
         ) or (provider == "cboe" and canonical == "VIX")
     if kind == "fund":
-        return provider == "eastmoney_fund"
+        from .fund_sources import FUND_PROVIDERS
+
+        return provider in FUND_PROVIDERS
     if kind in {"future", "option"} or (
         kind == "gold" and not re.fullmatch(r"\d{6}", code)
     ):
@@ -1716,6 +1747,10 @@ def _stock_yahoo_quote(inst):
 
 
 def _provider_quote(provider, inst):
+    if inst["kind"] == "fund" and provider != "eastmoney_fund":
+        from .fund_sources import official_quote
+
+        return official_quote(provider, inst)
     if inst["kind"] == "index":
         code, spec = _index_identity(inst)
         if provider in {"tencent", "cboe"}:
@@ -1731,6 +1766,10 @@ def fetch_quote(instrument, provider_config=None):
     from .provider_policy import provider_chain
 
     inst = _instrument(instrument)
+    if inst["kind"] == "fund":
+        from .fund_sources import compare_quote
+
+        return compare_quote(inst, provider_chain(provider_config, "fund"))
     attempts, first_error, stale = [], None, None
     try:
         providers = [
@@ -1800,7 +1839,11 @@ def _provider_history(provider, inst, start, end):
             return _us_index_fallback_history(inst, code, spec, start, end)
         return _index_history(inst, start, end, allow_fallback=False)
     if inst["kind"] == "fund":
-        return _fund_history(inst)
+        if provider == "eastmoney_fund":
+            return _fund_history(inst)
+        from .fund_sources import official_history
+
+        return official_history(provider, inst, start, end)
     return _stock_history(inst, start, end)
 
 
@@ -1825,6 +1868,10 @@ def fetch_history(instrument, start, end, provider_config=None):
         raise MarketDataError(
             "unsupported_history", "没有已启用且兼容的历史源，请录入实际持仓及收益"
         )
+    if inst["kind"] == "fund":
+        from .fund_sources import compare_history
+
+        return compare_history(inst, providers, start, end)
     first_error = None
     for provider in providers:
         try:

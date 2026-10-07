@@ -14,6 +14,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .common import day, serial
+from .market_quality import approved_prices, nav_quarantine
 from .models import (
     Event,
     FxRate,
@@ -97,11 +98,16 @@ class ReturnEvidence:
         self.formal, self.reference = defaultdict(list), defaultdict(list)
         from .investments import REFERENCE_KINDS
 
-        for quote in Price.objects.filter(
-            tenant=space,
-            instrument_id__in=self.instruments,
-            economic_date__lte=when,
-            kind__in=FORMAL_PRICE_KINDS | REFERENCE_KINDS,
+        self.nav_quarantines = nav_quarantine(space)
+        for quote in approved_prices(
+            Price.objects.filter(
+                tenant=space,
+                instrument_id__in=self.instruments,
+                economic_date__lte=when,
+                kind__in=FORMAL_PRICE_KINDS | REFERENCE_KINDS,
+            ),
+            space,
+            quarantines=self.nav_quarantines,
         ).order_by("economic_date", "created_at"):
             target = self.formal if quote.kind in FORMAL_PRICE_KINDS else self.reference
             target[str(quote.instrument_id)].append(quote)
@@ -301,6 +307,8 @@ class ReturnEvidence:
         )
         if item is None:
             return None
+        if str(when) in self.nav_quarantines.get(iid, {}):
+            return _unavailable(item, "本日正式净值来源存在差异，暂停收益计算")
         item.update(
             observation_kind="reference" if reference else "formal",
             price_basis="estimate" if reference else "formal",

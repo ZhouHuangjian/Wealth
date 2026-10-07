@@ -91,6 +91,25 @@ def set_quote(space, inst, value, when=None, fetched=None):
     return state
 
 
+def test_quarantined_history_cannot_silently_change_alert_baseline(book):
+    with tenant_context(book.space.pk):
+        state = set_quote(book.space, book.fund, "90")
+        state.data["nav_quarantine"] = {
+            str(timezone.localdate() - timedelta(days=1)): {"status": "conflict"}
+        }
+        state.save()
+        for metric in ("drawdown", "change_percent"):
+            result = insights.instrument_metric(
+                book.space, book.fund.pk, metric=metric, lookback_days=30
+            )
+            assert result["status"] == "unavailable"
+            assert result["value"] is None
+            assert "来源差异" in result["message"]
+        # A current, independently valid price threshold has no historical base.
+        result = insights.instrument_metric(book.space, book.fund.pk, metric="price")
+        assert result["status"] == "ok" and result["value"] == Decimal("90")
+
+
 def send(book, route, body, method="post", key=None):
     return getattr(book.client, method)(
         book.base + route,

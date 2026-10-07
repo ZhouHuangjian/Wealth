@@ -13,8 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .common import catalog_queryset
-from .common import DomainError, audit, day, dec, get_obj, serial
+from .common import DomainError, audit, catalog_queryset, day, dec, get_obj, serial
 from .ledger import event_detail, post_event
 from .models import (
     Account,
@@ -1140,11 +1139,16 @@ def profit_calendar(
             )
         )
     prices = defaultdict(list)
-    for quote in Price.objects.filter(
-        tenant=space,
-        instrument_id__in=instruments,
-        kind__in=FORMAL_PRICE_KINDS,
-        economic_date__lte=end,
+    from .market_quality import approved_prices
+
+    for quote in approved_prices(
+        Price.objects.filter(
+            tenant=space,
+            instrument_id__in=instruments,
+            kind__in=FORMAL_PRICE_KINDS,
+            economic_date__lte=end,
+        ),
+        space,
     ).order_by("economic_date", "created_at"):
         prices[str(quote.instrument_id)].append(quote)
     dividends = defaultdict(list)

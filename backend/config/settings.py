@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import dj_database_url
@@ -5,6 +6,13 @@ import dj_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = os.getenv("DEBUG", os.getenv("DJANGO_DEBUG", "0")) == "1"
 SECRET_KEY = os.environ.get("SECRET_KEY", os.environ.get("DJANGO_SECRET_KEY", ""))
+SECRET_KEY_FALLBACKS = json.loads(os.environ.get("DJANGO_SECRET_KEY_FALLBACKS", "[]"))
+if not isinstance(SECRET_KEY_FALLBACKS, list) or any(
+    not isinstance(key, str) or len(key) < 50 for key in SECRET_KEY_FALLBACKS
+):
+    raise RuntimeError(
+        "DJANGO_SECRET_KEY_FALLBACKS must be a JSON array of previous secret keys"
+    )
 if not SECRET_KEY:
     if DEBUG or os.environ.get("PYTEST_CURRENT_TEST") or os.getenv("WEALTH_TESTING"):
         SECRET_KEY = "local-tests-only-not-for-production-change-me"
@@ -124,7 +132,7 @@ REST_FRAMEWORK = {
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "Wealth API",
-    "VERSION": "2.9.1",
+    "VERSION": "2.10.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
 CELERY_BROKER_URL = os.getenv(

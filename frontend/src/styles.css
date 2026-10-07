@@ -3075,3 +3075,75 @@ h3 {
 .trade-total .money {
   font-size: 20px;
 }
+
+.fund-form-grid,
+.fund-mapping-grid,
+.fund-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+.fund-mapping-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.fund-facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 18px;
+  padding: 4px 0 14px;
+}
+.fund-facts > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fund-facts > div > span,
+.fund-impact,
+.quote-quality-details p {
+  color: var(--muted);
+  font-size: 13px;
+}
+.fund-result-summary,
+.fund-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+.fund-row-actions > textarea {
+  flex: 1 1 260px;
+}
+.fund-row-detail {
+  padding: 4px 10px;
+}
+.fund-reconciliation-dialog .form-error {
+  color: var(--error, #b42318);
+  margin: 8px 0;
+}
+.quote-quality-details details {
+  margin-top: 12px;
+}
+.quote-quality-details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.quote-attempts {
+  list-style: none;
+  padding: 0;
+}
+.quote-attempts li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .fund-form-grid,
+  .fund-mapping-grid,
+  .fund-facts {
+    grid-template-columns: 1fr;
+  }
+}
