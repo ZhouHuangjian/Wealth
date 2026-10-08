@@ -6,6 +6,7 @@ from django.db.models import Q
 
 from .common import DomainError, day
 from .models import Resource
+from .provider_policy import provider_origin
 
 
 def nav_quarantine(space, instrument_id=None):
@@ -74,7 +75,12 @@ def updated_quarantine(previous, observations, observed_at):
             }
         elif any(
             (q.get("data_quality") or {}).get("status") == "consistent"
-            and len(set((q.get("data_quality") or {}).get("agreeing_providers", [])))
+            and len(
+                {
+                    provider_origin(p)
+                    for p in (q.get("data_quality") or {}).get("agreeing_providers", [])
+                }
+            )
             >= 2
             and (q.get("data_quality") or {}).get("usable_for_accounting") is True
             for q in items

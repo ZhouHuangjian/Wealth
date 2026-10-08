@@ -14,19 +14,49 @@ DEFAULT_PRIORITY = {
         "cifm_official",
         "tushare_fund",
         "lixinger_fund",
+        "akshare",
     ],
-    "stock": ["tencent", "yahoo", "eastmoney_search"],
-    "etf": ["tencent", "yahoo", "eastmoney_search"],
-    "future": ["sina"],
-    "option": ["sina"],
+    "stock": ["tencent", "yahoo", "eastmoney_search", "akshare"],
+    "etf": ["tencent", "yahoo", "eastmoney_search", "akshare"],
+    "future": ["sina", "akshare"],
+    "option": ["sina", "akshare"],
     "index": ["yahoo", "tencent", "nasdaq", "cboe", "eastmoney_index"],
     "gold": ["sina", "tencent", "eastmoney_search"],
 }
 
 _NEW_PUBLIC_FUND = ("gffunds_official", "efunds_official", "cifm_official")
 _TOKEN_PROVIDERS = ("tushare_fund", "lixinger_fund")
+_AKSHARE_KINDS = ("fund", "stock", "etf", "future", "option")
 
 _PROVIDERS = [
+    {
+        "id": "akshare",
+        "name": "AKShare",
+        "description": (
+            "境内人民币普通/QDII基金正式净值及历史、A股和ETF已完成交易日收盘价、"
+            "商品期货参考行情及商品期权已完成交易日收盘价；底层来源为东方财富或新浪，与已有同源渠道不计为独立验证。"
+            "无需密钥，不读取个人资金或交易。"
+        ),
+        "hosts": [
+            "fund.eastmoney.com",
+            "api.fund.eastmoney.com",
+            "push2.eastmoney.com",
+            "push2his.eastmoney.com",
+            "vip.stock.finance.sina.com.cn",
+            "stock.finance.sina.com.cn",
+        ],
+        "requires_credentials": False,
+        "capabilities": [
+            {
+                "kind": kind,
+                "markets": ["CN"],
+                "operations": ["quote", "history"]
+                if kind in {"fund", "stock", "etf", "option"}
+                else ["quote"],
+            }
+            for kind in _AKSHARE_KINDS
+        ],
+    },
     *[
         {
             "id": key,
@@ -145,7 +175,7 @@ _PROVIDERS = [
     {
         "id": "sina",
         "name": "新浪财经",
-        "description": "境内期货、ETF/商品期权和XAU现货参考报价；这些合约目前没有第二自动报价源或历史源。",
+        "description": "境内期货、ETF/商品期权和XAU现货参考报价；AKShare为部分商品合约提供备用通道，同源数据不作为独立验证。",
         "hosts": ["hq.sinajs.cn"],
         "capabilities": [
             {"kind": kind, "markets": ["CN"], "operations": ["quote", "search"]}
@@ -228,9 +258,41 @@ def provider_directory():
 
 def default_provider_config():
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "enabled": {p["id"]: p["id"] not in _TOKEN_PROVIDERS for p in _PROVIDERS},
         "priority": deepcopy(DEFAULT_PRIORITY),
+    }
+
+
+def provider_origin(provider, kind="fund"):
+    """Fixed provenance: an SDK wrapping a vendor is not another publisher."""
+    if provider == "akshare":
+        return (
+            "eastmoney_fund"
+            if kind == "fund"
+            else "eastmoney"
+            if kind in {"stock", "etf"}
+            else "sina"
+        )
+    return provider
+
+
+def provider_provenance(provider, kind="fund"):
+    origin = provider_origin(provider, kind)
+    names = {
+        "eastmoney_fund": "东方财富·天天基金",
+        "eastmoney": "东方财富",
+        "sina": "新浪财经",
+        "gffunds_official": "广发基金官方",
+        "efunds_official": "易方达基金官方",
+        "cifm_official": "摩根基金官方",
+        "tushare_fund": "Tushare",
+        "lixinger_fund": "理杏仁",
+    }
+    return {
+        "source_group": origin,
+        "source_group_name": names.get(origin, origin),
+        "upstream_provider_id": origin,
     }
 
 
@@ -245,7 +307,7 @@ def validate_provider_config(data):
         )
     if type(data.get("schema_version", 1)) is not int or data.get(
         "schema_version", 1
-    ) not in (1, 2):
+    ) not in (1, 2, 3):
         raise ValueError("不支持的数据源配置版本")
     result = default_provider_config()
     flags, priorities = data.get("enabled", {}), data.get("priority", {})
@@ -267,12 +329,23 @@ def validate_provider_config(data):
     result["enabled"].update(flags)
     # Version 1 did not know these public adapters. Only add genuinely new keys;
     # explicit false flags remain false and version 2 keeps exact custom ordering.
-    if data.get("schema_version", 1) == 1 and "fund" in priorities:
+    if data.get("schema_version", 1) == 1 and priorities.get("fund"):
         result["priority"]["fund"].extend(
             provider
             for provider in (*_NEW_PUBLIC_FUND, *_TOKEN_PROVIDERS)
             if provider not in flags and provider not in result["priority"]["fund"]
         )
+    # Only upgrades introduce the new channel. Explicit source disabling and
+    # version 3 custom chain omissions remain intentional administrator policy.
+    if data.get("schema_version", 1) < 3 and "akshare" not in flags:
+        for kind in _AKSHARE_KINDS:
+            if (
+                kind in priorities
+                and priorities[kind]
+                and any(result["enabled"].get(p) for p in priorities[kind])
+                and "akshare" not in result["priority"][kind]
+            ):
+                result["priority"][kind].append("akshare")
     return result
 
 

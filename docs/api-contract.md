@@ -1,8 +1,16 @@
 # Wealth API 契约（当前实现）
 
-契约日期：2026-09-25，覆盖 2.2 候选代码；最终部署与验收状态见 [2.2 发布记录](release-2.2.md)。本文按 `backend/wealth/views.py`、`ledger.py`、`imports.py`、`planning.py`、`reporting.py`、`investments.py`、`market_sync.py`、`market_data.py`、`catalog.py`、`portfolio.py` 与 `insights.py` 的实际实现编写，供联调与回归使用；不代表该版本已在目标服务器发布。
+基础契约日期为 2026-09-25、覆盖 2.2 代码，后续增量记录至 2.11.0；当前部署与验收状态见 [2.11.0 发布记录](release-2.11.0.md)。本文按 `backend/wealth/views.py`、`ledger.py`、`imports.py`、`planning.py`、`reporting.py`、`investments.py`、`market_sync.py`、`market_data.py`、`catalog.py`、`portfolio.py` 与 `insights.py` 的实际实现编写，供联调与回归使用。
 
 **当前采用 Django 同源会话接口。虽然依赖中包含 DRF / drf-spectacular，但尚未暴露或核验覆盖这些函数视图的自动 OpenAPI schema；本文不是自动生成接口的声明。**
+
+## 2.11.0 增量契约
+
+- `GET /admin/data-sources` 增加 `akshare` 公共渠道，无需凭证；能力仅为本版已实现的境内市场接口。`config.schema_version` 升至 3，兼容 1、2 的旧配置；新版显式关闭及排序生效。
+- 行情及来源详情增加 `source_group`、`source_group_name`、`upstream_provider_id`；AKShare 行情含 `interface_name`。查询渠道与原始发布方分别展示。
+- 基金 `data_quality` 增加 `agreeing_source_groups`、`independent_source_count`。AKShare 与 `eastmoney_fund` 归入同一发布方，二者一致为 `single_source`；差异仍为 `conflict`。隔离恢复要求至少两家独立发布方一致。
+- 原有市场刷新、历史行情、价格存储及定投接口保持兼容，不新增个人持仓或交易获取接口。
+- 部分期货行情另含 `source_clock`、`timestamp_quality`、`timestamp_message`；夜盘自然日期未核实时公布时间为空，不能从获取时间推出成交或公布时间。
 
 ## 2.10.0 增量契约
 
