@@ -2,18 +2,28 @@ import { Table, Tag } from "antd";
 import { Money } from "../components";
 import {
   marketTime,
-  providerLabel,
   qualityPresentation,
   quoteDetails,
+  sourcePresentation,
+  sourceTimestampMessage,
 } from "../market-quality";
 
 export default function QuoteQualityDetails({ row }: { row: any }) {
   const details = quoteDetails(row),
-    quality = qualityPresentation(row);
+    quality = qualityPresentation(row),
+    timestampMessage = sourceTimestampMessage(row);
   const columns = [
     {
       title: "来源",
-      render: (_: any, r: any) => r.source || providerLabel(r.provider_id),
+      render: (_: any, r: any) => {
+        const source = sourcePresentation(r);
+        return (
+          <div className="cell-name" title={source.interfaceName || undefined}>
+            <span>{source.label}</span>
+            {source.origin && <small>原始来源：{source.origin}</small>}
+          </div>
+        );
+      },
     },
     {
       title: "正式净值日",
@@ -44,6 +54,7 @@ export default function QuoteQualityDetails({ row }: { row: any }) {
             : ""}
         </p>
       )}
+      {timestampMessage && <p>{timestampMessage}</p>}
       {!!details.observations.length && (
         <Table
           size="small"
@@ -75,10 +86,12 @@ export default function QuoteQualityDetails({ row }: { row: any }) {
           <ul className="quote-attempts">
             {details.attempts.map((attempt: any, i: number) => (
               <li key={`${attempt.provider}-${i}`}>
-                <span>
-                  {attempt.source ||
-                    attempt.provider_name ||
-                    providerLabel(attempt.provider_id || attempt.provider)}
+                <span
+                  title={sourcePresentation(attempt).interfaceName || undefined}
+                >
+                  {sourcePresentation(attempt).label}
+                  {sourcePresentation(attempt).origin &&
+                    `（原始来源：${sourcePresentation(attempt).origin}）`}
                 </span>
                 <Tag>
                   {(

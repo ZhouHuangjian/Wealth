@@ -1675,6 +1675,10 @@ def _nasdaq_ndx_history(inst, start, end):
 
 
 def _supports_provider(provider, inst, operation):
+    if provider == "akshare":
+        from .akshare_provider import supports
+
+        return supports(inst, operation)
     kind, market, code = inst["kind"], inst["market"], inst["code"].upper()
     if kind == "index":
         canonical, spec = _index_identity(inst)
@@ -1747,6 +1751,10 @@ def _stock_yahoo_quote(inst):
 
 
 def _provider_quote(provider, inst):
+    if provider == "akshare":
+        from .akshare_provider import quote
+
+        return quote(inst)
     if inst["kind"] == "fund" and provider != "eastmoney_fund":
         from .fund_sources import official_quote
 
@@ -1763,7 +1771,7 @@ def _provider_quote(provider, inst):
 
 def fetch_quote(instrument, provider_config=None):
     """Use enabled compatible providers in order, with no implicit database reads."""
-    from .provider_policy import provider_chain
+    from .provider_policy import provider_chain, provider_provenance
 
     inst = _instrument(instrument)
     if inst["kind"] == "fund":
@@ -1789,11 +1797,18 @@ def fetch_quote(instrument, provider_config=None):
                     inst, MarketDataError("invalid_response", "行情源数据格式已变化")
                 )
             quote["provider_id"] = provider
+            if provider == "akshare":
+                quote.update(provider_provenance(provider, inst["kind"]))
             attempts.append(
                 {
                     "provider": provider,
                     "status": quote["status"],
                     "error_code": quote.get("error_code"),
+                    **(
+                        provider_provenance(provider, inst["kind"])
+                        if provider == "akshare"
+                        else {}
+                    ),
                 }
             )
             if quote["status"] == "ok" and quote.get("price") is not None:
@@ -1829,6 +1844,10 @@ def _filter_history(rows, start, end):
 
 
 def _provider_history(provider, inst, start, end):
+    if provider == "akshare":
+        from .akshare_provider import history
+
+        return history(inst, start, end)
     if inst["kind"] == "index":
         code, spec = _index_identity(inst)
         if provider == "nasdaq":

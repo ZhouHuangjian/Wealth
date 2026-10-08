@@ -22,7 +22,13 @@ from xml.etree import ElementTree
 from . import market_data as md
 
 PUBLIC_PROVIDERS = ("gffunds_official", "efunds_official", "cifm_official")
-FUND_PROVIDERS = (*PUBLIC_PROVIDERS, "eastmoney_fund", "tushare_fund", "lixinger_fund")
+FUND_PROVIDERS = (
+    *PUBLIC_PROVIDERS,
+    "eastmoney_fund",
+    "tushare_fund",
+    "lixinger_fund",
+    "akshare",
+)
 _NAMES = {
     "gffunds_official": "广发基金官方·单位净值",
     "efunds_official": "易方达基金官方·单位净值",
@@ -551,6 +557,10 @@ def _observation(row):
         key: row.get(key)
         for key in (
             "provider_id",
+            "source_group",
+            "source_group_name",
+            "upstream_provider_id",
+            "interface_name",
             "source",
             "code",
             "currency",
@@ -566,23 +576,28 @@ def _observation(row):
 
 
 def _reconcile(rows, attempts):
+    from .provider_policy import provider_origin
+
     latest = max(row["economic_date"] for row in rows)
     compared = [row for row in rows if row["economic_date"] == latest]
     prices = {Decimal(row["price"]) for row in compared}
     # Repeated rows from one vendor are not independent confirmation.
     providers = list(dict.fromkeys(row["provider_id"] for row in compared))
+    origins = list(dict.fromkeys(provider_origin(provider) for provider in providers))
     conflict = len(prices) != 1
     result = dict(compared[0])
     result["data_quality"] = {
         "status": "conflict"
         if conflict
         else "consistent"
-        if len(providers) > 1
+        if len(origins) > 1
         else "single_source",
         "usable_for_accounting": not conflict,
         "compared_date": latest,
         "agreeing_providers": [] if conflict else providers,
         "conflicting_providers": providers if conflict else [],
+        "agreeing_source_groups": [] if conflict else origins,
+        "independent_source_count": len(origins),
     }
     result["provider_observations"] = [_observation(row) for row in rows]
     result["provider_attempts"] = attempts
@@ -617,6 +632,8 @@ def _failed_quality(inst, attempts, error):
             "compared_date": None,
             "agreeing_providers": [],
             "conflicting_providers": [],
+            "agreeing_source_groups": [],
+            "independent_source_count": 0,
         },
         provider_observations=[],
         provider_attempts=attempts,
@@ -625,6 +642,8 @@ def _failed_quality(inst, attempts, error):
 
 
 def compare_quote(inst, providers):
+    from .provider_policy import provider_provenance
+
     attempts, rows, estimate, first_error = [], [], None, None
     try:
         _identity(inst)
@@ -634,6 +653,7 @@ def compare_quote(inst, providers):
         try:
             row = _cached_provider_call(provider, inst, "quote")
             row["provider_id"] = provider
+            row.update(provider_provenance(provider))
             if row.get("estimate"):
                 estimate = row["estimate"]
             if _valid(row, inst):
@@ -644,7 +664,12 @@ def compare_quote(inst, providers):
                     row.get("message") or "来源没有有效净值",
                 )
             attempts.append(
-                {"provider": provider, "status": row["status"], "error_code": None}
+                {
+                    "provider": provider,
+                    "status": row["status"],
+                    "error_code": None,
+                    **provider_provenance(provider),
+                }
             )
         except (
             md.MarketDataError,
@@ -666,6 +691,7 @@ def compare_quote(inst, providers):
                     if error.code == "provider_unconfigured"
                     else "unavailable",
                     "error_code": error.code,
+                    **provider_provenance(provider),
                 }
             )
             first_error = first_error or error
@@ -684,6 +710,8 @@ def compare_quote(inst, providers):
 
 
 def compare_history(inst, providers, start, end):
+    from .provider_policy import provider_provenance
+
     _identity(inst)
     attempts, by_day, first_error = [], {}, None
     for provider in providers:
@@ -692,6 +720,7 @@ def compare_history(inst, providers, start, end):
             accepted = []
             for row in rows:
                 row["provider_id"] = provider
+                row.update(provider_provenance(provider))
                 if not _valid(row, inst):
                     _error("identity_mismatch", "历史净值身份或价格无效")
                 if start.isoformat() <= row["economic_date"] <= end.isoformat():
@@ -701,7 +730,14 @@ def compare_history(inst, providers, start, end):
             # Commit a provider's batch only after complete identity/date checks.
             for row in accepted:
                 by_day.setdefault(row["economic_date"], []).append(row)
-            attempts.append({"provider": provider, "status": "ok", "error_code": None})
+            attempts.append(
+                {
+                    "provider": provider,
+                    "status": "ok",
+                    "error_code": None,
+                    **provider_provenance(provider),
+                }
+            )
         except (
             md.MarketDataError,
             ValueError,
@@ -722,6 +758,7 @@ def compare_history(inst, providers, start, end):
                     if error.code == "provider_unconfigured"
                     else "unavailable",
                     "error_code": error.code,
+                    **provider_provenance(provider),
                 }
             )
             first_error = first_error or error

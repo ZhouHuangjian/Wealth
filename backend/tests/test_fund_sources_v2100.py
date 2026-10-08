@@ -46,7 +46,7 @@ def inst(code="270042", **kwargs):
 
 def configuration(providers):
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "priority": {"fund": providers},
         "enabled": {p: True for p in providers},
     }
@@ -336,7 +336,7 @@ def test_policy_upgrade_preserves_explicit_disables_and_new_version_exact_priori
         "priority": {"fund": ["eastmoney_fund"]},
     }
     upgraded = policy.validate_provider_config(old)
-    assert upgraded["schema_version"] == 2 and policy.provider_chain(
+    assert upgraded["schema_version"] == 3 and policy.provider_chain(
         upgraded, "fund"
     ) == ["efunds_official", "cifm_official"]
     assert (

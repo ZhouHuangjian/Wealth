@@ -41,7 +41,7 @@ def fixtures(name="index_fallback_responses.json"):
         {"url": "https://127.0.0.1"},
         {"enabled": {"custom": True}},
         {"schema_version": True},
-        {"schema_version": 3},
+        {"schema_version": 4},
         {"enabled": {"yahoo": "false"}},
         {"priority": {"fund": ["yahoo"]}},
         {"priority": {"stock": ["yahoo", "yahoo"]}},
@@ -59,13 +59,15 @@ def test_rejects_unsafe_or_ambiguous_config(config):
 def test_defaults_are_independent_and_capabilities_are_honest():
     config = policy.default_provider_config()
     config["enabled"]["sina"] = False
+    config["enabled"]["akshare"] = False
     assert policy.default_provider_config()["enabled"]["sina"] is True
     assert policy.provider_chain(config, "future") == []
     assert policy.provider_chain({}, "fund") == [
         "eastmoney_fund",
         *policy._NEW_PUBLIC_FUND,
+        "akshare",
     ]
-    assert policy.provider_chain({}, "option") == ["sina"]
+    assert policy.provider_chain({}, "option") == ["sina", "akshare"]
     assert "yahoo" not in policy.provider_chain({}, "gold")
     providers = policy.provider_directory()
     assert set(config["enabled"]) == {row["id"] for row in providers}

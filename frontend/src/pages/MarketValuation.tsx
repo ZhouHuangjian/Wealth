@@ -20,6 +20,7 @@ import {
   marketTime,
   qualityPresentation,
   quoteDetails,
+  sourcePresentation,
 } from "../market-quality";
 import QuoteQualityDetails from "./QuoteQualityDetails";
 function quoteTime(value?: string) {
@@ -206,8 +207,17 @@ export function QuotesTable() {
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
           scroll={{ x: 1000 }}
           expandable={{
-            rowExpandable: (r) =>
-              !!r.data_quality || quoteDetails(r).quarantined.length > 0,
+            rowExpandable: (r) => {
+              const details = quoteDetails(r);
+              return (
+                !!r.data_quality ||
+                !!(
+                  details.quarantined.length ||
+                  details.attempts.length ||
+                  details.observations.length
+                )
+              );
+            },
             expandedRowRender: (r) => <QuoteQualityDetails row={r} />,
           }}
           locale={{ emptyText: "暂无产品行情" }}
@@ -275,7 +285,14 @@ export function QuotesTable() {
               title: "数据来源",
               render: (_, r) => (
                 <div className="cell-name">
-                  <span>{r.source || "—"}</span>
+                  <span
+                    title={sourcePresentation(r).interfaceName || undefined}
+                  >
+                    {sourcePresentation(r).label}
+                  </span>
+                  {sourcePresentation(r).origin && (
+                    <small>原始来源：{sourcePresentation(r).origin}</small>
+                  )}
                   <small>
                     公布：{marketTime(r.published_at || r.publication_date)}
                   </small>

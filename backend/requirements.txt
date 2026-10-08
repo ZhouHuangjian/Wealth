@@ -12,3 +12,4 @@ pytest-django>=4.11,<5
 hypothesis>=6,<7
 Pillow>=11,<13
 cryptography>=46,<51
+akshare==1.19.1

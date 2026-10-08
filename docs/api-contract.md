@@ -611,3 +611,10 @@ Outbox 状态为 pending/queued/failed/done/superseded。业务修订与 Outbox 
 `fee_mode` 可为 `unknown`、`zero`、`fixed`、`rate`，`fee_value` 保留十进制精度。`auto_estimate` 默认关闭，开启后才按正式净值推算份额并标记 `estimated`；它不是机构确认。`remember_defaults` 保存此基金的默认值。自动定投亦支持显式的 `automation.funding_source=untracked` 与费率规则。
 
 账户返回 `recording_mode`、`history_status`、`recording_start_date`。余额记录不推断投资收益；缺失历史不提供完整年化。待确认明细的 `source_account_id` 始终表示在途资金记账位置，补关联后的实际付款来源另由 `actual_funding_account_id` 表示，避免改动资金归属或重复加总。
+# 2.11.0 数据源增量
+
+- `GET /admin/data-sources` 增加 `akshare` 公共渠道，无需凭证；能力仅为本版已实现的境内市场接口。`config.schema_version` 升至 3，兼容 1、2 的旧配置；新版显式关闭及排序生效。
+- 行情及来源详情增加 `source_group`、`source_group_name`、`upstream_provider_id`；AKShare 行情含 `interface_name`。查询渠道与原始发布方分别展示。
+- 基金 `data_quality` 增加 `agreeing_source_groups`、`independent_source_count`。AKShare 与 `eastmoney_fund` 归入同一发布方，二者一致为 `single_source`；差异仍为 `conflict`。隔离恢复要求至少两家独立发布方一致。
+- 原有市场刷新、历史行情、价格存储及定投接口保持兼容，不新增个人持仓或交易获取接口。
+- 部分期货行情另含 `source_clock`、`timestamp_quality`、`timestamp_message`；夜盘自然日期未核实时公布时间为空，不能从获取时间推出成交或公布时间。

@@ -32,6 +32,7 @@ def test_config_reads_current_database_on_every_request():
     assert policy.get_provider_config() == policy.default_provider_config()
     config = policy.default_provider_config()
     config["enabled"]["sina"] = False
+    config["enabled"]["akshare"] = False
     row = PlatformSetting.objects.create(key="market_sources", data=config, version=1)
     assert policy.provider_chain(policy.get_provider_config(), "future") == []
     config["enabled"]["sina"] = True

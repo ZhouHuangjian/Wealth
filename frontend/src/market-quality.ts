@@ -29,7 +29,18 @@ export function qualityPresentation(row: Record<string, any>) {
             : quality.usable_for_accounting === false
               ? "此次净值不能用于记账，请核对来源差异或等待更新。"
               : quality.status === "single_source"
-                ? "此日期只有一个可用来源，尚无其他来源交叉核对。"
+                ? quality.independent_source_count === 1 &&
+                  new Set(
+                    (row.provider_observations || [])
+                      .filter(
+                        (observation: any) =>
+                          observation.economic_date === quality.compared_date,
+                      )
+                      .map((observation: any) => observation.provider_id)
+                      .filter(Boolean),
+                  ).size > 1
+                  ? "多个查询渠道来自同一原始数据源，尚无独立来源交叉核对。"
+                  : "此日期只有一个独立可用来源，尚无其他来源交叉核对。"
                 : "同一净值日的可用来源已核对一致。",
       }
     : null;
@@ -74,6 +85,10 @@ export function providerLabel(provider?: string) {
         tushare_fund: "Tushare 基金净值",
         lixinger_fund: "理杏仁基金净值",
         eastmoney_fund: "天天基金 / 东方财富",
+        eastmoney: "东方财富",
+        eastmoney_index: "东方财富指数",
+        eastmoney_search: "东方财富产品搜索",
+        akshare: "AKShare",
         tencent: "腾讯行情",
         yahoo: "Yahoo Finance",
         sina: "新浪行情",
@@ -84,4 +99,46 @@ export function providerLabel(provider?: string) {
     provider ||
     "来源未提供"
   );
+}
+
+export function sourcePresentation(row: Record<string, any>) {
+  const groupLabels: Record<string, string> = {
+    eastmoney: "东方财富",
+    sina: "新浪",
+    gffunds: "广发基金官方",
+    efunds: "易方达基金官方",
+    cifm: "摩根基金官方",
+    tushare: "Tushare",
+    lixinger: "理杏仁",
+  };
+  const upstream = row.upstream_provider_id,
+    group = row.source_group,
+    provider = row.provider_id || row.provider;
+  return {
+    label:
+      row.source ||
+      row.provider_name ||
+      providerLabel(row.provider_id || row.provider),
+    origin:
+      (upstream && upstream !== provider) || (group && group !== provider)
+        ? row.source_group_name ||
+          (upstream
+            ? providerLabel(upstream)
+            : groupLabels[group] || providerLabel(group))
+        : null,
+    interfaceName:
+      typeof row.interface_name === "string" ? row.interface_name : null,
+  };
+}
+
+export function sourceTimestampMessage(row: Record<string, any>) {
+  if (row.timestamp_quality !== "source_clock_only") return null;
+  const clock =
+      typeof row.source_clock === "string" ? row.source_clock.trim() : "",
+    message =
+      typeof row.timestamp_message === "string"
+        ? row.timestamp_message.trim()
+        : "";
+  const parts = [clock ? `来源时钟：${clock}` : "", message].filter(Boolean);
+  return parts.length ? `${parts.join("。").replace(/。+$/, "")}。` : null;
 }
