@@ -98,7 +98,7 @@ CSRF 在进入业务视图前由 Django 中间件校验。**CSRF 失败可能返
 
 | 路径（GET） | 参数与说明 |
 | --- | --- |
-| `/overview` | `as_of`, `currency`；返回净资产、可动用资金、账户、持仓、缺口、待办与 `data_revision`。默认查询只命中同修订、同当日的缓存；不满足条件则实时计算 |
+| `/overview` | `as_of`, `currency`；返回净资产、可动用资金、账户、持仓、缺口、待办与 `data_revision`。默认查询只命中同修订、同当日且计算/结构版本匹配的缓存；不满足条件则实时计算。读取不会更改旧投影或原始账务 |
 | `/positions` | `as_of`；返回正式价格口径持仓，含成本未知状态与价格来源 |
 | `/holdings` | `as_of`, `account_id`, `instrument_id`, `kind`；账户持仓、正式/人工估值与参考估值、原买入日期及历史提示 |
 | `/profit-calendar` | `start`, `end`, `period`（day/week/month/year）, `selected_day`, `account_id`, `instrument_id`, `kind`；详见 6.3 |

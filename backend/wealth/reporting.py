@@ -19,6 +19,9 @@ from .models import (
     Resource,
 )
 
+# Bump for overview calculation or response changes; GET rejects older projections.
+OVERVIEW_CALCULATION_VERSION = "account-equity-v25"
+
 ASSET_CODES = {
     "cash",
     "investment",
@@ -509,7 +512,7 @@ def overview(space, when=None, currency=None, account_ids=None):
             "data_revision": space.revision,
             "as_of": when,
             "method_version": "v2-weighted-cost-including-buy-fees",
-            "calculation_version": "account-equity-v24",
+            "calculation_version": OVERVIEW_CALCULATION_VERSION,
             "is_demo": False,
         }
     )

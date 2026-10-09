@@ -49,7 +49,13 @@ from .imports import (
     reverse_batch,
 )
 from .ledger import balance, event_detail, post_event, reverse_event
-from .reporting import calendar, overview, performance, positions
+from .reporting import (
+    OVERVIEW_CALCULATION_VERSION,
+    calendar,
+    overview,
+    performance,
+    positions,
+)
 
 User = get_user_model()
 MODELS = {
@@ -930,7 +936,8 @@ def dispatch_space(request, space, role, path, body):
             ).first()
             if (
                 cached
-                and cached.payload.get("calculation_version") == "account-equity-v24"
+                and cached.payload.get("calculation_version")
+                == OVERVIEW_CALCULATION_VERSION
             ):
                 return dict(cached.payload, cached=True)
         return overview(space, request.GET.get("as_of"), request.GET.get("currency"))
