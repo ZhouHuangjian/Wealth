@@ -1,0 +1,66 @@
+{
+  "version": "2.12.0",
+  "source_commit": "d95984442f409a4f37ddfe4310d05e6327d1708d",
+  "source_manifest_sha256": "8ee889952c4d8ed68ec1db989f4372881af1e70b54d682e372d2b6a1de37e175",
+  "checked_at": "2026-10-09T15:36:55.044854+00:00",
+  "status": "local_validated_deployment_blocked",
+  "backend": {
+    "tests": 1495,
+    "warnings": 270,
+    "seconds": 160.84
+  },
+  "frontend": {
+    "tests": 178,
+    "clean_archive_install_typecheck_format_build": true
+  },
+  "backup_tests": 5,
+  "release_safety_tests": 45,
+  "source_archive_sha256": "64510e57e8d670cc6743640eaf54d645ccb02b054a8d4831fd8da83333eaffc7",
+  "source_file_count": 382,
+  "no_schema_or_dependency_changes": true,
+  "public_health_version": "2.11.0",
+  "deployment_blocker": "Existing SSH identity rejected (publickey,password); valid server access required. Website credentials are not server credentials.",
+  "server_candidate_backup_cutover": "not_run",
+  "production_financial_data_changed": false,
+  "source_manifest": "/Users/zhouhuangjian/.codex/worktrees/system-audit-2026-10-09/Wealth/.runtime/v212/deploy/source-manifest.json",
+  "local_proofs": {
+    "backend-local-frozen.json": "b7aa527b1e288e8fc96767815d824c4a494579845b8139dfe4bf736ac1f3afc1",
+    "frontend-reference-verification.json": "92780023265ca6d5b9c2d327edc06ad42cd5af052dbddd2c8dbe45a1329287bd",
+    "browser-acceptance.json": "b1778fee4124474745305a927c26b22737962ed62049b771af91313ebd749f13"
+  },
+  "release_tool_hashes": {
+    "https_readonly_check.py": "23acbc83129d56aeee4d4669cbf8d170e636ba1a97798626ef0b2468bfa0cdc6",
+    "deploy_preserving_data.py": "be799475c635070da55c58a98d56e315de491b09916f92eb85dfcf06b6ed528a",
+    "production_readonly.py": "15f5aa996acea9289f126ac72ba83c798ba2af2b6b0f7d42e6cd1609fda0710b",
+    "host_compose.py": "1388a180e946ab3ce9af7f292c859536683ea35445266e746260d83e59541167",
+    "test_release_safety.py": "76af301525c252a20332620439241603e6ab734cd27348443b0f6c87caec89df",
+    "preservation.py": "ac9a63668397a09937437fa1a43775bd7703829317c4665a1940c830c6404b03",
+    "serve_reference.py": "e6bfa0a4c417a247264706898ca2c931855a69bf7928589ce35b3d8fd277fc6f",
+    "public_sdk_probe.py": "61ad131ab04504d53482caa85ada6ff040eea11c76fed022acaf8c09369d4958",
+    "host_operations.py": "f508e31cdb6692669abf61a4bc90f6dbce4675c1c1024371eeb956b5afa65b2b",
+    "finalize_acceptance.py": "1102b94c5554c8a728700dc122c78625c6a0be502e8cb1db84665ed9c273ac80",
+    "rollback_image.py": "3a26461ebee4760a91ebf313b88fba76f26057202290b263616952c82a198e08",
+    "verify_candidate.py": "90a18cdc3c96ec574dd33c1ad118e74d16b29de47f569b070276439310ec04fe",
+    "prepare_wheels.py": "be47e259ae679f49960d955e0a391cb928d6786800c91933354221768bad0c38",
+    "pack_source.py": "2ab649babeb06f8222dc55ecb3356fd21dd64fda85b97d69f1a47f43cb44f2b8",
+    "verify_source_commit.py": "c50d7c5dc03cbc026cd3ac1d661dfe80fc145af2a06a5779c1506330bc18a31e",
+    "build_reference.py": "6958c10f103d743c2afcd2a41a6ae6b50cb81b685e0de05651d915d839bdc5bd",
+    "runtime_check.py": "174244b76ea7c0ab02f312fe602fe9dbd02eeb31aa83cc36ccf131615e609d37",
+    "cutover_orchestrator.py": "e23aa394f7faecd42895863afcb5e921f59b5a870e57fed7a180062b33d4c8eb",
+    "test_v212_boundaries.py": "3ee49c9d4b00a6e6d7e6c10ea57211b653ad7027f03d2941b2a7b117fce65c42",
+    "ui_fixture.py": "e9bd030fa90091729823f36511d336ce5621d7e7683632fde5231148846eb760",
+    "server_acceptance.py": "a5ad046254617e95300acc2aaf6a4267761a1ff0274fe9866ca75f7dd43bc8fc",
+    "release_common.py": "87c661a955c19281fe73a4832eb9ec6c334c4be9c99a334abb5c297b80aac114",
+    "build_candidate.py": "5c5a62dc3cc620a694fe0d00fd2519772ec9a2c4d8c45d4a7b2d9910e43b85f5",
+    "test_host_operations.py": "b8b29f81d50058b545cd83f87ee146fb5a102b7610d73b8525269d1298a22da5"
+  },
+  "historical_raw_whitespace_preserved": "docs/audits/evidence/2026-10-09/finding-results.txt:20",
+  "unverified": [
+    "server image and scheduler state",
+    "server Linux3.13 candidate regression",
+    "current authenticated backup and local recovery copy",
+    "cutover and production final verification",
+    "actual OS reduced-motion preference",
+    "real institution native statements and production scale"
+  ]
+}
