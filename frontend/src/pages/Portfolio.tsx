@@ -9,6 +9,7 @@ import type { Item } from "../api";
 import { useResource, useWorkspace } from "../state";
 import { Chart } from "./Home";
 import { QuoteStatus } from "./InvestmentWorkspace";
+import { newestFirst } from "../date-ordering";
 export default function Portfolio() {
   const { space, hidden } = useWorkspace();
   const analysis = useResource("portfolio-analysis");
@@ -336,7 +337,7 @@ function TagSeries({ tag }: { tag: Item }) {
         <Chart items={data?.days || []} xKey="date" yKey="value" />
         <Table
           rowKey="date"
-          dataSource={data?.days || []}
+          dataSource={newestFirst(data?.days || [])}
           pagination={{ pageSize: 8 }}
           columns={helpColumns([
             { title: "日期", dataIndex: "date" },

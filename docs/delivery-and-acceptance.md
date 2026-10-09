@@ -1,6 +1,6 @@
 # Wealth 开发路线、验收与开工门槛
 
-版本：0.1 · 2026-09-16 · 状态：计划与验收规格；下列应用测试尚未执行。
+维护日期2026-10-09。§1–6保留2026-09-16阶段路线和A01–29原验收意图，不能再理解为应用尚未开发；费用/自动定投/日期的现行口径由[domain-model§12–16](domain-model.md)替代原建议。§8是本轮实际验收索引，[开发状态](development-status.md)记录实现/验证/部署，历史发布不能代替当前测试。
 
 ## 1. 交付路线
 
@@ -46,7 +46,7 @@ G0 不要求提前验证所有机构的全部产品。缺少某一来源样本�
 | 汇率影响 | 原币收益与折算差异拆开；简单无流量案例采用“原币价格变动按期初汇率 + 期末原币价值乘汇率变动”，交叉项归汇率；有流量时逐段处理并披露方法 |
 | 贷款现金流与费用 | 现金流出为本金 + 利息 + 费用；本金减少负债，利息／费用减少净资产；未来应还不算已付款 |
 
-费用的默认管理口径建议单列，产品费用资本化可显式设置并记录生效版本；任何指标不能既将同一费用含在净额中，又重复扣一次。XIRR 年化公式与有效数据区间必须展示；简单收益 5% 不等于年化 5%。求解失败、多根、搜索域不足或资料不足有独立状态。极短区间即使可求解，也需展示持有期及年化性质。
+历史费用单列建议由现行“买入费用资本化、卖出减净所得、费用另披露但不重复扣”替代，见domain-model§14及reporting.performance.cost_policy。A10的995份/费用5在当前管理账投资成本包含该费用，不把草案的995成本当现行断言；现金/在途只变一次的验收意图保留。XIRR年化、缺数据/多根和求解状态的原则保留。
 
 ## 4. 核心验收案例
 
@@ -111,4 +111,30 @@ G5 必须具备：
 
 ## 7. 当前完成度
 
-本轮完成需求、模型、核算与导入规则、源码静态研究、技术基线、开发路线和验收规格。文档中的贷款、均价与汇率合成算例已作独立十进制复算；应用兼容性、导入适配、数据库隔离、运行性能和恢复测试均尚未执行。下一开发阶段从 G0 开始。
+当前项目已有实现；2026-10-09初始审查6项差异及追加AUD-007已有修复/隔离验收，未部署。后端1476/12 subtests、前端153、原审查20通过，0012原生小样本恢复通过；真实机构、完整核对替代恢复/Docker、全部页面和规模仍有未验项。具体结果见[审查§8](audits/system-audit-2026-10-09.md#8-授权修复与验收记录)/repair-results.json，不能把全部A/AT组统一标为通过。
+
+## 8. 2026-10-09 验收场景与持续回归
+
+时钟、交易日历和行情样本固定；真实供应商探测单列，不依赖当天行情让关键金融测试波动。独立手算只维护在domain-model§14.1，不复制第二套数字。初始tests1447项通过、审查14通过/6失败保留为历史；修复后默认1476/12 subtests、显式审查20通过，29项修复回归进入默认tests，位置在project-map。
+
+| 场景 | 可复现证据 | 本轮状态/边界 |
+| --- | --- | --- |
+| 首次开户/已有持仓不虚构扣款 | test_account_opening_v24、test_institution_funding_v25、test_holding_checks_v251；audit_case_a/b | 后端已运行；首次平台初始化/开户全页面本轮未跑 |
+| 一次保存、不要求逐期确认 | test_dca_once_v280；audit ordinary_user_api_save；浏览器记录 | API及普通用户真实页面通过，仅合成产品规则 |
+| 日/周休市、月末顺延、锚点 | test_dca_once_v280的monthly/daily/weekly/shifted；test_dca_due_schedule | 已运行；不表示每个机构/海外渠道年历已核实 |
+| 长假、跨年、截止/跨市场 | test_trading_calendar、test_fund_orders_v270 | 固定/已覆盖年和unknownyear拒猜已运行；目标真实QDII渠道、跨时区浏览器未验 |
+| 未来预测、起始日、历史补录 | test_dca_due_schedule；dca_history/import相关；audit future_forecast | 无未来实际期次/扣款通过；历史机构样本未验 |
+| 暂停、恢复、关闭、完成、配置变更 | test_dca_once_v280、dca_automation；audit disabled/paused；AUD-001 | off/paused/已付completed通过，completed不新增期/扣款；取消/冲正保留；配置生效OD-02其余范围待明确 |
+| NAV晚到/缺失、单源与冲突 | test_fund_sources_v2100、market_quality_v210；audit exact_nav/known_conflict | 对应日补齐推进、后来NAV不替代、同源不清冲突通过；官方受控恢复待设计 |
+| 接口中断恢复、无估值有正式NAV | recorded provider/cache/market lifecycle tests | 合成适配失败/恢复通过；真实网络本轮未探测 |
+| 重复提交、并发扫描、重启补处理 | API/ledger/jobs回归，probe concurrency/restart | 实际PG两连接及新进程通过；真实broker/worker中断未验 |
+| 余额不足、冻结/留存/预留 | availability/institution_funding/reservations；AUD-005 | 金融保护及同状态revision/Occurrence版本稳定通过；实际现金/配置变化仍生效，不自动换卡/赎货币基金 |
+| 晚获知收益日A/B、不同份额资格 | audit case_a/case_b；test_qdii_returns_v290 | 1元归D1、2/2与费用.98/1.99通过；并不推广为所有基金规则 |
+| 手续费、赎回到账、分红/再投/拆分 | audit redemption/reinvestment/split；ledger/dividends/final_acceptance | 受控账务与收益通过；分红通知到实际确认全页面未验 |
+| 实际账单绑定、更正/原事实保护 | test_fund_reconciliation_v210；audit actual_share_difference；AUD-002/003 | 无第二扣款/冲正替代、完整证据来源/撤销、晚确认NAV日回填通过；合成CSV一致核对全页面通过，真实机构与差异更正页面未验 |
+| 部分缺数、估算转正式、旧估值 | audit missing_day/formal_replaces；AUD-004/006 | 不编0/不相加、旧/未知/未来报价与正式公布资格通过；产品估值基准/区间仍缺 |
+| 贷款本金/利息、转账、期货权益/目标 | math/ledger/reporting/planning/portfolio/final_acceptance | 既有受控回归通过；本轮未做真实样本/对应页面完整路径 |
+| 私账、跨空间、授权代管、撤权/文件 | security/admin_access_consent/admin及audit_runtime；AUD-007 | runtime非owner/RLS/跨引用、重复init及恢复私有清理权限拒绝通过；完整管理台与大并发撤权未交互 |
+| 备份恢复/规模/运行版本 | test_backup当前5项；audit_local restore-drill；只读health | 密码学/归档及0012原生小样本恢复/最小ACL通过；完整核对替代恢复、Docker、性能、生产SHA/ACL/调度未核实 |
+
+修复完成门槛：对应AUD预期断言通过并进入常规tests；相关A/AT意图和接口/页面/数据库/任务交叉回归；记录固定输入、命令、环境、结果、失败/未跑、版本和数据影响。完整G5/V2上线验收必须补齐真实样本、恢复和规模证据，不能用绿色单元测试数量抵销这些缺口。

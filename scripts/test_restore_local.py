@@ -78,7 +78,7 @@ from decimal import Decimal
 django.setup()
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import connection, transaction, IntegrityError
+from django.db import connection, transaction, IntegrityError, DatabaseError
 from django.db.migrations.recorder import MigrationRecorder
 from django.test import Client
 from wealth.common import tenant_context
@@ -93,6 +93,15 @@ with connection.cursor() as c:
     c.execute("SELECT pg_get_userbyid(relowner),relrowsecurity,relforcerowsecurity FROM pg_class WHERE relname='wealth_account'")
     owner,rls,force=c.fetchone()
     assert owner=='wealth_owner' and rls and force,'Restored table lost its owner or forced RLS'
+    c.execute("SELECT has_table_privilege(current_user,'public.wealth_cleanup_scope','SELECT,INSERT,UPDATE,DELETE')")
+    assert not c.fetchone()[0],'Runtime gained access to the private cleanup capability'
+    c.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prosecdef AND p.prorettype<>'trigger'::regtype AND p.proname LIKE 'wealth_%' AND EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')")
+    assert c.fetchone()[0]==0,'Restored SECURITY DEFINER functions regained PUBLIC execution'
+try:
+    with transaction.atomic(), connection.cursor() as c:
+        c.execute("INSERT INTO public.wealth_cleanup_scope VALUES(pg_backend_pid(),txid_current(),%s,NULL)",[f['a']])
+except DatabaseError: pass
+else: raise AssertionError('Runtime can forge a cleanup capability')
 assert Account.objects.count()==0,'No tenant context must see no private accounts'
 a=Workspace.objects.get(pk=f['a'])
 with tenant_context(a.pk):
@@ -130,7 +139,7 @@ client.force_login(get_user_model().objects.get(pk=f['viewer']))
 assert client.get('/api/v1/spaces/'+f['a']+'/accounts').status_code==200,'Viewer cannot read restored accounts'
 assert client.post('/api/v1/spaces/'+f['a']+'/events',data=json.dumps({'kind':'expense','amount':'1','account_id':f['bank']}),content_type='application/json').status_code==403,'Viewer can write'
 assert client.get('/api/v1/spaces/'+f['a']+'/imports/'+f['batch']+'/file').status_code==403,'Viewer can download raw evidence'
-print(json.dumps({'runtime_role':user,'table_owner':owner,'forced_rls':True,'no_context_denied':True,'cross_space_denied':True,'viewer_write_denied':True,'viewer_raw_file_denied':True,'immutable_trigger':True,'closed_event_trigger':True,'media_hash_verified':True,'net_assets':str(total),'cash':str(cash),'loan_principal':str(debt),'fund_quantity':str(quantity),'fund_management_cost':str(cost),'wealth_migrations':list(MigrationRecorder.Migration.objects.filter(app='wealth').order_by('name').values_list('name',flat=True)),**counts},ensure_ascii=False))
+print(json.dumps({'runtime_role':user,'table_owner':owner,'forced_rls':True,'private_cleanup_denied':True,'security_definer_not_public':True,'no_context_denied':True,'cross_space_denied':True,'viewer_write_denied':True,'viewer_raw_file_denied':True,'immutable_trigger':True,'closed_event_trigger':True,'media_hash_verified':True,'net_assets':str(total),'cash':str(cash),'loan_principal':str(debt),'fund_quantity':str(quantity),'fund_management_cost':str(cost),'wealth_migrations':list(MigrationRecorder.Migration.objects.filter(app='wealth').order_by('name').values_list('name',flat=True)),**counts},ensure_ascii=False))
 """
 
 

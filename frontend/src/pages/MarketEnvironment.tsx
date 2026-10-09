@@ -38,6 +38,7 @@ import { useResource, useWorkspace } from "../state";
 import { Chart } from "./Home";
 import { QuoteStatus } from "./InvestmentWorkspace";
 import MarketSearch from "./MarketSearch";
+import { newestFirst } from "../date-ordering";
 const kinds: Record<string, string> = { ...investmentKinds, index: "指数" };
 const conditionNames: Record<string, string> = {
   drawdown: "回撤",
@@ -660,7 +661,7 @@ export default function MarketEnvironment({
             />
             <Table
               rowKey="date"
-              dataSource={chart.series || []}
+              dataSource={newestFirst(chart.series || [])}
               pagination={{ pageSize: 8 }}
               columns={helpColumns([
                 { title: "日期", dataIndex: "date" },

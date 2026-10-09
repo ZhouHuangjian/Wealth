@@ -21,6 +21,7 @@ import {
 } from "../product-metadata";
 import { investmentKinds, catalogMarket } from "../investment";
 import { useDebounced, useWorkspace } from "../state";
+import { newestYearsFirst } from "../date-ordering";
 const calendarOptions = [
   { value: "CN_EXCHANGE", label: "境内证券 / 基金交易日" },
   { value: "CN_FUTURES", label: "境内期货交易日" },
@@ -288,7 +289,9 @@ export default function ProductIdentity({
         <>
           <p className="data-caption">
             {resolved.calendar?.id} · 已核实日历：
-            {(resolved.calendar?.coverage_years || []).join("、") || "暂无覆盖"}
+            {newestYearsFirst(resolved.calendar?.coverage_years || []).join(
+              "、",
+            ) || "暂无覆盖"}
           </p>
           {resolved.warnings?.length > 0 && (
             <Alert

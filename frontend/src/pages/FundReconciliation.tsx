@@ -40,6 +40,7 @@ const labels: Record<string, string> = {
   application_date: "申请日",
   payment_date: "实际扣款日",
   confirmation_date: "实际确认日",
+  nav_date: "成交净值日",
   amount: "扣款金额",
   quantity: "确认份额",
   nav: "确认净值",
@@ -56,10 +57,12 @@ function issueText(issue: any) {
 
 export default function FundReconciliation({
   initialBatch,
+  initialContext,
   onClose,
   onDone,
 }: {
   initialBatch?: Item;
+  initialContext?: { account_id?: string; instrument_id?: string };
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -107,6 +110,44 @@ export default function FundReconciliation({
   const instruments = listOf<Item>(instrumentsState.data).filter(
     (i) => i.kind === "fund",
   );
+  const locatedContext = useRef("");
+  useEffect(() => {
+    if (
+      initialBatch ||
+      !initialContext ||
+      accountsState.loading ||
+      instrumentsState.loading
+    )
+      return;
+    const key = `${space.id}:${initialContext.account_id}:${initialContext.instrument_id}`;
+    if (locatedContext.current === key) return;
+    locatedContext.current = key;
+    const account = initialContext.account_id
+      ? accounts.find((item) => item.id === initialContext.account_id)
+      : undefined;
+    const instrument = initialContext.instrument_id
+      ? instruments.find((item) => item.id === initialContext.instrument_id)
+      : undefined;
+    if (
+      (initialContext.account_id && !account) ||
+      (initialContext.instrument_id && !instrument)
+    ) {
+      setError(
+        "指定账户或基金不存在、已归档或不在当前空间，请返回持仓重新选择。",
+      );
+      return;
+    }
+    form.setFieldsValue({
+      account_id: account?.id,
+      instrument_id: instrument?.id,
+    });
+  }, [
+    space.id,
+    initialContext?.account_id,
+    initialContext?.instrument_id,
+    accountsState.data,
+    instrumentsState.data,
+  ]);
   const fields: any[] = settings?.fields || [];
   const rows: any[] = preview?.rows || [];
   const mappedLocked = [
@@ -597,6 +638,15 @@ export default function FundReconciliation({
         <p>金额与账单明细已隐藏。</p>
       ) : (
         <>
+          {initialContext && (
+            <Alert
+              type="info"
+              showIcon
+              message="核对已有扣款与机构确认账单"
+              description={`${readOnly ? "你可查看核对步骤，上传与更正请联系空间管理员。" : "上传该账户的机构确认账单，核实同一订单、份额、净值、费用和日期，再关联已有记录。"} 上传不会自动改账，也不会自动消除差额。`}
+              style={{ marginBottom: 12 }}
+            />
+          )}
           <Steps
             size="small"
             current={step}
@@ -778,13 +828,18 @@ export default function FundReconciliation({
                       ),
                     },
                     {
-                      title: "扣款 / 确认日",
+                      title: "扣款 / 确认 / 净值日",
                       width: 170,
                       render: (_, r) => (
                         <div className="cell-name">
                           <span>{r.normalized?.payment_date || "未提供"}</span>
                           <small>
                             {r.normalized?.confirmation_date || "确认日未提供"}
+                          </small>
+                          <small>
+                            {r.normalized?.nav_date
+                              ? `成交净值日 ${r.normalized.nav_date}`
+                              : "成交净值日未提供"}
                           </small>
                         </div>
                       ),

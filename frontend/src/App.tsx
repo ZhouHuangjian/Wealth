@@ -67,6 +67,7 @@ import { WorkspaceContext, useWorkspace } from "./state";
 import type { Space as Workspace } from "./state";
 import { NavigationProvider, useNavigation } from "./navigation";
 import { GlossaryProvider } from "./help";
+import LeisureCorner from "./leisure/LeisureCorner";
 import { navigationHidden, orderedNavigation } from "./navigation-model";
 import {
   ThemePreferences,
@@ -705,6 +706,7 @@ function WorkspaceApp({
               </NavLink>
             ))}
           </nav>
+          <LeisureCorner />
           <div className="sidebar-bottom">
             {auth.user?.is_platform_admin && (
               <NavLink

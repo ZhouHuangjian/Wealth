@@ -1,0 +1,61 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+__________ test_aud001_completed_plan_must_finish_already_paid_period __________
+audit_scenarios/test_system_audit_20261009.py:540: in test_aud001_completed_plan_must_finish_already_paid_period
+    assert Event.objects.filter(kind="fund_confirm").count() == 1
+E   AssertionError: assert 0 == 1
+E    +  where 0 = count()
+E    +    where count = <QuerySet []>.count
+E    +      where <QuerySet []> = filter(kind='fund_confirm')
+E    +        where filter = <django.db.models.manager.Manager object at 0x106cf8470>.filter
+E    +          where <django.db.models.manager.Manager object at 0x106cf8470> = Event.objects
+______ test_aud002_actual_evidence_must_promote_daily_quantity_provenance ______
+audit_scenarios/test_system_audit_20261009.py:555: in test_aud002_actual_evidence_must_promote_daily_quantity_provenance
+    assert item["quantity_source"] != "automatic_estimate"
+E   AssertionError: assert 'automatic_estimate' != 'automatic_estimate'
+__ test_aud003_statement_nav_date_must_survive_confirmation_from_paid_record ___
+audit_scenarios/test_system_audit_20261009.py:583: in test_aud003_statement_nav_date_must_survive_confirmation_from_paid_record
+    assert observed == {"nav_date": str(D1), "d1": D(2), "d2": D(2)}
+E   AssertionError: assert {'nav_date': ...00000000000')} == {'nav_date': ... Decimal('2')}
+E     
+E     Omitting 1 identical items, use -vv to show
+E     Differing items:
+E     {'d2': Decimal('1.000000000000000000000000000000000000')} != {'d2': Decimal('2')}
+E     {'nav_date': None} != {'nav_date': '2026-09-29'}
+E     Use -v to get more diff
+______ test_aud004_recent_fetch_must_not_make_hours_old_estimate_current _______
+audit_scenarios/test_system_audit_20261009.py:627: in test_aud004_recent_fetch_must_not_make_hours_old_estimate_current
+    assert daily(book, D1)["amount"] is None
+E   AssertionError: assert '2.000000000000000000000000000000000000' is None
+________ test_aud005_waiting_cash_poll_must_not_change_ledger_revision _________
+audit_scenarios/test_system_audit_20261009.py:639: in test_aud005_waiting_cash_poll_must_not_change_ledger_revision
+    assert Workspace.objects.get(pk=book.space.pk).revision == before
+E   AssertionError: assert 6 == 4
+E    +  where 6 = <Workspace: Workspace object (c921521f-3898-4a4a-8d90-8647f14b1006)>.revision
+E    +    where <Workspace: Workspace object (c921521f-3898-4a4a-8d90-8647f14b1006)> = get(pk=UUID('c921521f-3898-4a4a-8d90-8647f14b1006'))
+E    +      where get = <django.db.models.manager.Manager object at 0x106d49910>.get
+E    +        where <django.db.models.manager.Manager object at 0x106d49910> = Workspace.objects
+E    +      and   UUID('c921521f-3898-4a4a-8d90-8647f14b1006') = <Workspace: Workspace object (c921521f-3898-4a4a-8d90-8647f14b1006)>.pk
+E    +        where <Workspace: Workspace object (c921521f-3898-4a4a-8d90-8647f14b1006)> = namespace(space=<Workspace: Workspace object (c921521f-3898-4a4a-8d90-8647f14b1006)>, user=<User: audit-owner>, source..., clock={'day': datetime.date(2026, 9, 29), 'now': datetime.datetime(2026, 9, 29, 4, 0, tzinfo=datetime.timezone.utc)}).space
+___________ test_aud006_formal_reader_must_ignore_future_publication ___________
+audit_scenarios/test_system_audit_20261009.py:662: in test_aud006_formal_reader_must_ignore_future_publication
+    assert formal_price(book.space, book.instrument, D1).economic_date == D0
+E   AssertionError: assert datetime.date(2026, 9, 29) == datetime.date(2026, 9, 28)
+E    +  where datetime.date(2026, 9, 29) = <Price: Price object (d67b5729-9b56-4ee4-82db-60b3963b420f)>.economic_date
+E    +    where <Price: Price object (d67b5729-9b56-4ee4-82db-60b3963b420f)> = formal_price(<Workspace: Workspace object (2e70170a-ad26-4f8c-900d-aa54486e621f)>, <Instrument: Instrument object (66b9a075-e4f4-4af1-99bf-115d5d9c4724)>, datetime.date(2026, 9, 29))
+E    +      where <Workspace: Workspace object (2e70170a-ad26-4f8c-900d-aa54486e621f)> = namespace(space=<Workspace: Workspace object (2e70170a-ad26-4f8c-900d-aa54486e621f)>, user=<User: audit-owner>, source..., clock={'day': datetime.date(2026, 10, 1), 'now': datetime.datetime(2026, 10, 1, 4, 0, tzinfo=datetime.timezone.utc)}).space
+E    +      and   <Instrument: Instrument object (66b9a075-e4f4-4af1-99bf-115d5d9c4724)> = namespace(space=<Workspace: Workspace object (2e70170a-ad26-4f8c-900d-aa54486e621f)>, user=<User: audit-owner>, source..., clock={'day': datetime.date(2026, 10, 1), 'now': datetime.datetime(2026, 10, 1, 4, 0, tzinfo=datetime.timezone.utc)}).instrument
+=============================== warnings summary ===============================
+audit_scenarios/test_system_audit_20261009.py::test_aud006_formal_reader_must_ignore_future_publication
+  /Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/core/handlers/base.py:61: UserWarning: No directory at: /Users/zhouhuangjian/.codex/worktrees/system-audit-2026-10-09/Wealth/backend/staticfiles/
+    mw_instance = middleware(adapted_handler)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED audit_scenarios/test_system_audit_20261009.py::test_aud001_completed_plan_must_finish_already_paid_period
+FAILED audit_scenarios/test_system_audit_20261009.py::test_aud002_actual_evidence_must_promote_daily_quantity_provenance
+FAILED audit_scenarios/test_system_audit_20261009.py::test_aud003_statement_nav_date_must_survive_confirmation_from_paid_record
+FAILED audit_scenarios/test_system_audit_20261009.py::test_aud004_recent_fetch_must_not_make_hours_old_estimate_current
+FAILED audit_scenarios/test_system_audit_20261009.py::test_aud005_waiting_cash_poll_must_not_change_ledger_revision
+FAILED audit_scenarios/test_system_audit_20261009.py::test_aud006_formal_reader_must_ignore_future_publication
+6 failed, 14 deselected, 1 warning in 1.98s

@@ -38,6 +38,8 @@ import {
 import type { Item } from "../api";
 import { HelpText, helpColumns } from "../help";
 import { useWealthTheme } from "../ThemeProvider";
+import { dcaNextAction } from "../business-action";
+import { newestFirst } from "../date-ordering";
 import "./fund-experience.css";
 export function Chart({
   items,
@@ -395,7 +397,19 @@ export default function Home() {
                         dataIndex: "status",
                         render: (v, r: any) =>
                           r.reference_partial ? (
-                            <Tag color="gold">待核对</Tag>
+                            <Tooltip title="部分行情、机构数据或汇率尚不完整；点击查看相关资产并补充有依据的数据。">
+                              <LinkButton
+                                onClick={() =>
+                                  goto(
+                                    ["future", "futures"].includes(r.kind)
+                                      ? `analytics?tab=settlement&section=derivatives&account_id=${encodeURIComponent(r.id)}`
+                                      : `assets?tab=holdings&account_id=${encodeURIComponent(r.id)}`,
+                                  )
+                                }
+                              >
+                                数据待补全
+                              </LinkButton>
+                            </Tooltip>
                           ) : r.has_estimate ? (
                             <Tag color="gold">参考估算</Tag>
                           ) : (
@@ -415,23 +429,59 @@ export default function Home() {
               <Panel title="待处理" action={<Tag>{todos.length} 项</Tag>}>
                 {todos.length ? (
                   <div className="todo-list">
-                    {todos.slice(0, 5).map((t: any, i: number) => (
-                      <button
-                        key={t.id || i}
-                        onClick={() => goto("cashbook?tab=todos")}
-                      >
-                        <span className="todo-dot" />
-                        <div>
-                          <strong>{t.title || t.kind || "待核对事项"}</strong>
-                          <p>
-                            {hidden && (t.reason || t.description)
-                              ? "内容已隐藏"
-                              : t.reason || t.description || t.due_date}
-                          </p>
-                        </div>
-                        <ArrowRight size={16} />
-                      </button>
-                    ))}
+                    {newestFirst(todos, ["due_date", "date", "created_at"])
+                      .slice(0, 5)
+                      .map((t: any, i: number) => {
+                        const action =
+                          t.kind === "occurrence"
+                            ? dcaNextAction(space.id, t)
+                            : null;
+                        const to =
+                          action?.to ||
+                          `/spaces/${space.id}/cashbook?${new URLSearchParams(
+                            t.kind === "fund_order"
+                              ? {
+                                  tab: "investments",
+                                  action: "check-order",
+                                  order_id: t.id,
+                                }
+                              : {
+                                  tab: "todos",
+                                  occurrence_id:
+                                    t.kind === "occurrence" ? t.id : "",
+                                },
+                          )}`;
+                        const explanation =
+                          action?.description ||
+                          t.reason ||
+                          t.description ||
+                          t.automation?.message ||
+                          (t.kind === "fund_order"
+                            ? "对照机构账单，补充实际扣款、份额确认或退款进度。"
+                            : "查看事项详情并按实际记录处理。");
+                        return (
+                          <button key={t.id || i} onClick={() => navigate(to)}>
+                            <span className="todo-dot" />
+                            <div>
+                              <strong>
+                                {t.title || t.kind || "待核对事项"}
+                              </strong>
+                              <p>
+                                {hidden
+                                  ? "内容已隐藏"
+                                  : `${t.due_date || ""} · ${explanation}`}
+                              </p>
+                              <small>
+                                {action?.label ||
+                                  (t.kind === "fund_order"
+                                    ? "记录实际进度"
+                                    : "查看并处理")}
+                              </small>
+                            </div>
+                            <ArrowRight size={16} />
+                          </button>
+                        );
+                      })}
                   </div>
                 ) : (
                   <Blank
@@ -449,7 +499,10 @@ export default function Home() {
                   <p className="muted">{calendar.error}</p>
                 ) : listOf<Item>(calendar.data).length ? (
                   <div className="compact-list">
-                    {listOf<Item>(calendar.data)
+                    {newestFirst(listOf<Item>(calendar.data), [
+                      "date",
+                      "due_date",
+                    ])
                       .slice(0, 4)
                       .map((r, i) => (
                         <div key={r.id || i}>

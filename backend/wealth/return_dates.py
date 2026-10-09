@@ -3,7 +3,7 @@
 from .common import DomainError, day
 
 
-def analytical_movement(row, instrument, *, known_on):
+def analytical_movement(row, instrument, *, known_on, shares_verified=False):
     event = row.event
     reconstructed = (
         event.kind == "opening"
@@ -51,6 +51,7 @@ def analytical_movement(row, instrument, *, known_on):
         "event": event,
         "reconstructed": reconstructed,
         "created_at": row.created_at,
+        "shares_verified": shares_verified,
     }
 
 
@@ -62,6 +63,7 @@ def has_automatic_shares(space, movements, when):
             row["date"] <= when
             and event.kind == "fund_confirm"
             and event.payload.get("automatic_estimate") is True
+            and not row.get("shares_verified", False)
             and (
                 event.stage_key
                 == f"{space.pk}:dca:{event.payload.get('dca_import_plan_id')}:{event.payload.get('dca_import_date')}:confirm"

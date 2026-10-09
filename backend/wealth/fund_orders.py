@@ -9,7 +9,6 @@ from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from django.db import transaction
 from django.db.models import Q, Sum
-from django.utils import timezone
 
 from .common import DomainError, bump, day, dec, get_obj, money_round, serial
 from .institution_funding import CASH_ACCOUNT_KINDS
@@ -186,7 +185,11 @@ def detail(row):
 
 
 def list_orders(space, **filters):
-    rows = Resource.objects.filter(tenant=space, kind=KIND).order_by("-created_at")
+    from .display_ordering import resource_display_order
+
+    rows = resource_display_order(
+        Resource.objects.filter(tenant=space, kind=KIND), "fund_orders"
+    )
     for name in ("instrument_id", "account_id"):
         if filters.get(name):
             rows = rows.filter(**{f"data__{name}": filters[name]})
@@ -407,19 +410,20 @@ def estimate(space, user, row):
         if fee is None:
             _update(row, user, note="待补充费用规则，不推测费用")
             return
-        from .market_quality import nav_is_blocked
+        from .market_quality import available_prices, nav_is_blocked
 
         if nav_is_blocked(space, str(instrument.pk), day(nav_date)):
             _update(row, user, note="正式净值来源存在差异，等待核对", needs_review=True)
             return
         quote = (
-            Price.objects.filter(
-                tenant=space,
-                instrument=instrument,
-                economic_date=day(nav_date),
-                kind="official_nav",
+            available_prices(
+                Price.objects.filter(
+                    tenant=space,
+                    instrument=instrument,
+                    economic_date=day(nav_date),
+                    kind="official_nav",
+                )
             )
-            .filter(Q(published_at__isnull=True) | Q(published_at__lte=timezone.now()))
             .order_by("-created_at")
             .first()
         )

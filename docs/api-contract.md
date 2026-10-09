@@ -1,10 +1,10 @@
 # Wealth API 契约（当前实现）
 
-基础契约日期为 2026-09-25、覆盖 2.2 代码，后续增量记录至 2.11.0；当前部署与验收状态见 [2.11.0 发布记录](release-2.11.0.md)。本文按 `backend/wealth/views.py`、`ledger.py`、`imports.py`、`planning.py`、`reporting.py`、`investments.py`、`market_sync.py`、`market_data.py`、`catalog.py`、`portfolio.py` 与 `insights.py` 的实际实现编写，供联调与回归使用。
+维护核对：2026-10-09，代码基线 `e379dfe67a715d9913af246eba021c7b26ce45d1`。本文维护当前接口；业务定义唯一维护在 [领域模型](domain-model.md#12-现行业务基线2026-10-09)，调用链见 [项目地图](project-map.md)。2.11.0部署声明是[历史发布证据](release-2.11.0.md)，本轮只核实公开health版本，运行SHA与任务未核实。基础部分源自2.2，下面标明当前增量与已知差异，不能把历史描述当成修复完成。
 
 **当前采用 Django 同源会话接口。虽然依赖中包含 DRF / drf-spectacular，但尚未暴露或核验覆盖这些函数视图的自动 OpenAPI schema；本文不是自动生成接口的声明。**
 
-## 2.11.0 增量契约
+## 行情来源与数据质量（现行，schema_version=3）
 
 - `GET /admin/data-sources` 增加 `akshare` 公共渠道，无需凭证；能力仅为本版已实现的境内市场接口。`config.schema_version` 升至 3，兼容 1、2 的旧配置；新版显式关闭及排序生效。
 - 行情及来源详情增加 `source_group`、`source_group_name`、`upstream_provider_id`；AKShare 行情含 `interface_name`。查询渠道与原始发布方分别展示。
@@ -12,7 +12,7 @@
 - 原有市场刷新、历史行情、价格存储及定投接口保持兼容，不新增个人持仓或交易获取接口。
 - 部分期货行情另含 `source_clock`、`timestamp_quality`、`timestamp_message`；夜盘自然日期未核实时公布时间为空，不能从获取时间推出成交或公布时间。
 
-## 2.10.0 增量契约
+## 来源凭证与标准基金核对（现行）
 
 - `GET /admin/data-sources`：来源目录增加 `category` 与安全的 `credential` 状态（required/configured/version/status），不返回 Token 或密文。
 - `PUT /admin/data-sources/{provider}/credential`：管理员提交 `{version, token}`；`DELETE` 提交 `{version}`。只支持 `tushare_fund`、`lixinger_fund`，需要 `Idempotency-Key`；普通用户不得访问。启停/排序继续用原数据源配置接口。
@@ -22,7 +22,11 @@
 - `POST /spaces/{s}/imports/{id}/fund-preview`：`account_id`、可选 `instrument_id`/`funding_account_id`、`mapping`/`save_mapping`；部分处理后可仅提交 `{refresh_only:true}` 重新核对。`GET` 同路径支持 `offset`/`limit`。返回上下文、版本、账簿修订、预览哈希、行及汇总。
 - `POST /spaces/{s}/imports/{id}/fund-apply`：带幂等键，提交 `preview_version`、`ledger_revision`、`preview_hash`；省略 decisions 时只绑定可自动匹配的行。显式 decisions 为 `{row_id,action:link|correct|skip,debit_event_id?,reason?}` 数组。更正需要原因与完整实际确认字段；陈旧预览 409，不完整/冲突不会部分留下金融写入。
 
-基金核对属于来源导入权限，不开放给只读成员。代管仍要求空间所有者当前授权，失效授权也不能重放过去的写入。金额、份额、净值保持精确十进制字符串；未知不是零。完整业务行为及尚未接入范围见 [2.10.0 发布说明](release-2.10.0.md)。
+基金核对属于来源导入权限，不开放给只读成员。代管仍要求空间所有者当前授权，失效授权也不能重放过去的写入。金额、份额、净值保持精确十进制字符串；未知不是零。来源/更正规则维护在[领域模型§12–16](domain-model.md)及[导入说明§15](import-reconciliation.md#15-标准基金核对的现行边界2026-10-09)；历史交付边界见[2.10.0记录](release-2.10.0.md)。
+
+当前preview返回`batch,headers,mapping,context,preview_version,ledger_revision,preview_hash,rows,summary,count,offset,limit,has_more`；summary覆盖全批，rows默认500分页。标准解析器`fund-confirmation-1`不能通过普通commit重复记收支。订单/SourceFact永久身份、当前版本/修订/哈希、金额币种尾差及后续依赖须保留。
+
+修复增量（已隔离验证、未部署）：mapping/normalized增加可选`nav_date`，别名为成交净值日期/净值日期/净值归属日/nav_date；没有提供则null，明确日期差异不能作为一致行绑定。更正保留实际confirmation_date并传有据nav_date；旧已处理预览/批次不自动重解析。解析版本保持`fund-confirmation-1`兼容，不改变已存来源身份。有效完整确认EvidenceLink在日收益和日历批量读取；部分付款证据不能升级份额来源，撤销后恢复推算，原payload不改。日期边界见领域模型§13。
 
 ## 1. 基础规则
 
@@ -57,7 +61,7 @@ CSRF 在进入业务视图前由 Django 中间件校验。**CSRF 失败可能返
 | --- | --- |
 | `GET /health` | 数据库健康状态；另有 `/api/health/`。不提供账务数据 |
 | `GET /auth/me` | `user`, `spaces`, `csrf_token`, `setup_required`；未登录时 `user=null` |
-| `POST /auth/setup` | 首次初始化：`username`, `password`, 可选 `space_name`。已有用户后永久关闭该入口，返回 `setup_closed` |
+| `POST /auth/setup` | 空库首次初始化平台管理员：`username`, `password`；不会创建私人空间。已有任意用户后关闭，返回 `setup_closed`；普通用户由管理员创建或邀请加入 |
 | `POST /auth/login` | `username`, `password`。来源 IP＋用户名组合在五分钟内限制登录尝试次数 |
 | `POST /auth/logout` | 注销当前会话 |
 | `POST /auth/password` | `current_password`, `password`；新密码至少 10 字符，拒绝常见或纯数字密码 |
@@ -567,7 +571,7 @@ Outbox 状态为 pending/queued/failed/done/superseded。业务修订与 Outbox 
 
 产品 `specification.subscription_calendar` 支持 `auto/domestic/cn_us/cn_hk`；识别结果 `subscription_rule` 返回规则来源、适用日历及说明。定投历史估算、计划和申购日期预览采用同一规则。期次 GET 中 `plan_kind` 表示资源类型，`operation_kind` 表示收支/定投业务；`auto_skip` 与 `subscription_day` 表示因已知休市自动跳过。真实已发生事项不会仅因休市而被禁止登记。没有日历覆盖的日期为未知，不能按推定成功执行批量补录。
 
-## 21. 2.6.3 每日收益与持仓展示
+## 21. 每日收益与持仓展示（现行）
 
 `GET spaces/{id}/net-worth-comparison?as_of=YYYY-MM-DD&currency=CNY` 新增 `daily_return`；`GET spaces/{id}/holdings` 同时提供顶层汇总、每行 `daily_return`、`latest_confirmed_return` 与 `labels`。
 
@@ -577,21 +581,31 @@ Outbox 状态为 pending/queued/failed/done/superseded。业务修订与 Outbox 
 
 计算使用实际仓位变动和正式/当日有效估值、已记分红及已核对资金流水。机构权益覆盖的合约明细不再加总；外币口径为 `local_profit_converted_daily_excludes_fx`。上述接口均为只读，无补记交易副作用。
 
-## 2.6.4 增量：定投自动补录
+2.9后的明细另含 `price_basis,observation_kind,return_date,nav_date,published_at,observed_at,quantity_source` 及 `latest_formal_return`；兼容键 `latest_confirmed_return` 不是机构确认承诺。历史正式日期只作上下文，不加入所选日总额。`profit-calendar` 可以返回 `estimated`（份额为推算），即使价格正式也要显示“按正式净值计算，份额为推算”。正式与估算同区间择一，缺口用null；最近净值、当前估值、收益和净资产变化不能同名同义。
 
-本节新增于 2026-09-28，部署状态见 [2.6.4 发布记录](release-2.6.4.md)。以上历史契约的其他部分不因本节而宣称已全面重新审计。
+AUD-002/003/004/006已在隔离分支修复：完整实际证据升级有效份额来源；标准核对保留有据成交日；旧/未知/未来时点报价不因刚抓取而进入今日参考计算；正式选择器统一排除未来公布。公布时间未知的正式观察仍可用，不伪造时刻。当前日参考时效沿用来源20分钟delayed及10分钟fetch门槛，不是全产品实时SLA。估算基准/期间等完整元数据仍是OD-05/R-004目标，字段尚未完整实现。
 
-普通场外基金 `plans` 记录支持 `automation` 对象：`enabled`（布尔）、`start_date`（明确生效日）、`holding_account_id`、`fee_mode`（`unknown` / `zero` / `fixed`）、`fee_amount`（fixed 时每期固定金额）、`excluded_dates`（日期数组）、`pause_ranges`（`{start,end}` 数组）。资金来源沿用计划的 `account_id`。配置由原计划 POST/PATCH 接口维护，仍要求幂等键、空间权限及修改版本。缺省不开启；未知费用不等同于零费用。
+## 22. 定投自动记账（唯一现行契约）
 
-- `GET /spaces/{space_id}/plans/{plan_id}/automation`：只读状态，返回 `enabled`、`start_date`、`plan_version`、`data_revision`、`total_count`、`has_more`、`summary`、最近最多500期 `items`。
-- `POST /spaces/{space_id}/plans/{plan_id}/automation/run`：使用既有幂等写入接口，请求必须仅包含整数 `expected_plan_version`。Viewer 不可执行；版本不一致返回412。后台每五分钟检查启用的计划。
-- 每期含 `date`、`amount`、`status`、`message`、`debit_event_id`、`confirmation_event_id`；已具备相关数据时附 `nav_date`、`confirmation_date`、`nav`、`quantity`。等待情况保留空值，不补零。
-- 状态包括 `scheduled`、`disabled`、`paused`、`excluded`、`waiting_calendar`、`waiting_cash`、`waiting_nav`、`waiting_confirmation`、`waiting_fee`、`recorded_estimate`、`already_recorded`、`needs_review`。`recorded_estimate` 是本账簿推算，不能显示为机构成交确认。
-- 自动扣款/确认与历史补录共用计划＋计划日期＋阶段唯一标识；重试不会重复写账。资金不足、记录冲突、已撤销、部分实际确认等情况留待核对。份额会参与持仓与估值，`contains_automatic_estimates` 和 `entry_basis_label` 保留来源；正式行情不将推算份额对应的收益升级为机构确认。
+核对日期：2026-10-09；业务状态、等待闭环与日期规则统一见[领域模型第12–15章](domain-model.md#12-现行业务基线2026-10-09)。本节替代早期2.6.4的“缺省不开启”与固定费用范围描述。普通场外基金新计划默认开启；旧计划显式关闭、缺旧配置的情况保持原选择。保存计划会调用 run_plan，不需要再点每期确认；外部扣款/交易不会发生。
 
-导入预览新增 `automatic_match` 及候选的 `automatic_estimate` 标记。同账户、同日、同币种同金额的自动基金扣款不能直接新增第二笔；可通过既有 `links` 关联证据，或经明确核对在提交体的 `distinct_rows` 中传选定来源行 ID 表示独立交易。该数组必须属于本次所选来源行；关联凭证不改写原推算份额来源。
+计划 POST/PATCH 仍使用幂等键、同空间关联、修改版本。automation 支持 enabled（bool）、start_date、holding_account_id、fee_mode（unknown/zero/fixed/rate）、fee_amount、excluded_dates、pause_ranges（{start,end}数组）、funding_source（account/untracked）。新计划生效日可沿用首期；旧计划不默认补全部历史。rate 模式 fee_amount 为百分数（如 `"0.15"` 表示0.15%，非0.0015），最多6位小数；fixed为每期固定金额，最多2位。未知费用允许保存并记到期扣款，仅份额阶段等待一次计划配置。
 
-## 2.6.5 增量：买入待确认
+| 接口 | 当前请求/响应与边界 |
+| --- | --- |
+| GET plans/{id}/automation | enabled/start_date/plan_status/plan_version/data_revision/last_checked_at/total_count/has_more/items/summary；last_checked_at为最近runtime检查时刻或null。最近最多500期，summary仅覆盖返回样本，不宣称全部历史 |
+| POST plans/{id}/automation/run | 只接受整数 expected_plan_version；幂等键必须；Viewer拒绝；版本不符412；后台300秒扫描，独立于页面与会话 |
+| 期次 items | occurrence_id/date/scheduled_date/application_date/amount；debit_event_id/confirmation_event_id；status/message/processing_state/requires_action/action_scope/action_label/requires_confirmation=false |
+| 日期/数值 | 数据齐备时附nav_date/confirmation_date/nav/quantity/来源；缺失null；date为实际排期日，scheduled_date为原锚点 |
+| 进度 | scheduled/disabled/paused/excluded/waiting_calendar/waiting_cash/waiting_nav/waiting_confirmation/waiting_fee/recorded_estimate/already_recorded/needs_review |
+| 来源 | recorded_estimate是本账簿推算；已有实际EvidenceLink另核定；正式NAV不证明机构交易已确认 |
+| 等待可观察性 | GET已输出last_checked_at；页面标明北京时间。它不证明任务健康；next_retry_at/attempt_count及超期升级尚未实现，不由前端编造 |
+
+已有扣款状态只在对应条件恢复后进入份额处理；精确当期正式NAV可来自可信单源，盘中估值缺失不阻塞。已知同日冲突隔离仍保留。paused/completed已扣期次可收尾，completed不生成新期次/新扣款；显式disabled、取消/排除、冲正及事实冲突仍不自动推进。归档/草稿不采用completed资格。同条件waiting_cash重复扫描不提高账簿修订或Occurrence版本；真实排期/配置变化保留版本保护（AUD-001/005已修复）。
+
+已有本地金融阶段与历史补录共享稳定的空间+计划+原锚点+阶段标识。不同订单不能因同日同额合并。实际证据链接/更正接口见fund-preview/fund-apply；完整实际确认升级有效份额来源，撤销则恢复推算。以上是未部署的修复增量，无数据库列迁移或历史事实更新。
+
+## 23. 买入在途与待确认（现行）
 
 `holdings` 顶层及每行、`overview` 及其账户、`net-worth-comparison` 各日期状态及其账户新增只读 `pending_purchases`。摘要包括 `as_of,currency,amount,known_amount,completeness,count,by_currency,items,included_in_assets,added_to_net_assets,message`。账户摘要按资金来源账户归集，持仓行按目标账户和产品归集，二者不能再次相加。`amount=null` 表示无法完整折算；`known_amount` 保留已知部分。
 
@@ -600,7 +614,7 @@ Outbox 状态为 pending/queued/failed/done/superseded。业务修订与 Outbox 
 `added_to_net_assets=false`：本投影不额外增加净资产；涉及机构快照时 `included_in_assets=null`，避免声称每笔在途均已被机构快照覆盖。只存在在途的持仓行 `pending_only=true,contributes=false`，数量、成本、市值、收益为空，保留产品展示，不参与已确认仓位的收益或配置计算。
 
 `GET plans?holding_account_id=…` 可按持仓账户筛选定投，资金来源 `account_id` 仍单独保留。优先使用计划明确的持仓账户，其次使用可靠且一致的历史补录目标；无上述信息时兼容原计划账户。所有查询继续在当前账簿租户范围内执行。
-# 2.7.0 基金分阶段记录补充
+## 24. 基金分阶段记录（现行）
 
 以下接口位于 `/api/v1/spaces/{space}/`，遵循既有空间权限、写入幂等和资源版本规则；只读成员不能写入。
 
@@ -619,3 +633,13 @@ Outbox 状态为 pending/queued/failed/done/superseded。业务修订与 Outbox 
 `fee_mode` 可为 `unknown`、`zero`、`fixed`、`rate`，`fee_value` 保留十进制精度。`auto_estimate` 默认关闭，开启后才按正式净值推算份额并标记 `estimated`；它不是机构确认。`remember_defaults` 保存此基金的默认值。自动定投亦支持显式的 `automation.funding_source=untracked` 与费率规则。
 
 账户返回 `recording_mode`、`history_status`、`recording_start_date`。余额记录不推断投资收益；缺失历史不提供完整年化。待确认明细的 `source_account_id` 始终表示在途资金记账位置，补关联后的实际付款来源另由 `actual_funding_account_id` 表示，避免改动资金归属或重复加总。
+
+## 25. 2.12.0 候选版：只读展示与处理定位
+
+`GET calendar` 默认 `scope=recent`，以空间业务日计算最近30日；`scope=upcoming` 查看未来30日。显式 `start/end` 可覆盖范围，开始晚于结束返回领域错误。返回 `start/end/items`，items 最近日期在前。读取和切换范围不生成期次或资金事实；daily_returns 的日期资格与自然时间轴不变。
+
+业务明细在后端分页前按业务日期倒序，创建时间和id用于稳定同日顺序；日期未知末尾。流水按economic_date，净值/汇率/权益按economic_date，期次/还款按due_date，核对按as_of，预算按month，目标按target_date，计划按start_date，订单按application_date。导入批次按created_at；机构账单预览全批按业务日期排序后分页，保留源行号、身份及预览哈希。规则维护在 `display_ordering.py` 与 `date-ordering.ts`。
+
+期次及overview待办新增只读 `plan_id/account_id/holding_account_id/instrument_id` 定位字段，优先保存的期次身份及扣款事实，未有事实时才采用计划配置。overview保留 `occurrence_id/details/automation` 供页面解释具体原因，属于原有空间权限内的投影。点击提示只打开同空间的既有处理窗口，不触发POST、更正、重新扣款或自动调平。对象不存在/无写入权时明确提示。具体导航由 `frontend/src/business-action.ts` 维护。
+
+娱乐角无新增后端接口、数据库事实或持久化配置。

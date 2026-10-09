@@ -39,6 +39,7 @@ from .common import (
     serial,
     tenant_context,
 )
+from .display_ordering import resource_display_order
 from .imports import (
     ADAPTERS,
     batch_preview,
@@ -941,10 +942,18 @@ def dispatch_space(request, space, role, path, body):
     if resource == "performance" and request.method == "GET":
         return performance(space, request.GET.get("start"), request.GET.get("end"))
     if resource == "calendar" and request.method == "GET":
+        from .planning import today
+
+        current_day = today(space)
+        scope = request.GET.get("scope", "recent")
+        if scope not in {"recent", "upcoming"}:
+            raise DomainError("日历范围须为 recent 或 upcoming")
+        start = current_day - timedelta(days=29) if scope == "recent" else current_day
+        end = current_day if scope == "recent" else current_day + timedelta(days=30)
         return calendar(
             space,
-            request.GET.get("start") or str(day().replace(day=1)),
-            request.GET.get("end") or str(day() + timedelta(days=31)),
+            request.GET.get("start") or str(start),
+            request.GET.get("end") or str(end),
         )
     if resource == "forecast" and request.method in {"GET", "POST"}:
         from .planning import forecast
@@ -1049,7 +1058,9 @@ def dispatch_space(request, space, role, path, body):
         if request.method == "GET":
             if ident:
                 return event_detail(get_obj(m.Event, space, ident))
-            qs = m.Event.objects.filter(tenant=space)
+            qs = m.Event.objects.filter(tenant=space).order_by(
+                "-economic_date", "-created_at", "-pk"
+            )
             if request.GET.get("account_id"):
                 qs = qs.filter(lines__account_id=request.GET["account_id"]).distinct()
             if request.GET.get("q"):
@@ -1135,7 +1146,9 @@ def dispatch_space(request, space, role, path, body):
             return dict(
                 page(
                     request,
-                    m.ImportBatch.objects.filter(tenant=space).order_by("-created_at"),
+                    m.ImportBatch.objects.filter(tenant=space).order_by(
+                        "-created_at", "-pk"
+                    ),
                 ),
                 data_revision=space.revision,
             )
@@ -1287,8 +1300,8 @@ def dispatch_space(request, space, role, path, body):
         if request.method == "GET":
             if obj:
                 return record(obj)
-            qs = m.Resource.objects.filter(tenant=space, kind=resource).order_by(
-                "-created_at"
+            qs = resource_display_order(
+                m.Resource.objects.filter(tenant=space, kind=resource), resource
             )
             if request.GET.get("q"):
                 qs = qs.filter(
@@ -1344,8 +1357,8 @@ def dispatch_space(request, space, role, path, body):
         if request.method == "GET":
             qs = (
                 m.Occurrence.objects.filter(tenant=space)
-                .select_related("plan")
-                .order_by("due_date")
+                .select_related("plan", "event")
+                .order_by("-due_date", "-created_at", "-pk")
             )
             if resource == "installments":
                 qs = qs.filter(plan__kind="loans")
@@ -1366,6 +1379,16 @@ def dispatch_space(request, space, role, path, body):
                     "name": o.plan.data.get("name"),
                     "plan_kind": o.plan.kind,
                     "operation_kind": o.plan.data.get("kind", "loan"),
+                    "account_id": o.details.get("account_id")
+                    or (o.event.payload.get("account_id") if o.event else None)
+                    or o.plan.data.get("account_id"),
+                    "instrument_id": o.details.get("instrument_id")
+                    or (o.event.payload.get("instrument_id") if o.event else None)
+                    or o.plan.data.get("instrument_id"),
+                    "holding_account_id": o.details.get("holding_account_id")
+                    or (o.event.payload.get("holding_account_id") if o.event else None)
+                    or (o.plan.data.get("automation") or {}).get("holding_account_id"),
+                    "plan_id": str(o.plan_id),
                     "automation_enabled": (o.plan.data.get("automation") or {}).get(
                         "enabled", False
                     ),
@@ -1524,7 +1547,14 @@ def model_resource(request, space, kind, ident, body):
         if obj:
             return model_record(obj)
 
-        qs = model.objects.filter(tenant=space).order_by("-created_at")
+        qs = model.objects.filter(tenant=space)
+        qs = qs.order_by(
+            *(
+                ("-economic_date", "-created_at", "-pk")
+                if kind in {"prices", "fx", "snapshots"}
+                else ("-created_at", "-pk")
+            )
+        )
         if kind in {"accounts", "instruments"}:
             from .catalog_lifecycle import deleted_catalog_ids
 

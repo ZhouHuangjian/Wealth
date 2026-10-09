@@ -1,0 +1,9 @@
+....................                                                     [100%]
+=============================== warnings summary ===============================
+audit_scenarios/test_system_audit_20261009.py::test_ordinary_user_api_save_runs_without_an_extra_confirmation
+audit_scenarios/test_system_audit_20261009.py::test_aud006_formal_reader_must_ignore_future_publication
+  /Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/core/handlers/base.py:61: UserWarning: No directory at: /Users/zhouhuangjian/.codex/worktrees/system-audit-2026-10-09/Wealth/backend/staticfiles/
+    mw_instance = middleware(adapted_handler)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+20 passed, 2 warnings in 6.09s

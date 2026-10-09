@@ -8,6 +8,7 @@ import { LoadState, Money, Panel } from "../components";
 import { useResource, useWorkspace } from "../state";
 import { investmentKinds, monthBounds, profitTone } from "../investment";
 import { QuoteStatus, Rate } from "./InvestmentWorkspace";
+import { newestFirst } from "../date-ordering";
 
 export default function ProfitCalendar() {
   const { hidden } = useWorkspace();
@@ -33,7 +34,7 @@ export default function ProfitCalendar() {
   const accounts = useResource("accounts", "?limit=200");
   const data = state.data;
   const days = listOf<any>(data?.days),
-    buckets = listOf<any>(data?.buckets);
+    buckets = newestFirst(listOf<any>(data?.buckets));
   const offset = new Date(`${month}-01T12:00:00`).getDay();
   const length = new Date(Number(year), Number(month.slice(5)), 0).getDate();
   const cells = Array.from(

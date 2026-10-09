@@ -1,6 +1,6 @@
 # 本地启动、部署与恢复手册
 
-提供已实测的本地启动入口和 `compose.yaml` 容器部署入口。Ubuntu 24.04 服务器已通过 [https://124.223.23.76/](https://124.223.23.76/) 提供服务，实际版本、证书与验证证据见[服务器部署记录](server-deployment.md)。本文件是运行步骤，不代表完整 P0、全部安全或性能验收已通过；以 [开发状态](development-status.md) 的证据为准。2.1 工作区已接入公开参考行情，尚未配置自动金融机构账单连接、自动汇率或外部支付。原有服务器验证是上一版证据，本次更新是否已发布须核对[2.1 发布说明](release-2.1.md)与服务器部署记录。
+维护日期2026-10-09。提供本地启动和compose容器步骤；现行定位与回归入口见[项目地图](project-map.md)，本轮版本/任务/恢复边界见[审查报告](audits/system-audit-2026-10-09.md)。公网health只读返回2.11.0，不等于当前镜像/SHA、调度或备份已验证。服务器部署历史见[部署记录](server-deployment.md)和[2.11发布](release-2.11.0.md)；不以旧记录承诺现在健康。系统没有外部付款、自动机构账单拉取或自动汇率能力。
 
 2.10.0 新增数据源 Token 加密存储。运维必须保留原 `DJANGO_SECRET_KEY`；轮换使用 `DJANGO_SECRET_KEY_FALLBACKS`（旧密钥的 JSON 数组），过渡期间重新保存 Token 后才能移除旧密钥。后台只提供写入/删除及状态，不提供读取明文；不要直接编辑数据库密文。公开官方净值无需 Token，订阅 Token 仅在独立管理台 → 数据源配置，默认停用。详细来源范围、故障与差异处理见 [2.10.0 发布说明](release-2.10.0.md)。
 
@@ -14,11 +14,11 @@ python3 scripts/local_dev.py status
 python3 scripts/local_dev.py stop
 ```
 
-默认打开 `http://127.0.0.1:8000`，首次进入创建自己的用户和账簿。启动器不写入演示余额，不安装全局软件，也不修改已有全局服务。若不存在 `.env`，依据模板创建独立随机凭证；已有 `.env` 则要求权限 0600 且没有占位密码。依赖仅安装在项目 `.venv` 和前端 `node_modules`。
+默认打开 `http://127.0.0.1:8000`。空库首次初始化创建平台管理员；普通用户和账簿在独立管理台另行建立，管理员角色本身不拥有私人账簿。启动器不写入演示余额，不安装全局软件，也不修改已有全局服务。若不存在 `.env`，依据模板创建独立随机凭证；已有 `.env` 则要求权限 0600 且没有占位密码。依赖仅安装在项目 `.venv` 和前端 `node_modules`。
 
 `start` 会复用或初始化本项目 `.runtime/pgdata` 中的 PostgreSQL 18 集群，固定仅监听本机 55432；数据库若不属于该目录或端口被其他服务占用，会拒绝操作。应用使用 `wealth_app`，迁移使用 `wealth_owner`。`wealth` 是用户账本，`wealth_test` 为隔离测试数据库，浏览器验收另用 `wealth_ui_test`。任何测试数据都不得进入 `wealth`。
 
-启动器编译网页、启动同源网页/API，并每 30 秒执行一次本地待办扫描与持久化任务补跑。此开发模式无需消息队列；正式容器仍采用 Celery/RabbitMQ。只有一个受控任务循环，不把计划扫描当成真实扣款。`status` 返回最近扫描时间与退出状态，私有日志在 `.runtime/web.log`、`.runtime/tick.log` 和 `.runtime/supervisor.log`。
+启动器编译网页、启动同源网页/API；本地任务一轮完成后等待约30秒再扫描，网络慢时不能承诺每30秒准时处理。tick顺序为分红→行情→提醒→计划→outbox。此开发模式无需消息队列；正式容器采用Celery/RabbitMQ，计划扫描间隔300秒。只有一个受控任务循环；自动记账不向银行付款。`status`返回最近扫描时间与退出状态，私有日志在`.runtime/web.log`、`.runtime/tick.log`和`.runtime/supervisor.log`。
 
 `stop` 只停止本启动器记录、且经进程命令与实例标识验证的网页和任务进程；不会停止 PostgreSQL、删除账本或终止其他服务。端口冲突时可用 `python3 scripts/local_dev.py start --port 18080`。该入口面向本地开发使用，始终绑定 127.0.0.1，不用于直接公网发布。
 
@@ -204,3 +204,76 @@ python3 -m unittest discover -s scripts -p 'test_*.py' -v
 ```
 
 CI 通过不代表真实机构样本、性能规模、浏览器全部状态或恢复演练全部通过。发布需要 [V2 的 AT-01—46](requirements-v2.md) 对应证据。
+
+## 8. 定投与收益维护基线（2026-10-09）
+
+### 8.1 先判断是否在运行，再判断是否缺数据
+
+1. 记录代码SHA、实际运行镜像/版本、迁移、业务时区和检查时间；健康API只证明web可响应。只读查计划状态、automation.enabled/start_date、选定资金/持仓账户、产品/渠道/币种和版本。显式关闭不可因排障重新开启。
+2. 开发环境先看`local_dev.py status`中的扫描时间/退出码，再看tick/supervisor私有日志；容器环境核对唯一beat、worker接收scan-due/refresh-market任务及最近完成结果。服务healthy不证明某计划已处理。排查网络阶段耗时、失败/权限失效和没有Owner导致跳过；日志不公开私人账单/Token。
+3. 按期次查看scheduled_date、due_date、event_id及automation.status/message/processing_state。按稳定stage_key核查debit、confirm/refund及替代关系。扣款已记但NAV未到是正常等待；没有debit先排日历/关闭/资金，不把资料缺口说成银行拒付。
+4. 逐产品核对精确NAV日、正式Price、published_at（未知留空）、冲突隔离及预计确认日。不要取今天最新值或以后第一条值代替，不因估值缺失忽略正式NAV。已知冲突不能靠剩一个源解锁。
+5. 看outbox状态/lease与目标revision；旧revision结果不能覆盖新投影。DCA runtime有checked_at和500期游标，状态API已输出last_checked_at、页面标北京时间；它只证明计划检查发生，不证明beat/worker持续健康。下次重试/失联出口仍属R-005，不虚构“下次重试”字段。
+
+正常等待表只维护在[domain-model§12.3](domain-model.md#123-每种等待暂停的闭环)：进入、影响阶段、唤醒、重试、超时/人工介入、退出都有定义。当前有周期补扫，没有逐原因退避/超时升级；按产品适用规则的提醒方案是待实现OD-06。等待超期只升级核对/运维，不自动退款、换卡或填份额。
+
+### 8.2 安全重试、核对与更正
+
+状态GET是只读；页面“刷新进度”对有写权限且enabled的计划可能发送`POST plans/{id}/automation/run`，**不是纯读取**。run使用expected_plan_version、幂等键和合法空间权限，可能处理已到期期次。优先让健康任务自动补扫；生产run/修订不在本轮授权内，不能把“点一次试试”当只读诊断。
+
+- 缺NAV/接口中断：恢复对应来源、检查产品日期与隔离后等待下一轮；失败只影响相关产品/日期。网络在写事务之外，有界请求；不在持仓锁中请求第三方。
+- waiting_cash：核实所选账户的真实余额/期初覆盖、机构留存、冻结/预留和已有扣款；补账簿资料与真实不足分别处理。不能自动找另一银行卡或把货币基金当已赎现金。
+- waiting_fee/configuration_required：只补一次计划规则且标生效范围，不重开off；已扣款可以等份额规则。费率未知不得默认为零。
+- 已付而completed：修复后enabled计划可自动收尾已扣期次，计划仍completed，不新增期次/扣款；off、取消/冲正、排除和事实冲突仍阻断。生产尚未部署：先只读列期次/在途/原授权，不批量改active或重开off；生产补扫另授权。
+- 实际账单晚到：标准fund-preview→明确link/correct/skip→fund-apply；相同订单优先补证，金额/份额差异冲正替代，保留原文件、原推算和审计。同日同额不是同一交易。原确认已有后续卖出/退款时先处理依赖。
+- 成交净值日：修复后标准账单显式映射nav_date并分别预览扣款/确认/NAV日；未知留空，日期差异需有原因更正。旧已处理批次不自动重解析，历史补有据日期先差异预览；不能修改原confirm.economic_date绕开资格。
+- 已知NAV冲突：默认等独立origin一致；官方更正提案OD-01没有已实现操作命令，不能手工删除隔离。保存原因、来源、更正证据和受影响日期。
+
+### 8.3 隔离复现与变更检查
+
+已有项目依赖时运行专用审查入口；它不读取工作区`.env`、不使用55432，使用短路径私有临时状态和合成库。`init`只在该入口拥有的集群配置空库，不生成真实财务记录。端口冲突必须改为新的审查端口，不能停止别人的数据库。
+
+```sh
+.venv/bin/python scripts/audit_local.py init
+.venv/bin/python scripts/audit_local.py check
+.venv/bin/python scripts/audit_local.py test audit_scenarios -m audit_invariant
+.venv/bin/python scripts/audit_local.py test audit_scenarios -m audit_finding
+.venv/bin/python scripts/audit_local.py test tests/test_audit_repairs_20261009.py
+.venv/bin/python scripts/audit_local.py probe concurrency
+.venv/bin/python scripts/audit_local.py probe restart-prepare
+.venv/bin/python scripts/audit_local.py probe restart-recover
+.venv/bin/python scripts/audit_local.py probe restart-completed-prepare
+.venv/bin/python scripts/audit_local.py probe restart-recover
+.venv/bin/python scripts/audit_local.py restore-drill
+.venv/bin/python scripts/audit_local.py stop
+```
+
+初始finding命令6失败，修复后原断言全部通过；29项修复回归已进入默认tests，未skip/xfail或删除旧断言。重跑prepare/concurrency新建标记合成空间；recover只处理其manifest。restore-drill仅创建/清理入口拥有的独立演练源/目标库，已有非演练同名库拒绝使用。stop停止专用审查PG，和local_dev.py stop保留开发PG不同。截图/样本均合成；审查web只绑定本机，结束后停止该进程。
+
+每次修复按project-map影响表选定测试，再运行相应财务/权限/任务回归、Python检查、模型check/迁移差异、前端类型/测试/格式和必要页面。模型变化必须在新的隔离库owner迁移、runtime执行，不能用SQLite/owner运行通过代替RLS。实际检查命令和结果写入该批次验收；不重复无影响的全套测试。
+
+### 8.4 重算、发布与回滚要求
+
+本轮只给步骤，不执行生产操作。历史收益分析/Projection可重建，原Event/JournalLine/PositionMovement/SourceRecord.raw不可为了日期展示修改。真实金额/份额更正独立走冲正替代并检查后续依赖。
+
+重算前先核对输入版本/范围和私有文件，认证备份并在独立库验证可恢复；固定算法版本、空间、日期范围、截止revision，输出旧/新每日收益、缺口、来源、汇总差异及原流水校验。预览获授权后按空间小批幂等执行并保留审计；新原始事实到来时旧预览失效。失败保留现有可用投影，可回滚到先前投影版本；不能以恢复全库来撤销几行展示结果。
+
+发布前确认B批次断言、页面、接口兼容、迁移和备份/回滚；停止/恢复任务避免双beat，源码/产物/SHA与生产分别核对。回退代码不得删除已经生成的正确新事实；有新账务的版本回滚必须先验证读兼容与队列状态。真实数据修复、密钥轮换、生产部署/恢复均须具体授权；历史2.2清空账簿的发布命令不适用于日常升级。
+
+当前0012原生小样本恢复已验证认证加密、文件hash、RLS/不可变/清理权限、Viewer原件权限及重复补扫，结果见[恢复证据](audits/evidence/2026-10-09/repair-restore-drill.json)。核对EvidenceLink/替代完整链、Docker、真实队列中断、规模与异地备份/告警仍未验；过去0006记录保留，不用1.903秒小样本承诺生产RPO/RTO。
+
+### 8.5 初始化与恢复后的最小权限（AUD-007）
+
+`scripts/database_privileges.py`是初始化/恢复授权的唯一维护位置：owner业务表可授runtime CRUD，内部`wealth_cleanup_scope`禁止PUBLIC/runtime直接访问；4个已知受保护SECURITY DEFINER函数撤销PUBLIC执行并保留应用入口。`local_dev.configure_database`与`backup.restore`事务应用同一策略；新增类似私有能力表/函数必须同时更新策略和恢复/不可变回归，不能再次使用ALL TABLES宽授权。
+
+在已授权的环境可只读检查：`SELECT has_table_privilege('wealth_app','public.wealth_cleanup_scope','INSERT');`必须false；同时核实runtime非owner/NOSUPERUSER/NOBYPASSRLS、强制RLS和受保护函数ACL。不要在生产尝试伪造INSERT来“验证”。重复init后运行`test_administration_v25::test_immutable_and_rls_cannot_be_bypassed_with_context_flags_or_private_scope`，恢复后运行test_restore_local的权限/事实/文件断言。
+
+生产ACL尚未核实或更改；发布前只读列权限与运行版本，认证备份、维护窗与具体授权后再修订。回滚须保留私有表REVOKE及函数保护，禁止恢复不安全的ALL TABLES授权；权限收紧不需要修改历史账务。
+
+### 8.6 2.12.0 候选版的定位与保数据发布
+
+待核对的状态与按钮先说明下一步，点击定位当前空间的原账户/产品/期次。余额不足进入账户核对；费用与账户配置进入计划设置；日历/份额规则进入产品；已知NAV冲突进入来源详情；确认差异进入账单核对；已有扣款疑点进入关联实账。普通waiting_nav/confirmation/date不制造人工确认。仅打开页面不会执行核对、更正、扣款或份额生成。账户核对保护说明默认折叠，需要时展开。
+
+常规验收使用 `scripts/audit_local.py` 的离线独立数据库，以及前端测试、类型检查、格式检查、生产构建；本批必跑 `test_display_ordering.py`、`test_occurrence_navigation.py`、`business-action.test.mjs`、`date-ordering.test.mjs`、`entity-form.test.mjs`、`coin-oracle.test.mjs`。浏览器验证新增核对默认值、状态点击后的对象、最近/未来范围、铜钱六爻/重置/窄屏；不能只凭服务测试声称页面通过。
+
+已授权发布仍需验证真实SSH访问与运行镜像；网站账户不等于服务器凭证。2.12工具位于隔离工作区 `.runtime/v212/deploy/`，继承2.11两阶段停写/指纹/认证备份流程，并新增主机backup.py/database_privileges.py冻结安装和前任快照。先验候选，再prepare停写备份；拿到认证本地副本才apply；失败不清卷/恢复旧数据冒充回滚。仅替换备份工具不会执行生产权限修订。具体冻结源码、工具测试和未运行项在[发布说明](release-2.12.0.md)记录。

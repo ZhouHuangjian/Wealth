@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   App,
@@ -414,7 +415,7 @@ export function FundOrders({
   instrumentId?: string;
   accountId?: string;
 }) {
-  const { space, reload, requestReveal, hidden } = useWorkspace();
+  const { space, reload, requestReveal, hidden, showDetail } = useWorkspace();
   const { modal, message } = App.useApp();
   const [editing, setEditing] = useState<Item | null>(null);
   const [linking, setLinking] = useState<Item | null>(null);
@@ -422,6 +423,57 @@ export function FundOrders({
   const accountState = useResource("accounts", "?limit=1000");
   const [linkBusy, setLinkBusy] = useState(false);
   const [page, setPage] = useState(1);
+  const [routeParams, setRouteParams] = useSearchParams();
+  const [actionError, setActionError] = useState("");
+  const locatedOrder = useRef("");
+  useEffect(() => {
+    const id = routeParams.get("order_id");
+    if (
+      routeParams.get("action") !== "check-order" ||
+      !id ||
+      routeParams.get("tab") !== (pending ? "todos" : "investments")
+    ) {
+      locatedOrder.current = "";
+      return;
+    }
+    const key = `${space.id}:${id}`;
+    if (locatedOrder.current === key) return;
+    let active = true;
+    setActionError("");
+    api<Item>(`/spaces/${space.id}/fund-orders/${encodeURIComponent(id)}`)
+      .then((order) => {
+        if (!active) return;
+        locatedOrder.current = key;
+        if (space.role === "viewer") {
+          setActionError(
+            "已定位申购记录。对照机构进度查看原记录，保存实际进度或更正请联系空间管理员。",
+          );
+          requestReveal(() => showDetail(order));
+        } else if (["confirmed", "cancelled"].includes(order.status)) {
+          setActionError(
+            "该记录已确认或已撤销，请查看原记录；实际账单有差异时到基金交易核对关联证据。",
+          );
+          requestReveal(() => showDetail(order));
+        } else requestReveal(() => setEditing(order));
+        const next = new URLSearchParams(routeParams);
+        next.delete("action");
+        setRouteParams(next, { replace: true });
+      })
+      .catch(() => {
+        if (active)
+          setActionError(
+            "指定申购记录不存在或不在当前空间，请返回待办重新选择。",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    space.id,
+    pending,
+    routeParams.get("action"),
+    routeParams.get("order_id"),
+  ]);
   useEffect(() => setPage(1), [space.id, pending, instrumentId, accountId]);
   const linkLock = useRef(false);
   const params = new URLSearchParams({
@@ -450,6 +502,14 @@ export function FundOrders({
         title={pending ? "基金待处理" : "基金申购进度"}
         subtitle={pending ? "仅显示需要补充信息或处理的异常。" : undefined}
       >
+        {actionError && (
+          <Alert
+            type="info"
+            showIcon
+            message={actionError}
+            style={{ marginBottom: 12 }}
+          />
+        )}
         <LoadState {...state}>
           <Table
             rowKey="id"

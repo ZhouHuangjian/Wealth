@@ -34,7 +34,8 @@ import {
   MoreHorizontal,
   Pin,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { holdingForAction, holdingNextAction } from "../business-action";
 import type { ColumnsType } from "antd/es/table";
 import HoldingDisplaySettings, {
   useHoldingDisplayPreferences,
@@ -205,6 +206,9 @@ export default function InvestmentWorkspace({
 }) {
   const { space, requestReveal, hidden, refresh } = useWorkspace();
   const navigate = useNavigate();
+  const [routeParams, setRouteParams] = useSearchParams();
+  const locatedAction = useRef("");
+  const [actionError, setActionError] = useState("");
   const { modal } = App.useApp();
   const [kind, setKind] = useState(""),
     [converting, setConverting] = useState<Item | null>(null),
@@ -233,13 +237,26 @@ export default function InvestmentWorkspace({
     products ? "instruments" : "holdings",
     `?${params}`,
   );
+  const accountState = useResource("accounts", "?limit=1000");
+  const scopedAccountId =
+    !products && !routeParams.get("action") && !routeParams.get("instrument_id")
+      ? routeParams.get("account_id")
+      : null;
+  const scopedAccount = listOf<Item>(accountState.data).find(
+    (account) => account.id === scopedAccountId,
+  );
   const quotes = useResource("market/quotes");
   const debouncedQuery = useDebounced(query);
   const display = useHoldingDisplayPreferences(space.id);
   const asOf = state.data?.as_of || dateToday();
   const filteredRows = (
     products ? listOf<Item>(state.data) : holdingDisplayRows(state.data)
-  ).filter((row) => holdingMatches(row, debouncedQuery, products ? "" : kind));
+  ).filter(
+    (row) =>
+      holdingMatches(row, debouncedQuery, products ? "" : kind) &&
+      (!scopedAccountId ||
+        (!!scopedAccount && row.account_id === scopedAccountId)),
+  );
   const rows = products
     ? filteredRows
     : (sortHoldings(filteredRows, display.preferences, asOf) as Item[]);
@@ -275,6 +292,78 @@ export default function InvestmentWorkspace({
       setOpen(true);
     });
   }
+  useEffect(() => {
+    const action = routeParams.get("action");
+    if (!action) {
+      locatedAction.current = "";
+      return;
+    }
+    if (state.loading || state.error) return;
+    if (
+      products
+        ? action !== "edit-product"
+        : !["check-holding", "edit-plan"].includes(action)
+    )
+      return;
+    const key = `${space.id}:${products}:${routeParams.toString()}`;
+    if (locatedAction.current === key) return;
+    locatedAction.current = key;
+    setActionError("");
+    function consumeAction() {
+      const next = new URLSearchParams(routeParams);
+      next.delete("action");
+      setRouteParams(next, { replace: true });
+    }
+    if (action === "edit-plan") {
+      setPlanHolding(null);
+      setPlansOpen(true);
+      return;
+    }
+    if (action === "edit-product") {
+      const product = listOf<Item>(state.data).find(
+        (item) => item.id === routeParams.get("instrument_id"),
+      );
+      if (!product) {
+        setActionError("指定产品不存在或不在当前空间，请重新选择。");
+        return;
+      }
+      if (space.role === "viewer") {
+        setActionError(
+          "已定位产品。你可以查看产品规则，修正请联系空间管理员。",
+        );
+        setQuery(product.name || product.code || "");
+        return;
+      }
+      add(product, true);
+      consumeAction();
+      return;
+    }
+    const holding = holdingForAction(
+      holdingDisplayRows(state.data) as Item[],
+      routeParams.get("account_id"),
+      routeParams.get("instrument_id"),
+    );
+    if (!holding) {
+      setActionError("指定持仓不存在或不在当前空间，请返回持仓重新选择。");
+      return;
+    }
+    if (space.role === "viewer") {
+      setActionError(
+        "已定位这笔待核对持仓。请对照同日期、同份额范围的机构数据；保存核对或更正请联系空间管理员。",
+      );
+      setQuery(holding.instrument_name || holding.name || "");
+      return;
+    }
+    if (!holding.reconciliation_eligibility?.eligible) {
+      setActionError(
+        holding.reconciliation_eligibility?.reason ||
+          "请先到收支账本核对原交易和定投记录。",
+      );
+      return;
+    }
+    requestReveal(() => setHoldingCheck(holding));
+    consumeAction();
+  }, [space.id, products, state.data, routeParams.toString()]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       void quotes.retry();
@@ -338,6 +427,43 @@ export default function InvestmentWorkspace({
           </Space>
         }
       >
+        {actionError && (
+          <Alert
+            type="info"
+            showIcon
+            message={actionError}
+            style={{ marginBottom: 12 }}
+          />
+        )}
+        {scopedAccountId && !accountState.loading && (
+          <Alert
+            type={scopedAccount ? "info" : "warning"}
+            showIcon
+            message={
+              scopedAccount
+                ? `当前账户：${scopedAccount.name}`
+                : "指定账户不存在或不在当前空间。"
+            }
+            description={
+              scopedAccount
+                ? "仅展示此账户的持仓。根据实际机构记录补全持仓日期或交易，不能将资料缺失视为零收益。"
+                : "请返回首页重新选择，或查看全部持仓。"
+            }
+            action={
+              <Button
+                size="small"
+                onClick={() => {
+                  const next = new URLSearchParams(routeParams);
+                  next.delete("account_id");
+                  setRouteParams(next);
+                }}
+              >
+                全部持仓
+              </Button>
+            }
+            style={{ marginBottom: 12 }}
+          />
+        )}
         {!products && !state.loading && !state.error && (
           <HoldingsOverview
             rows={filteredRows}
@@ -628,7 +754,20 @@ export default function InvestmentWorkspace({
                             </div>
                           )}
                           {r.status === "needs_reconciliation" && (
-                            <small>金额范围待核对</small>
+                            <Tooltip
+                              title={holdingNextAction(space.id, r).description}
+                            >
+                              <Button
+                                type="link"
+                                size="small"
+                                style={{ paddingInline: 0 }}
+                                onClick={() =>
+                                  navigate(holdingNextAction(space.id, r).to)
+                                }
+                              >
+                                金额范围待核对
+                              </Button>
+                            </Tooltip>
                           )}
                           {(r.contains_preview_entries ||
                             r.contains_automatic_estimates ||
@@ -796,7 +935,25 @@ export default function InvestmentWorkspace({
                           >
                             {r.status === "needs_reconciliation" ? (
                               <>
-                                <Tag color="orange">待核对</Tag>
+                                <Tooltip
+                                  title={`${holdingNextAction(space.id, r).description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
+                                >
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    style={{ paddingInline: 0 }}
+                                    onClick={() =>
+                                      navigate(
+                                        holdingNextAction(space.id, r).to,
+                                      )
+                                    }
+                                  >
+                                    待核对 ·{" "}
+                                    {space.role === "viewer"
+                                      ? "查看操作说明"
+                                      : holdingNextAction(space.id, r).label}
+                                  </Button>
+                                </Tooltip>
                                 <small>
                                   机构显示{" "}
                                   <Money
@@ -1099,11 +1256,14 @@ export default function InvestmentWorkspace({
           />
         </LoadState>
         {!products && (
-          <p className="data-caption">
-            盘中估值按可用行情更新；基金正式净值发布后归属到对应交易日。期货权益见「分析复盘
-            →
-            行情与结算」。期权参考持仓的市值和毛浮动盈亏单独展示，不重复计入账户权益。
-          </p>
+          <details className="data-caption">
+            <summary>收益与估值说明</summary>
+            <p>
+              盘中估值按可用行情更新；基金正式净值发布后归属到对应交易日。期货权益见「分析复盘
+              →
+              行情与结算」。期权参考持仓的市值和毛浮动盈亏单独展示，不重复计入账户权益。
+            </p>
+          </details>
         )}
       </Panel>
       <Drawer

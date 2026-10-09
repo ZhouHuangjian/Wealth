@@ -1,6 +1,7 @@
 import { helpColumns } from "../help";
 import { useEffect, useState } from "react";
-import { Alert, Input, Space, Table, Tag } from "antd";
+import { Alert, Button, Input, Space, Table, Tag } from "antd";
+import { useSearchParams } from "react-router-dom";
 import {
   Search,
   Activity,
@@ -174,19 +175,58 @@ export default function MarketValuation() {
 }
 export function QuotesTable() {
   const { space, refresh } = useWorkspace();
+  const [routeParams, setRouteParams] = useSearchParams();
+  const instrumentId = routeParams.get("instrument_id");
   const [query, setQuery] = useState("");
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const state = useResource("market/quotes");
+  const allRows = listOf<Item>(state.data);
+  const target = allRows.find((row) => row.instrument_id === instrumentId);
+  useEffect(() => {
+    if (instrumentId && target) setExpandedKeys([instrumentId]);
+  }, [instrumentId, target?.instrument_id]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       void state.retry();
     }, 60000);
     return () => window.clearInterval(timer);
   }, [space.id, refresh]);
-  const rows = listOf<Item>(state.data).filter((r) =>
-    [r.name, r.code].join(" ").toLowerCase().includes(query.toLowerCase()),
+  const rows = allRows.filter(
+    (r) =>
+      (!instrumentId || r.instrument_id === instrumentId) &&
+      [r.name, r.code].join(" ").toLowerCase().includes(query.toLowerCase()),
   );
   return (
     <Panel title="自动行情" action={<RefreshQuotes onDone={state.retry} />}>
+      {instrumentId && !state.loading && (
+        <Alert
+          type={target ? "info" : "warning"}
+          showIcon
+          message={
+            target
+              ? `已定位净值来源：${target.name || target.code}`
+              : "指定产品没有可查看的行情记录，或不在当前空间。"
+          }
+          description={
+            target
+              ? `查看来源日期与差异，系统保留已知冲突，可信数据恢复后自动继续处理。${space.role === "viewer" ? "资料核实或修正请联系空间管理员。" : ""}`
+              : "请返回持仓核实产品，或查看全部行情。"
+          }
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                const next = new URLSearchParams(routeParams);
+                next.delete("instrument_id");
+                setRouteParams(next);
+              }}
+            >
+              查看全部行情
+            </Button>
+          }
+          style={{ marginBottom: 12 }}
+        />
+      )}
       <div className="table-toolbar">
         <Input
           prefix={<Search size={16} />}
@@ -207,6 +247,8 @@ export function QuotesTable() {
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
           scroll={{ x: 1000 }}
           expandable={{
+            expandedRowKeys: expandedKeys,
+            onExpandedRowsChange: (keys) => setExpandedKeys([...keys]),
             rowExpandable: (r) => {
               const details = quoteDetails(r);
               return (

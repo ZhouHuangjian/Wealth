@@ -443,6 +443,7 @@ def holdings_summary(
     include_pending=True,
 ):
     from .reporting import formal_price, positions
+    from .market_quality import available_prices
 
     when = day(when)
     accounts, instruments = _selected_rows(space, account_id, instrument_id, kind)
@@ -489,11 +490,13 @@ def holdings_summary(
             .first()
         )
         reference = (
-            Price.objects.filter(
-                tenant=space,
-                instrument=instrument,
-                economic_date__lte=when,
-                kind__in=REFERENCE_KINDS,
+            available_prices(
+                Price.objects.filter(
+                    tenant=space,
+                    instrument=instrument,
+                    economic_date__lte=when,
+                    kind__in=REFERENCE_KINDS,
+                )
             )
             .order_by("-economic_date", "-published_at", "-created_at")
             .first()
@@ -1120,9 +1123,10 @@ def profit_calendar(
     accounts, instruments = _selected_rows(space, account_id, instrument_id, kind)
     movement_groups = defaultdict(list)
     from .return_dates import analytical_movement
+    from .fund_reconciliation import actual_confirmation_ids
 
     known_on = timezone.localdate()
-    for row in (
+    movement_rows = list(
         PositionMovement.objects.filter(
             tenant=space,
             account_id__in=accounts,
@@ -1132,10 +1136,18 @@ def profit_calendar(
         )
         .select_related("event__related")
         .order_by("event__economic_date", "event__created_at")
-    ):
+    )
+    verified = actual_confirmation_ids(
+        space,
+        [row.event_id for row in movement_rows if row.event.kind == "fund_confirm"],
+    )
+    for row in movement_rows:
         movement_groups[(str(row.account_id), str(row.instrument_id))].append(
             analytical_movement(
-                row, instruments[str(row.instrument_id)], known_on=known_on
+                row,
+                instruments[str(row.instrument_id)],
+                known_on=known_on,
+                shares_verified=str(row.event_id) in verified,
             )
         )
     prices = defaultdict(list)
