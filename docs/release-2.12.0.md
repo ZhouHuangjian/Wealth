@@ -44,14 +44,15 @@
 | `npm test/typecheck/format:check/build` | 178项通过，无skip；类型、格式和生产构建通过；已有大于500 kB产物告警保留 |
 | `ruff format --check backend scripts` / CI关键lint | 169文件格式通过、关键规则通过；views的8项全规则提示与HEAD基线一致，未无关重构 |
 | `unittest discover -s scripts` | 5项备份密码学/边界测试通过；直接把脚本作为包模块加载的尝试因导入路径失败，按项目CI的discover入口运行成功 |
-| `unittest discover -s .runtime/v212/deploy` | 45项发布安全测试通过；不连接Docker/服务器 |
+| `unittest discover -s .runtime/v212/deploy` | 46项发布安全测试通过；不连接Docker/服务器 |
 | 普通用户浏览器 | 离线合成账簿：待核对持仓点击定位；余额异常定位；日期倒序与最近/未来切换；默认值；桌面/390px铜钱、六次卦象、键盘、重置通过。未提交核对或外部交易 |
+| 本地主机工具 | 原Python缺certifi/default CA验证失败；改用已安装系统CA并实际验证TLS，不关闭证书/主机名验证，新增离线保护用例通过 |
 | 生产只读 | 公网HTTPS health实际2.11.0，匿名setup关闭；SSH publickey/password拒绝。生产镜像SHA、任务、备份、私有数据未核实 |
 | 本版部署 | 未运行服务器镜像构建/候选回归、停写、认证备份或切换；不得标记已部署 |
 
 原有2.11.0结果没有复用为本版通过证据。日期新增测试首次两次fixture错误、UI新增表单默认值的实际失败及后续修复保留；没有删除断言或skip来求全绿。减少动画分支有实现，实际系统偏好切换未做；真实账单、生产规模和跨市场等既有审计未覆盖项不因本次展示通过而关闭。
 
-冻结应用提交 `d95984442f409a4f37ddfe4310d05e6327d1708d`；源包 `wealth-release-source-2.12.0-20261009.tar.gz`（382个源码文件，无迁移、依赖或手册改动），SHA-256 `64510e57e8d670cc6743640eaf54d645ccb02b054a8d4831fd8da83333eaffc7`。独立归档安装/前端构建178项通过，冻结源码后端1495项通过；冻结前后的关键真实页面均复验。结果与未运行项见[本批证据](audits/evidence/2026-10-09/ux-release-results.json)，本地发布包、截图、完整日志及45项发布安全工具保留在 `.runtime/v212/deploy/`。后续文档证据提交不改变这一冻结应用提交。
+冻结应用提交 `d95984442f409a4f37ddfe4310d05e6327d1708d`；源包 `wealth-release-source-2.12.0-20261009.tar.gz`（382个源码文件，无迁移、依赖或手册改动），SHA-256 `64510e57e8d670cc6743640eaf54d645ccb02b054a8d4831fd8da83333eaffc7`。独立归档安装/前端构建178项通过，冻结源码后端1495项通过；冻结前后的关键真实页面均复验。结果与未运行项见[本批证据](audits/evidence/2026-10-09/ux-release-results.json)，本地发布包、截图、完整日志及46项发布安全工具保留在 `.runtime/v212/deploy/`。后续文档证据提交不改变这一冻结应用提交。
 
 69个Linux3.13依赖轮子已重核全部哈希及元数据，锁文件与2.11相同；这不替代本版服务器候选的pip check或Linux运行测试。干净安装额外报告既有间接构建依赖source-map-js1.2.1的DoS公告；后续最小锁文件补丁见open-decisions DEP-001，本轮没有用npm audit fix无审查修改依赖。
 
