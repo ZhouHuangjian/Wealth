@@ -1,6 +1,6 @@
 # Wealth API 契约（当前实现）
 
-维护核对：2026-10-09，代码基线 `e379dfe67a715d9913af246eba021c7b26ce45d1`。本文维护当前接口；业务定义唯一维护在 [领域模型](domain-model.md#12-现行业务基线2026-10-09)，调用链见 [项目地图](project-map.md)。2.11.0部署声明是[历史发布证据](release-2.11.0.md)，本轮只核实公开health版本，运行SHA与任务未核实。基础部分源自2.2，下面标明当前增量与已知差异，不能把历史描述当成修复完成。
+维护核对：2026-10-10，已发布应用提交 `c99d3b35bc82e38cb52559333a30e7f86e527605`。本文维护当前接口；业务定义唯一维护在[领域模型](domain-model.md#12-现行业务基线2026-10-09)，调用链见[项目地图](project-map.md)。2.12.0保数据发布于2026-10-10最终验收通过，运行镜像、任务与只读生产核验范围见[发布说明](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)。初始 `e379dfe67a715d9913af246eba021c7b26ce45d1` 审查和[2.11.0发布](release-2.11.0.md)保留为历史证据；基础部分源自2.2，不能把历史描述当成当前交付。
 
 **当前采用 Django 同源会话接口。虽然依赖中包含 DRF / drf-spectacular，但尚未暴露或核验覆盖这些函数视图的自动 OpenAPI schema；本文不是自动生成接口的声明。**
 
@@ -26,7 +26,7 @@
 
 当前preview返回`batch,headers,mapping,context,preview_version,ledger_revision,preview_hash,rows,summary,count,offset,limit,has_more`；summary覆盖全批，rows默认500分页。标准解析器`fund-confirmation-1`不能通过普通commit重复记收支。订单/SourceFact永久身份、当前版本/修订/哈希、金额币种尾差及后续依赖须保留。
 
-修复增量（已隔离验证、未部署）：mapping/normalized增加可选`nav_date`，别名为成交净值日期/净值日期/净值归属日/nav_date；没有提供则null，明确日期差异不能作为一致行绑定。更正保留实际confirmation_date并传有据nav_date；旧已处理预览/批次不自动重解析。解析版本保持`fund-confirmation-1`兼容，不改变已存来源身份。有效完整确认EvidenceLink在日收益和日历批量读取；部分付款证据不能升级份额来源，撤销后恢复推算，原payload不改。日期边界见领域模型§13。
+2.12已发布修复：mapping/normalized增加可选`nav_date`，别名为成交净值日期/净值日期/净值归属日/nav_date；没有提供则null，明确日期差异不能作为一致行绑定。更正保留实际confirmation_date并传有据nav_date；旧已处理预览/批次不自动重解析。解析版本保持`fund-confirmation-1`兼容，不改变已存来源身份。有效完整确认EvidenceLink在日收益和日历批量读取；部分付款证据不能升级份额来源，撤销后恢复推算，原payload不改。日期边界见领域模型§13。
 
 ## 1. 基础规则
 
@@ -583,7 +583,7 @@ Outbox 状态为 pending/queued/failed/done/superseded。业务修订与 Outbox 
 
 2.9后的明细另含 `price_basis,observation_kind,return_date,nav_date,published_at,observed_at,quantity_source` 及 `latest_formal_return`；兼容键 `latest_confirmed_return` 不是机构确认承诺。历史正式日期只作上下文，不加入所选日总额。`profit-calendar` 可以返回 `estimated`（份额为推算），即使价格正式也要显示“按正式净值计算，份额为推算”。正式与估算同区间择一，缺口用null；最近净值、当前估值、收益和净资产变化不能同名同义。
 
-AUD-002/003/004/006已在隔离分支修复：完整实际证据升级有效份额来源；标准核对保留有据成交日；旧/未知/未来时点报价不因刚抓取而进入今日参考计算；正式选择器统一排除未来公布。公布时间未知的正式观察仍可用，不伪造时刻。当前日参考时效沿用来源20分钟delayed及10分钟fetch门槛，不是全产品实时SLA。估算基准/期间等完整元数据仍是OD-05/R-004目标，字段尚未完整实现。
+AUD-002/003/004/006已修复并随2.12发布：完整实际证据升级有效份额来源；标准核对保留有据成交日；旧/未知/未来时点报价不因刚抓取而进入今日参考计算；正式选择器统一排除未来公布。公布时间未知的正式观察仍可用，不伪造时刻。当前日参考时效沿用来源20分钟delayed及10分钟fetch门槛，不是全产品实时SLA。估算基准/期间等完整元数据仍是OD-05/R-004目标，字段尚未完整实现。
 
 ## 22. 定投自动记账（唯一现行契约）
 
@@ -603,7 +603,7 @@ AUD-002/003/004/006已在隔离分支修复：完整实际证据升级有效份�
 
 已有扣款状态只在对应条件恢复后进入份额处理；精确当期正式NAV可来自可信单源，盘中估值缺失不阻塞。已知同日冲突隔离仍保留。paused/completed已扣期次可收尾，completed不生成新期次/新扣款；显式disabled、取消/排除、冲正及事实冲突仍不自动推进。归档/草稿不采用completed资格。同条件waiting_cash重复扫描不提高账簿修订或Occurrence版本；真实排期/配置变化保留版本保护（AUD-001/005已修复）。
 
-已有本地金融阶段与历史补录共享稳定的空间+计划+原锚点+阶段标识。不同订单不能因同日同额合并。实际证据链接/更正接口见fund-preview/fund-apply；完整实际确认升级有效份额来源，撤销则恢复推算。以上是未部署的修复增量，无数据库列迁移或历史事实更新。
+已有本地金融阶段与历史补录共享稳定的空间+计划+原锚点+阶段标识。不同订单不能因同日同额合并。实际证据链接/更正接口见fund-preview/fund-apply；完整实际确认升级有效份额来源，撤销则恢复推算。以上修复随2.12发布，无数据库列迁移或生产历史事实更新。
 
 ## 23. 买入在途与待确认（现行）
 
@@ -634,12 +634,14 @@ AUD-002/003/004/006已在隔离分支修复：完整实际证据升级有效份�
 
 账户返回 `recording_mode`、`history_status`、`recording_start_date`。余额记录不推断投资收益；缺失历史不提供完整年化。待确认明细的 `source_account_id` 始终表示在途资金记账位置，补关联后的实际付款来源另由 `actual_funding_account_id` 表示，避免改动资金归属或重复加总。
 
-## 25. 2.12.0 候选版：只读展示与处理定位
+## 25. 2.12.0：只读展示与处理定位
 
 `GET calendar` 默认 `scope=recent`，以空间业务日计算最近30日；`scope=upcoming` 查看未来30日。显式 `start/end` 可覆盖范围，开始晚于结束返回领域错误。返回 `start/end/items`，items 最近日期在前。读取和切换范围不生成期次或资金事实；daily_returns 的日期资格与自然时间轴不变。
 
 业务明细在后端分页前按业务日期倒序，创建时间和id用于稳定同日顺序；日期未知末尾。流水按economic_date，净值/汇率/权益按economic_date，期次/还款按due_date，核对按as_of，预算按month，目标按target_date，计划按start_date，订单按application_date。导入批次按created_at；机构账单预览全批按业务日期排序后分页，保留源行号、身份及预览哈希。规则维护在 `display_ordering.py` 与 `date-ordering.ts`。
 
 期次及overview待办新增只读 `plan_id/account_id/holding_account_id/instrument_id` 定位字段，优先保存的期次身份及扣款事实，未有事实时才采用计划配置。overview保留 `occurrence_id/details/automation` 供页面解释具体原因，属于原有空间权限内的投影。点击提示只打开同空间的既有处理窗口，不触发POST、更正、重新扣款或自动调平。对象不存在/无写入权时明确提示。具体导航由 `frontend/src/business-action.ts` 维护。
+
+`GET overview` 的 `calculation_version` 当前为 `account-equity-v25`，唯一常量维护在 `reporting.OVERVIEW_CALCULATION_VERSION`。当前日期与空间本位币请求，仅在Projection的 `revision/as_of/calculation_version` 同时与当前条件一致时读取缓存并返回 `cached=true`；旧v24或缺版本的payload直接只读计算当前响应，保留旧Projection，不经GET写缓存、产生Outbox或提高修订。其他日期/显示币种仍实时计算；没有 `cached=true` 不代表数据缺失。`test_overview_projection_version.py`覆盖真实旧结构待办定位和当前缓存，两条路径均不得写账。
 
 娱乐角无新增后端接口、数据库事实或持久化配置。

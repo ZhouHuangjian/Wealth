@@ -1,6 +1,6 @@
 # 本地启动、部署与恢复手册
 
-维护日期2026-10-09。提供本地启动和compose容器步骤；现行定位与回归入口见[项目地图](project-map.md)，本轮版本/任务/恢复边界见[审查报告](audits/system-audit-2026-10-09.md)。公网health只读返回2.11.0，不等于当前镜像/SHA、调度或备份已验证。服务器部署历史见[部署记录](server-deployment.md)和[2.11发布](release-2.11.0.md)；不以旧记录承诺现在健康。系统没有外部付款、自动机构账单拉取或自动汇率能力。
+维护日期2026-10-10。提供本地启动和compose容器步骤；现行定位与回归入口见[项目地图](project-map.md)，初始审查边界见[审查报告](audits/system-audit-2026-10-09.md)。2.12.0已完成保数据发布，2026-10-10 08:13:25（北京时间）最终验收通过；本版镜像、任务、认证备份与只读核验范围见[2.12发布](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)。历史服务器记录见[部署记录](server-deployment.md)，2026-10-09的2.11公网版本及SSH阻塞属于发布前阶段。系统没有外部付款、自动机构账单拉取或自动汇率能力。
 
 2.10.0 新增数据源 Token 加密存储。运维必须保留原 `DJANGO_SECRET_KEY`；轮换使用 `DJANGO_SECRET_KEY_FALLBACKS`（旧密钥的 JSON 数组），过渡期间重新保存 Token 后才能移除旧密钥。后台只提供写入/删除及状态，不提供读取明文；不要直接编辑数据库密文。公开官方净值无需 Token，订阅 Token 仅在独立管理台 → 数据源配置，默认停用。详细来源范围、故障与差异处理见 [2.10.0 发布说明](release-2.10.0.md)。
 
@@ -219,12 +219,12 @@ CI 通过不代表真实机构样本、性能规模、浏览器全部状态或�
 
 ### 8.2 安全重试、核对与更正
 
-状态GET是只读；页面“刷新进度”对有写权限且enabled的计划可能发送`POST plans/{id}/automation/run`，**不是纯读取**。run使用expected_plan_version、幂等键和合法空间权限，可能处理已到期期次。优先让健康任务自动补扫；生产run/修订不在本轮授权内，不能把“点一次试试”当只读诊断。
+状态GET是只读；页面“刷新进度”对有写权限且enabled的计划可能发送`POST plans/{id}/automation/run`，**不是纯读取**。run使用expected_plan_version、幂等键和合法空间权限，可能处理已到期期次。优先让健康任务自动补扫；本次发布未执行生产手工run或事实修订，不能把“点一次试试”当只读诊断。
 
 - 缺NAV/接口中断：恢复对应来源、检查产品日期与隔离后等待下一轮；失败只影响相关产品/日期。网络在写事务之外，有界请求；不在持仓锁中请求第三方。
 - waiting_cash：核实所选账户的真实余额/期初覆盖、机构留存、冻结/预留和已有扣款；补账簿资料与真实不足分别处理。不能自动找另一银行卡或把货币基金当已赎现金。
 - waiting_fee/configuration_required：只补一次计划规则且标生效范围，不重开off；已扣款可以等份额规则。费率未知不得默认为零。
-- 已付而completed：修复后enabled计划可自动收尾已扣期次，计划仍completed，不新增期次/扣款；off、取消/冲正、排除和事实冲突仍阻断。生产尚未部署：先只读列期次/在途/原授权，不批量改active或重开off；生产补扫另授权。
+- 已付而completed：2.12已发布修复，enabled计划可自动收尾已扣期次，计划仍completed，不新增期次/扣款；off、取消/冲正、排除和事实冲突仍阻断。排查先只读列期次/在途/原授权，不批量改active或重开off；手工生产补扫需明确范围，不能作为部署验收试写。
 - 实际账单晚到：标准fund-preview→明确link/correct/skip→fund-apply；相同订单优先补证，金额/份额差异冲正替代，保留原文件、原推算和审计。同日同额不是同一交易。原确认已有后续卖出/退款时先处理依赖。
 - 成交净值日：修复后标准账单显式映射nav_date并分别预览扣款/确认/NAV日；未知留空，日期差异需有原因更正。旧已处理批次不自动重解析，历史补有据日期先差异预览；不能修改原confirm.economic_date绕开资格。
 - 已知NAV冲突：默认等独立origin一致；官方更正提案OD-01没有已实现操作命令，不能手工删除隔离。保存原因、来源、更正证据和受影响日期。
@@ -254,7 +254,7 @@ CI 通过不代表真实机构样本、性能规模、浏览器全部状态或�
 
 ### 8.4 重算、发布与回滚要求
 
-本轮只给步骤，不执行生产操作。历史收益分析/Projection可重建，原Event/JournalLine/PositionMovement/SourceRecord.raw不可为了日期展示修改。真实金额/份额更正独立走冲正替代并检查后续依赖。
+2.12保数据发布已获授权并完成，未执行生产历史重算、事实修订、备份恢复、权限修订或数据重置。以下重算仍是操作要求，不代表已经执行。历史收益分析/Projection可重建，原Event/JournalLine/PositionMovement/SourceRecord.raw不可为了日期展示修改。真实金额/份额更正独立走冲正替代并检查后续依赖。
 
 重算前先核对输入版本/范围和私有文件，认证备份并在独立库验证可恢复；固定算法版本、空间、日期范围、截止revision，输出旧/新每日收益、缺口、来源、汇总差异及原流水校验。预览获授权后按空间小批幂等执行并保留审计；新原始事实到来时旧预览失效。失败保留现有可用投影，可回滚到先前投影版本；不能以恢复全库来撤销几行展示结果。
 
@@ -268,12 +268,16 @@ CI 通过不代表真实机构样本、性能规模、浏览器全部状态或�
 
 在已授权的环境可只读检查：`SELECT has_table_privilege('wealth_app','public.wealth_cleanup_scope','INSERT');`必须false；同时核实runtime非owner/NOSUPERUSER/NOBYPASSRLS、强制RLS和受保护函数ACL。不要在生产尝试伪造INSERT来“验证”。重复init后运行`test_administration_v25::test_immutable_and_rls_cannot_be_bypassed_with_context_flags_or_private_scope`，恢复后运行test_restore_local的权限/事实/文件断言。
 
-生产ACL尚未核实或更改；发布前只读列权限与运行版本，认证备份、维护窗与具体授权后再修订。回滚须保留私有表REVOKE及函数保护，禁止恢复不安全的ALL TABLES授权；权限收紧不需要修改历史账务。
+2.12生产只读核验确认runtime非owner/NOSUPERUSER/NOBYPASSRLS、租户表强制RLS、私有清理表不能SELECT/INSERT、不可变触发器未禁用；没有更改生产ACL。完整权限攻击矩阵和所有受保护函数权限仍不由这些检查替代。部署同时按冻结哈希安装`backup.py/database_privileges.py`，仅更新未来恢复使用的工具；并未在生产执行授权SQL。权限修订仍需认证备份、维护窗与具体范围；回滚不得削弱现有私有表REVOKE及函数保护，禁止执行不安全的ALL TABLES授权。
 
-### 8.6 2.12.0 候选版的定位与保数据发布
+### 8.6 2.12.0 定位与保数据发布
 
 待核对的状态与按钮先说明下一步，点击定位当前空间的原账户/产品/期次。余额不足进入账户核对；费用与账户配置进入计划设置；日历/份额规则进入产品；已知NAV冲突进入来源详情；确认差异进入账单核对；已有扣款疑点进入关联实账。普通waiting_nav/confirmation/date不制造人工确认。仅打开页面不会执行核对、更正、扣款或份额生成。账户核对保护说明默认折叠，需要时展开。
 
-常规验收使用 `scripts/audit_local.py` 的离线独立数据库，以及前端测试、类型检查、格式检查、生产构建；本批必跑 `test_display_ordering.py`、`test_occurrence_navigation.py`、`business-action.test.mjs`、`date-ordering.test.mjs`、`entity-form.test.mjs`、`coin-oracle.test.mjs`。浏览器验证新增核对默认值、状态点击后的对象、最近/未来范围、铜钱六爻/重置/窄屏；不能只凭服务测试声称页面通过。
+常规验收使用 `scripts/audit_local.py` 的离线独立数据库，以及前端测试、类型检查、格式检查、生产构建；本批必跑 `test_display_ordering.py`、`test_occurrence_navigation.py`、`test_overview_projection_version.py`、`business-action.test.mjs`、`date-ordering.test.mjs`、`entity-form.test.mjs`、`coin-oracle.test.mjs`。浏览器验证新增核对默认值、状态点击后的对象、最近/未来范围、铜钱六爻/重置/窄屏；不能只凭服务测试声称页面通过。
 
-已授权发布仍需验证真实SSH访问与运行镜像；网站账户不等于服务器凭证。2.12工具位于隔离工作区 `.runtime/v212/deploy/`，继承2.11两阶段停写/指纹/认证备份流程，并新增主机backup.py/database_privileges.py冻结安装和前任快照。先验候选，再prepare停写备份；拿到认证本地副本才apply；失败不清卷/恢复旧数据冒充回滚。仅替换备份工具不会执行生产权限修订。具体冻结源码、工具测试和未运行项在[发布说明](release-2.12.0.md)记录。
+本版应用提交为 `c99d3b35bc82e38cb52559333a30e7f86e527605`，运行镜像为 `sha256:c9fffa59a720f3e972b3b3460cfa512551012a4cda9ebcc85c0a16217685fa94`，schema保持0012。服务器候选完整后端1498项及12项子测试、关键459项、前端178项、发布工具51项通过。启动前40表、4会话、序列与保留文件指纹相同；服务器及本地独立副本完成认证备份校验。web/worker/beat/db/rabbitmq均healthy且重启计数0，worker回应pong、single beat、备份与续期timer active。14次只读空间GET（9项基础查询+4个定投状态+1项授权状态）、来源目录及公网21个资源一致核验通过；只读生产代管覆盖1个已授权空间，未授权管理员实际分支为0，不宣称全部生产权限路径已验证。[发布说明](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)集中保存时间、哈希与验证结果。
+
+2.12工具位于 `.runtime/v212/deploy/`，采用两阶段停写/指纹/认证备份流程，并管理主机`backup.py/database_privileges.py`冻结安装、前任快照及receipt。先验候选，再prepare停止备份计时器并确认服务/PID停止，安装工具后停应用写入并备份；拿到认证本地副本才apply。回滚先停写，只在完整指纹仍为准备时状态且文件哈希一致时恢复前任操作文件；已有新数据时保留新备份工具，仅审查兼容的镜像回退，不能恢复旧数据库覆盖新数据。失败不清卷、不重置账号或队列，不重新开启旧禁用计划或数据源。
+
+首页返回结构或计算变化必须升级 `reporting.OVERVIEW_CALCULATION_VERSION`。当前v25只读绕过旧v24投影并实时返回定位字段；排查不要删除旧Projection、强制提高空间修订或手工补账来刷新页面。正常任务重算可以生成当前版本投影，GET不写缓存。真实行情/机构样本、规模、历史收益重算、全部权限路径和实际系统减少动画偏好切换等未覆盖范围继续保留，不因发布完成而关闭。
