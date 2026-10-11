@@ -1,0 +1,209 @@
+{
+  "version": "2.13.1",
+  "deployed_at": "2026-10-11T06:13:54.608511+00:00",
+  "source_commit": "93a1ee6f57ceee607863ff5a5cf051e9033149b7",
+  "github_merge_commit": "08614614c5d4955b44c941071fe7a6aebbf28579",
+  "pull_request": "https://github.com/ZhouHuangjian/Wealth/pull/5",
+  "image": {
+    "version": "2.13.1",
+    "image_id": "sha256:6b8e8e2f2a6c20e8b577ff25291395127e48fe903583a903dc3c646a64f48c12",
+    "source_commit": "93a1ee6f57ceee607863ff5a5cf051e9033149b7",
+    "source_manifest_sha256": "98b1f287fd65e1da8ee6893d8576ae38be45b89e7b984425dece43cc2e1632b7",
+    "image_files_manifest_sha256": "456ea68b045d4ded6eb0953ef36dc67d833824bf20c10f828068930403a66917",
+    "source_backend_files": 176,
+    "frontend_files": 23,
+    "parent_image": "sha256:b636f74c998a2147cfe94ccc4b524846f08c8eddf959e6c60c9dee6b1ab11328",
+    "verified_at": "2026-10-11T06:03:48.155914+00:00",
+    "status": "passed"
+  },
+  "regression": {
+    "status": "passed",
+    "version": "2.13.1",
+    "image_id": "sha256:6b8e8e2f2a6c20e8b577ff25291395127e48fe903583a903dc3c646a64f48c12",
+    "image_tag": "wealth:release-2.13.1-20261011-final",
+    "database": "wealth_chat_v2131_final_test",
+    "production_database_used": false,
+    "checked_at": "2026-10-11T06:11:24.035054+00:00",
+    "source_manifest_sha256": "98b1f287fd65e1da8ee6893d8576ae38be45b89e7b984425dece43cc2e1632b7",
+    "source_commit": "93a1ee6f57ceee607863ff5a5cf051e9033149b7",
+    "migration": "0014_chat_device_credentials",
+    "baseline_migrations_preserved": true,
+    "data_reset_performed": false,
+    "candidate_health_version_verified": "2.13.1",
+    "tests_passed": 1546,
+    "tests_skipped": 0,
+    "subtests_passed": 12,
+    "synthetic_credential_encryption_tests_included": true,
+    "scope": "full_regression",
+    "test_files": []
+  },
+  "preservation": {
+    "existing_tables_preserved": 43,
+    "new_tables": 0,
+    "sessions_preserved": true,
+    "files_preserved": true,
+    "backup_verified": true,
+    "backup_sha256": "ef6999b2b8e6bc43505ed9aa773dc01a1188db8ef4799806b805f81839a734f3",
+    "backup_timer_restored": true
+  },
+  "encrypted_backup_local_copy_hash_verified": true,
+  "public_checks": {
+    "health": {
+      "status": "ok",
+      "version": "2.13.1",
+      "mode": "production"
+    },
+    "tls_certificate_and_hostname_verified": true,
+    "unauthenticated_endpoints": [
+      {
+        "path": "/api/v1/chat/me",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/devices",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/drafts",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/admin/chat/users",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/ingest",
+        "method": "POST",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/device/check",
+        "method": "POST",
+        "status": 401
+      }
+    ],
+    "public_frontend_files_verified": 23,
+    "chat_route_status": 200
+  },
+  "host_checks": {
+    "version": "2.13.1",
+    "checked_at": "2026-10-11T06:14:23.188640+00:00",
+    "containers": [
+      {
+        "service": "web",
+        "healthy": true,
+        "image_id": "sha256:6b8e8e2f2a6c20e8b577ff25291395127e48fe903583a903dc3c646a64f48c12"
+      },
+      {
+        "service": "worker",
+        "healthy": true,
+        "image_id": "sha256:6b8e8e2f2a6c20e8b577ff25291395127e48fe903583a903dc3c646a64f48c12"
+      },
+      {
+        "service": "beat",
+        "healthy": true,
+        "image_id": "sha256:6b8e8e2f2a6c20e8b577ff25291395127e48fe903583a903dc3c646a64f48c12"
+      },
+      {
+        "service": "db",
+        "healthy": true,
+        "image_id": "sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650"
+      },
+      {
+        "service": "rabbitmq",
+        "healthy": true,
+        "image_id": "sha256:2531fe16e1cb4ec4086d3eaa63118c8f074dd98620d55f022f453a397b18f037"
+      }
+    ],
+    "timers": {
+      "wealth-backup.timer": "active",
+      "wealth-certbot.timer": "active"
+    },
+    "disposable_test_database_removed": true,
+    "production_database_reset": false
+  },
+  "github_ci": {
+    "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38116771266",
+    "head_sha": "93a1ee6f57ceee607863ff5a5cf051e9033149b7",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "mac-client",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38116771266/job/114403141286"
+      },
+      {
+        "name": "frontend",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38116771266/job/114403141449"
+      },
+      {
+        "name": "backend",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38116771266/job/114403141450"
+      },
+      {
+        "name": "container",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38116771266/job/114403781145"
+      }
+    ]
+  },
+  "local_tests": {
+    "chat_backend": 48,
+    "frontend": 184,
+    "mac_client": 155
+  },
+  "synthetic_browser_checks": {
+    "device_and_admin": [
+      "admin without a space lands on visible first My Chat tab",
+      "admin desktop has no horizontal overflow",
+      "legacy rotation persists and config reopens unchanged after refresh",
+      "copy/download match stable config; token absent from web storage",
+      "admin mobile device page has no horizontal overflow",
+      "mobile admin switches between personal chat and account chat management without delegation",
+      "new member device switches empty inbox from add-device to awaiting connection",
+      "member mobile waiting connection has no horizontal overflow",
+      "real Mac checkDraftConnection validates Django URL/auth/JSON schema",
+      "synthetic device check changes empty inbox to awaiting drafts",
+      "member mobile device controls have no horizontal overflow",
+      "disabled no-space account shows disabled state",
+      "no uncaught browser page errors"
+    ],
+    "deletion": [
+      "soft delete removes live item and preserves content in trash",
+      "restore returns deleted draft to live list",
+      "late live GET cannot pollute trash after view switch",
+      "late trash GET cannot pollute live list after view switch",
+      "permanent delete supports a live draft and removes it from both lists",
+      "permanent delete removes a trash draft",
+      "legacy empty payload cannot restore and has honest timestamps on mobile",
+      "legacy empty payload can be permanently deleted",
+      "manual re-upload of a permanently deleted batch can create it again",
+      "permanent device deletion removes its live/trash drafts, invalidates token, preserves device B",
+      "other account never sees owner devices after permanent deletion",
+      "no uncaught page errors"
+    ],
+    "mac_connection": [
+      "No startup handshake; visible verification button disabled until configured; input masked.",
+      "Saving Wealth configuration automatically verifies exactly once; displays saved and verified separately; token input cleared.",
+      "Failed remote verification preserves saved configuration; error is sanitized; masked input cleared; retry enabled.",
+      "Manual verification retries existing saved configuration successfully, with no repaste.",
+      "390px narrow layout fits viewport; verification and controls remain visible; cleared credential input."
+    ],
+    "uncaught_errors": 0
+  },
+  "mac_runtime": {
+    "health": "ok",
+    "fresh_frontend": true,
+    "local_records_preserved": true,
+    "auto_reply_enabled": false,
+    "sync_preference_preserved": true,
+    "verification_sent": false,
+    "real_chat_generation_or_send": false
+  }
+}
