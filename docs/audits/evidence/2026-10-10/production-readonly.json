@@ -1,0 +1,46 @@
+{
+  "version": "2.12.0",
+  "checked_at": "2026-10-10T00:13:12.707843+00:00",
+  "active_spaces_checked": 1,
+  "read_projections_checked": 14,
+  "routes": [
+    "overview",
+    "occurrences",
+    "installments",
+    "portfolio-analysis",
+    "holdings",
+    "net-worth-comparison",
+    "fund-orders",
+    "entry-defaults",
+    "accounts",
+    "admin-access"
+  ],
+  "dca_automation_plans_checked": 4,
+  "data_source_directory": {
+    "status": "passed",
+    "provider_count": 14,
+    "no_credentials_entered": true,
+    "no_credential_material_returned": true,
+    "outbound_quote_requests_performed": false,
+    "quote_availability_not_asserted": true
+  },
+  "source_directory_database_read_only_enforced": true,
+  "pending_purchases_contract": {
+    "summaries": 29,
+    "summaries_with_items": 10,
+    "pending_only_rows": 0
+  },
+  "empty_pending_is_valid": true,
+  "all_reads_and_serialization_passed": true,
+  "owner_reads_database_read_only_enforced": true,
+  "owner_api_reads_used": true,
+  "administrator_denial_sql_write_fenced_and_rolled_back": true,
+  "administrator_consent_denials_checked": 0,
+  "currently_owner_authorized_spaces": 1,
+  "admin_denial_probe_database_read_only": false,
+  "sessions_created": false,
+  "production_business_data_changed": false,
+  "source_manifest_sha256": "1d513170d60ebc1d7dd0015ab0e6bda52f0cfb8bb3e54284890b9bed4cc5bd81",
+  "source_commit": "c99d3b35bc82e38cb52559333a30e7f86e527605",
+  "image_id": "sha256:c9fffa59a720f3e972b3b3460cfa512551012a4cda9ebcc85c0a16217685fa94"
+}

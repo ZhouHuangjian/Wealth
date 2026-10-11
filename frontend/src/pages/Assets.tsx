@@ -206,6 +206,10 @@ export default function Assets() {
     },
   ];
   const [params] = useSearchParams();
+  const targetAccountId = params.get("account_id");
+  const targetAccount = listOf<Item>(state.data).find(
+    (account) => account.id === targetAccountId,
+  );
   const tab = params.get("tab") || "holdings";
   const { space, requestReveal } = useWorkspace();
   const group = [
@@ -396,6 +400,9 @@ export default function Assets() {
           resource="reconciliations"
           title="核对记录"
           allowEdit={false}
+          queryParams={
+            targetAccount ? { account_id: targetAccount.id } : undefined
+          }
           fields={[
             {
               name: "account_id",
@@ -403,6 +410,7 @@ export default function Assets() {
               type: "select",
               required: true,
               options: accounts,
+              initial: targetAccount?.id,
             },
             {
               name: "currency",
@@ -410,7 +418,7 @@ export default function Assets() {
               type: "select",
               required: true,
               options: currencyOptions,
-              initial: "CNY",
+              initial: targetAccount?.currency || "CNY",
             },
             {
               name: "as_of",
@@ -477,11 +485,29 @@ export default function Assets() {
             },
           ]}
         >
-          <Alert
-            type="info"
-            showIcon
-            message="核对不自动调平。差异保留为待处理事项，历史更正后需重新核对。"
-          />
+          {targetAccountId && (
+            <Alert
+              type={targetAccount ? "info" : "warning"}
+              showIcon
+              message={
+                targetAccount
+                  ? `已定位扣款账户：${targetAccount.name}`
+                  : "指定账户不存在或不在当前空间，请重新选择。"
+              }
+              description={
+                targetAccount
+                  ? space.role === "viewer"
+                    ? "对照机构余额和本账簿流水查看差异；保存核对或修正请联系空间管理员。"
+                    : "点击“新增”登记同日期的机构余额。若真实收支漏记，补录相应流水后重新核对；不能为了消除差额虚构资金。"
+                  : undefined
+              }
+              style={{ marginBottom: 12 }}
+            />
+          )}
+          <details>
+            <summary>核对说明</summary>
+            <p>核对不自动调平。差异保留为待处理事项，历史更正后需重新核对。</p>
+          </details>
         </EntityManager>
       ),
     },

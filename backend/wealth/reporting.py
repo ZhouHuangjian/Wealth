@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.db.models import Q, Sum
 
-from .common import catalog_queryset, day, dec, record, serial
+from .common import DomainError, catalog_queryset, day, dec, record, serial
 from .ledger import LIABILITIES, cash_code, position
 from .market_quality import approved_prices, nav_quarantine
 from .models import (
@@ -18,6 +18,9 @@ from .models import (
     Price,
     Resource,
 )
+
+# Bump for overview calculation or response changes; GET rejects older projections.
+OVERVIEW_CALCULATION_VERSION = "account-equity-v25"
 
 ASSET_CODES = {
     "cash",
@@ -421,7 +424,8 @@ def overview(space, when=None, currency=None, account_ids=None):
         Occurrence.objects.filter(
             tenant=space, due_date__lte=when, status__in=["scheduled", "pending"]
         )
-        .select_related("plan")
+        .select_related("plan", "event")
+        .order_by("-due_date", "-created_at", "-pk")
         .iterator(chunk_size=100)
     ):
         from .dca_automation import occurrence_processing
@@ -447,6 +451,18 @@ def overview(space, when=None, currency=None, account_ids=None):
                 "status": o.status,
                 "kind": "occurrence",
                 "plan_id": str(o.plan_id),
+                "occurrence_id": str(o.pk),
+                "details": o.details,
+                "account_id": o.details.get("account_id")
+                or (o.event.payload.get("account_id") if o.event else None)
+                or o.plan.data.get("account_id"),
+                "holding_account_id": o.details.get("holding_account_id")
+                or (o.event.payload.get("holding_account_id") if o.event else None)
+                or o.plan.data.get("holding_account_id")
+                or (o.plan.data.get("automation") or {}).get("holding_account_id"),
+                "instrument_id": o.details.get("instrument_id")
+                or (o.event.payload.get("instrument_id") if o.event else None)
+                or o.plan.data.get("instrument_id"),
                 "automation": progress,
             }
         )
@@ -469,6 +485,8 @@ def overview(space, when=None, currency=None, account_ids=None):
                 "currency": order.data.get("currency"),
                 "status": order.data["status"],
                 "kind": "fund_order",
+                "account_id": order.data.get("account_id"),
+                "instrument_id": order.data.get("instrument_id"),
             }
         )
     return serial(
@@ -494,7 +512,7 @@ def overview(space, when=None, currency=None, account_ids=None):
             "data_revision": space.revision,
             "as_of": when,
             "method_version": "v2-weighted-cost-including-buy-fees",
-            "calculation_version": "account-equity-v24",
+            "calculation_version": OVERVIEW_CALCULATION_VERSION,
             "is_demo": False,
         }
     )
@@ -764,6 +782,8 @@ def performance(space, start=None, end=None, account_ids=None):
 def calendar(space, start, end):
     start = day(start)
     end = day(end)
+    if start > end:
+        raise DomainError("日历开始日期不能晚于结束日期")
     result = []
     for o in Occurrence.objects.filter(
         tenant=space, due_date__range=(start, end)
@@ -814,8 +834,12 @@ def calendar(space, start, end):
             }
         )
     return {
-        "items": result,
+        "items": sorted(
+            result, key=lambda row: (row["date"], row["kind"], row["id"]), reverse=True
+        ),
         "daily_returns": daily,
+        "start": str(start),
+        "end": str(end),
         "data_revision": space.revision,
         "missing_days": "not_updated",
     }

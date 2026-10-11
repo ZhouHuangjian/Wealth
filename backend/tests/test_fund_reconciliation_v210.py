@@ -120,6 +120,29 @@ def command(p, **extra):
     } | extra
 
 
+def test_statement_display_sorts_full_batch_before_paging_and_preserves_file_identity(
+    book,
+):
+    batch, result = statement(
+        book,
+        rows=[
+            ["020602", "2026-09-22", "2026-09-24", "10", "5", "2", "0", "older"],
+            ["020602", "2026-09-23", "2026-09-24", "10", "5", "2", "0", "newer"],
+        ],
+    )
+    before = Event.objects.count(), batch.preview_hash
+    first = batch_preview(book.space, batch, offset=0, limit=1)
+    second = batch_preview(book.space, batch, offset=1, limit=1)
+    assert first["rows"][0]["row_number"] == 3  # CSV header is physical row 1.
+    assert second["rows"][0]["row_number"] == 2
+    assert first["rows"][0]["normalized"]["payment_date"] == "2026-09-23"
+    assert first["preview_hash"] == second["preview_hash"] == result["preview_hash"]
+    assert (Event.objects.count(), batch.preview_hash) == before
+    assert list(
+        batch.rows.order_by("row_number").values_list("row_number", flat=True)
+    ) == [2, 3]
+
+
 def test_exact_unique_confirmation_links_actual_evidence_without_money_or_public_nav(
     book,
 ):

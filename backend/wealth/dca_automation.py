@@ -8,7 +8,7 @@ from collections import Counter
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Sum
 from django.utils import timezone
 
 from .common import DomainError, bump, day, dec, get_obj, money_round, serial
@@ -117,9 +117,9 @@ def occurrence_processing(occurrence):
     if not config.get("enabled"):
         status = "disabled"
     elif (
-        plan.data.get("status") not in {"active", "paused"}
+        plan.data.get("status") not in {"active", "paused", "completed"}
         or not occurrence.event_id
-        and plan.data.get("status") == "paused"
+        and plan.data.get("status") != "active"
     ):
         status = "paused"
     elif occurrence.status in {"cancelled", "skipped"}:
@@ -350,6 +350,9 @@ def automation_status(space, plan_id):
     occurrences = Occurrence.objects.filter(
         tenant=space, plan=plan, due_date__gte=start, due_date__lte=now
     ).order_by("due_date", "sequence")
+    runtime = Resource.objects.filter(
+        tenant=space, kind="dca_automation_runtime", data__plan_id=str(plan.pk)
+    ).first()
     total_count = occurrences.count()
     for row in reversed(list(occurrences.order_by("-due_date", "-sequence")[:500])):
         state = row.details.get("automation") or {}
@@ -365,9 +368,11 @@ def automation_status(space, plan_id):
             else "scheduled"
         )
         values = {"status": default, "message": STATES[default], **state}
-        if not row.event_id and (
-            not config.get("enabled") or plan.data.get("status") != "active"
-        ):
+        if not config.get("enabled"):
+            values.update(status="disabled", message=STATES["disabled"])
+        elif plan.data.get("status") not in {"active", "paused", "completed"}:
+            values.update(status="paused", message=STATES["paused"])
+        elif not row.event_id and plan.data.get("status") != "active":
             values.update(status=default, message=STATES[default])
         values.update(processing_state(values["status"]))
         items.append(
@@ -386,6 +391,8 @@ def automation_status(space, plan_id):
         "enabled": bool(config.get("enabled")),
         "start_date": config.get("start_date"),
         "plan_version": plan.version,
+        "plan_status": plan.data.get("status", "active"),
+        "last_checked_at": runtime.data.get("checked_at") if runtime else None,
         "total_count": total_count,
         "has_more": total_count > len(items),
         "items": items,
@@ -790,7 +797,7 @@ def _process(space, user, plan, occurrence, now):
         return _state(space, user, occurrence, "waiting_confirmation", **details)
     if config.get("fee_mode", "unknown") == "unknown":
         return _state(space, user, occurrence, "waiting_fee", **details)
-    from .market_quality import nav_is_blocked
+    from .market_quality import available_prices, nav_is_blocked
 
     if nav_is_blocked(space, str(instrument.pk), day(trade_date)):
         return _state(
@@ -802,13 +809,14 @@ def _process(space, user, plan, occurrence, now):
             **details,
         )
     quote = (
-        Price.objects.filter(
-            tenant=space,
-            instrument=instrument,
-            kind="official_nav",
-            economic_date=day(trade_date),
+        available_prices(
+            Price.objects.filter(
+                tenant=space,
+                instrument=instrument,
+                kind="official_nav",
+                economic_date=day(trade_date),
+            )
         )
-        .filter(Q(published_at__isnull=True) | Q(published_at__lte=timezone.now()))
         .order_by("-created_at")
         .first()
     )
@@ -960,20 +968,27 @@ def run_plan(space, user, plan_id, *, expected_plan_version=None):
     ):
         raise DomainError("计划已修改，请刷新后再检查", "version_conflict", 412)
     config = plan.data.get("automation") or {}
-    if not config.get("enabled") or plan.data.get("status") not in {"active", "paused"}:
+    if not config.get("enabled") or plan.data.get("status") not in {
+        "active",
+        "paused",
+        "completed",
+    }:
         return {**automation_status(space, plan.pk), "processed": 0}
     validate_configuration(space, plan.data)
     now = today(space)
     if plan.data.get("status") == "active":
         generate_schedule(space, user, plan, now)
-    occurrences = list(
-        Occurrence.objects.filter(
-            tenant=space,
-            plan=plan,
-            due_date__gte=day(config["start_date"]),
-            due_date__lte=now,
-        ).order_by("due_date", "sequence")
+    occurrences_query = Occurrence.objects.filter(
+        tenant=space,
+        plan=plan,
+        due_date__gte=day(config["start_date"]),
+        due_date__lte=now,
     )
+    if plan.data.get("status") == "completed":
+        # Ending the plan stops new periods/debits, but does not strand cash
+        # already in transit. _process retains cancellation/reversal guards.
+        occurrences_query = occurrences_query.filter(event__isnull=False)
+    occurrences = list(occurrences_query.order_by("due_date", "sequence"))
     runtime = Resource.objects.filter(
         tenant=space, kind="dca_automation_runtime", data__plan_id=str(plan.pk)
     ).first()

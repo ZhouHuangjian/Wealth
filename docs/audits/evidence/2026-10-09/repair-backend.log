@@ -1,0 +1,59 @@
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 14%]
+........................................................................ [ 19%]
+........................................................................ [ 24%]
+........................................................................ [ 29%]
+........................................................................ [ 34%]
+........................................................................ [ 39%]
+........................................................................ [ 43%]
+........................................................................ [ 48%]
+........................................................................ [ 53%]
+........................................................................ [ 58%]
+........................................................................ [ 63%]
+........................................................................ [ 68%]
+........................................................................ [ 73%]
+........................................................................ [ 78%]
+............................................................ [ 82%]
+........................................................................ [ 86%]
+........................................................................ [ 91%]
+........................................................................ [ 96%]
+................................................                         [100%]
+=============================== warnings summary ===============================
+tests/test_account_balances.py: 1 warning
+tests/test_account_opening_v24.py: 5 warnings
+tests/test_admin_access_consent.py: 34 warnings
+tests/test_admin_data_v260.py: 21 warnings
+tests/test_admin_edit_v261.py: 8 warnings
+tests/test_admin_holding_corrections_v261.py: 8 warnings
+tests/test_admin_purge_v261.py: 20 warnings
+tests/test_administration_v25.py: 12 warnings
+tests/test_api.py: 19 warnings
+tests/test_audit_repairs_20261009.py: 1 warning
+tests/test_catalog_delete_v255.py: 1 warning
+tests/test_catalog_integration_v255.py: 10 warnings
+tests/test_dca_automation_v264.py: 2 warnings
+tests/test_dca_entry_basis_v254.py: 2 warnings
+tests/test_dca_history_v252.py: 3 warnings
+tests/test_dca_import_v253.py: 2 warnings
+tests/test_dividends_v24.py: 3 warnings
+tests/test_fund_orders_v270.py: 2 warnings
+tests/test_fund_reconciliation_v210.py: 3 warnings
+tests/test_glossary_v25.py: 1 warning
+tests/test_holding_corrections_v251.py: 3 warnings
+tests/test_insights_v22.py: 15 warnings
+tests/test_institution_funding_v25.py: 1 warning
+tests/test_management_v24.py: 20 warnings
+tests/test_market_integration.py: 6 warnings
+tests/test_metadata_api_v23.py: 8 warnings
+tests/test_option_positions_v251.py: 5 warnings
+tests/test_pending_purchases_v265.py: 1 warning
+tests/test_platform_v23.py: 15 warnings
+tests/test_provider_credentials_v210.py: 17 warnings
+tests/test_valuation_basis_v25.py: 2 warnings
+tests/test_workspace_usability_v262.py: 2 warnings
+  /Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/core/handlers/base.py:61: UserWarning: No directory at: /Users/zhouhuangjian/.codex/worktrees/system-audit-2026-10-09/Wealth/backend/staticfiles/
+    mw_instance = middleware(adapted_handler)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1476 passed, 253 warnings, 12 subtests passed in 145.71s (0:02:25)

@@ -1,0 +1,15 @@
+{
+  "version": "2.12.0",
+  "source_manifest_sha256": "1d513170d60ebc1d7dd0015ab0e6bda52f0cfb8bb3e54284890b9bed4cc5bd81",
+  "source_commit": "c99d3b35bc82e38cb52559333a30e7f86e527605",
+  "image_id": "sha256:c9fffa59a720f3e972b3b3460cfa512551012a4cda9ebcc85c0a16217685fa94",
+  "checked_at": "2026-10-10T00:13:25.901390+00:00",
+  "https_verified": true,
+  "security_headers": true,
+  "setup_closed": true,
+  "anonymous_private_api_denied": true,
+  "existing_production_sessions_not_used_or_changed": true,
+  "no_login_or_business_mutations": true,
+  "all_public_frontend_assets_match_candidate": true,
+  "frontend_asset_count": 21
+}

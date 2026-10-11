@@ -29,6 +29,30 @@ const preview = {
   preview_hash: "snapshot-hash",
   rows: [exact],
 };
+test("statement NAV date remains a separate optional mapping from payment and confirmation", () => {
+  const dates = [
+    { key: "payment_date", label: "实际扣款日", aliases: ["扣款日期"] },
+    { key: "confirmation_date", label: "实际确认日", aliases: ["确认日期"] },
+    {
+      key: "nav_date",
+      label: "成交净值日期",
+      aliases: ["净值归属日", "nav_date"],
+    },
+  ];
+  const headers = ["扣款日期", "确认日期", "nav_date"];
+  const mapping = fundMappingDefaults(headers, dates, {
+    payment_date: "扣款日期",
+  });
+  assert.deepEqual(
+    fundPreviewRequest({ account_id: "fund", mapping }, dates, headers).mapping,
+    {
+      payment_date: "扣款日期",
+      confirmation_date: "确认日期",
+      nav_date: "nav_date",
+    },
+  );
+  assert.equal(fundMappingDefaults(["确认日期"], dates).nav_date, undefined);
+});
 test("saved mapping must still name a real header; ambiguous aliases are not guessed", () => {
   assert.deepEqual(
     fundMappingDefaults(["金额", "amount", "fee"], fields, {

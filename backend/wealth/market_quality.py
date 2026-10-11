@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from django.db.models import Q
+from django.utils import timezone
 
 from .common import DomainError, day
 from .models import Resource
@@ -28,6 +29,17 @@ def nav_is_blocked(space, instrument_id, when):
     )
 
 
+def available_prices(query, *, known_at=None):
+    """Future publication is unavailable now, including for historical returns.
+
+    Missing publication times remain unknown; never substitute fetched/created
+    time. Existing manual observations and NAV sources without a time are kept.
+    """
+    return query.filter(
+        Q(published_at__isnull=True) | Q(published_at__lte=known_at or timezone.now())
+    )
+
+
 def approved_prices(query, space, *, quarantines=None):
     """Used by both current values and historical returns; raw rows are retained."""
     blocked = nav_quarantine(space) if quarantines is None else quarantines
@@ -40,7 +52,7 @@ def approved_prices(query, space, *, quarantines=None):
                     economic_date__in=list(dates),
                 )
             )
-    return query
+    return available_prices(query)
 
 
 def updated_quarantine(previous, observations, observed_at):

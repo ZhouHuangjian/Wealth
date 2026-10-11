@@ -1,5 +1,6 @@
 import { Table, Tag } from "antd";
 import { Money } from "../components";
+import { newestFirst } from "../date-ordering";
 import {
   marketTime,
   qualityPresentation,
@@ -59,7 +60,7 @@ export default function QuoteQualityDetails({ row }: { row: any }) {
         <Table
           size="small"
           rowKey={(r, i) => `${r.provider_id}-${r.economic_date}-${i}`}
-          dataSource={details.observations}
+          dataSource={newestFirst(details.observations, ["economic_date"])}
           pagination={false}
           scroll={{ x: 750 }}
           columns={columns}
@@ -73,7 +74,10 @@ export default function QuoteQualityDetails({ row }: { row: any }) {
           <Table
             size="small"
             rowKey={(r, i) => `${r.provider_id}-${r.quarantine_date}-${i}`}
-            dataSource={details.quarantined}
+            dataSource={newestFirst(details.quarantined, [
+              "economic_date",
+              "quarantine_date",
+            ])}
             pagination={{ pageSize: 5, hideOnSinglePage: true }}
             scroll={{ x: 750 }}
             columns={columns}

@@ -31,6 +31,7 @@ import {
   toggleDcaExcludedDate,
 } from "../dca-preview";
 import DcaHistoryImport from "./DcaHistoryImport";
+import { newestFirst } from "../date-ordering";
 
 const statuses: Record<string, string> = {
   estimated: "可估算",
@@ -481,7 +482,7 @@ export default function DcaHistoryPreview({
                     <Table<Item>
                       size="small"
                       rowKey={(row) => row.date}
-                      dataSource={data?.items || []}
+                      dataSource={newestFirst(data?.items || [])}
                       pagination={{ pageSize: 10, showSizeChanger: true }}
                       scroll={{ x: 720 }}
                       columns={[

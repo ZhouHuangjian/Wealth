@@ -41,6 +41,7 @@ ALIASES = {
     "application_date": ["申请日期", "申请时间", "application_date"],
     "payment_date": ["扣款日期", "交易日期", "payment_date", "date"],
     "confirmation_date": ["确认日期", "份额确认日期", "confirmation_date"],
+    "nav_date": ["成交净值日期", "净值日期", "净值归属日", "nav_date"],
     "amount": ["实际金额", "申购金额", "扣款金额", "交易金额", "金额", "amount"],
     "quantity": ["确认份额", "实际份额", "份额", "quantity"],
     "nav": ["确认净值", "成交净值", "单位净值", "nav"],
@@ -121,7 +122,7 @@ def _normalise(space, batch, raw, mapping, account, instrument, funding):
         "external_id": data["external_id"] or None,
         "source_row_id": data["source_row_id"] or None,
     }
-    for key in ("application_date", "payment_date", "confirmation_date"):
+    for key in ("application_date", "payment_date", "confirmation_date", "nav_date"):
         n[key] = _date(data[key])
         if n[key] and day(n[key]) > today(space):
             raise DomainError(f"{LABELS[key]}尚未到达，不能作为已发生的实际事实")
@@ -146,6 +147,11 @@ def _normalise(space, batch, raw, mapping, account, instrument, funding):
         n["application_date"] or n["payment_date"]
     ):
         raise DomainError("份额确认日不能早于申请日")
+    if n["nav_date"]:
+        if day(n["nav_date"]) < day(n["application_date"] or n["payment_date"]):
+            raise DomainError("成交净值日不能早于申请日；请核对申请与扣款日期")
+        if n["confirmation_date"] and n["nav_date"] > n["confirmation_date"]:
+            raise DomainError("成交净值日不能晚于份额确认日")
     if n["fee"] is not None and dec(n["fee"]) >= dec(n["amount"]):
         raise DomainError("费用不能达到申购金额")
     if all(n.get(k) is not None for k in CONFIRM_FIELDS):
@@ -191,10 +197,13 @@ def preview(space, user, batch, body):
     headers = batch.diagnostics.get("headers", [])
     mapping = body.get("mapping")
     if mapping is None:
-        mapping = settings(space, account.pk, batch.source)["mapping"] or {
+        mapping = {
             key: next((a for a in aliases if a in headers), "")
             for key, aliases in ALIASES.items()
         }
+        # Existing saved mappings can predate additive optional fields. Keep
+        # explicit user choices (including blanks), detect only missing keys.
+        mapping.update(settings(space, account.pk, batch.source)["mapping"])
     if (
         not isinstance(mapping, dict)
         or set(mapping) - set(ALIASES)
@@ -350,6 +359,30 @@ def event_evidence(space, event):
     }
 
 
+def actual_confirmation_ids(space, event_ids):
+    """Batch effective share evidence; no mutation of immutable event payloads.
+
+    Uses the same complete-statement requirement as event_evidence. A revoked
+    link, reversed confirmation or debit-only statement cannot verify shares.
+    """
+    if not event_ids:
+        return set()
+    rows = EvidenceLink.objects.filter(
+        tenant=space,
+        event_id__in=event_ids,
+        event__kind="fund_confirm",
+        event__reversal__isnull=True,
+        event__reverses__isnull=True,
+        active=True,
+        record__batch__parser_version=PARSER,
+    ).values_list("event_id", "record__normalized")
+    return {
+        str(event_id)
+        for event_id, normalized in rows
+        if all(normalized.get(key) is not None for key in CONFIRM_FIELDS)
+    }
+
+
 def _difference(n, debit, confirmation):
     fields = [("amount", debit.payload.get("amount"))]
     # Payment day is an actual debit fact; application day is not assumed to equal it.
@@ -358,12 +391,19 @@ def _difference(n, debit, confirmation):
     if confirmation:
         fields += [
             ("confirmation_date", str(confirmation.economic_date)),
+            ("nav_date", confirmation.payload.get("nav_date")),
             ("quantity", confirmation.payload.get("quantity")),
             ("nav", confirmation.payload.get("price")),
             ("fee", confirmation.payload.get("fee", "0")),
         ]
-    elif any(n.get(k) is not None for k in ("quantity", "nav", "confirmation_date")):
-        fields += [(k, None) for k in ("confirmation_date", "quantity", "nav", "fee")]
+    elif any(
+        n.get(k) is not None
+        for k in ("quantity", "nav", "confirmation_date", "nav_date")
+    ):
+        fields += [
+            (k, None)
+            for k in ("confirmation_date", "nav_date", "quantity", "nav", "fee")
+        ]
     differences = []
     for field, value in fields:
         actual = n.get(field)
@@ -516,6 +556,7 @@ def _source_compatibility(space, row, fact):
         "application_date",
         "payment_date",
         "confirmation_date",
+        "nav_date",
         "amount",
         "quantity",
         "nav",
@@ -662,6 +703,19 @@ def batch_preview(space, batch, offset=0, limit=500):
             "error",
         )
     }
+    # Display order is independent of original file identity and the apply set.
+    # Sort the entire batch before slicing, so later pages cannot hide newer dates.
+    rows.sort(
+        key=lambda row: next(
+            (
+                row["normalized"].get(field)
+                for field in ("payment_date", "application_date", "confirmation_date")
+                if row["normalized"].get(field)
+            ),
+            "",
+        ),
+        reverse=True,
+    )
     return {
         "batch": record(batch),
         "headers": batch.diagnostics.get("headers", []),
@@ -757,6 +811,9 @@ def _correct(space, user, row, debit, confirmation, reason):
         "instrument_id": n["instrument_id"],
         "related_event_id": str(debit.pk),
         "economic_date": n["confirmation_date"],
+        # A statement date supersedes the inferred NAV date; an omitted date
+        # stays unknown rather than inheriting a potentially different trade.
+        "nav_date": n.get("nav_date"),
         "quantity": n["quantity"],
         "price": n["nav"],
         "fee": n["fee"],
@@ -820,6 +877,7 @@ def _correct(space, user, row, debit, confirmation, reason):
             "quantity": n["quantity"],
             "fee": n["fee"],
             "confirmation_date": n["confirmation_date"],
+            "nav_date": n.get("nav_date"),
             "actual_source_record_id": str(row.pk),
         }
         if resource.kind == "fund_orders":

@@ -10,7 +10,13 @@ from django.test import Client
 from test_dca_automation_v264 import book as shared_book
 from test_dca_automation_v264 import quote
 from wealth.common import DomainError
-from wealth.fund_orders import preferences, save_order, scan_orders, transition
+from wealth.fund_orders import (
+    list_orders,
+    preferences,
+    save_order,
+    scan_orders,
+    transition,
+)
 from wealth.ledger import balance, position, post_event
 from wealth.models import Event, JournalLine, Resource, ResourceRevision
 from wealth.reporting import positions
@@ -35,6 +41,15 @@ def order(b, **kw):
 
 def row(b, result):
     return Resource.objects.get(tenant=b.space, pk=result["id"])
+
+
+def test_order_list_uses_application_date_before_page_slicing(book):
+    newest = order(book, application_date="2026-09-24")
+    older = order(book, application_date="2026-09-23")
+    before = Event.objects.count()
+    assert list_orders(book.space, offset=0, limit=1)["items"][0]["id"] == newest["id"]
+    assert list_orders(book.space, offset=1, limit=1)["items"][0]["id"] == older["id"]
+    assert Event.objects.count() == before
 
 
 def test_application_is_not_payment_or_holding(book):

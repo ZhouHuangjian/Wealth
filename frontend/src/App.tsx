@@ -46,6 +46,7 @@ import {
   X,
   ChevronDown,
   SlidersHorizontal,
+  MessageCircle,
 } from "lucide-react";
 import {
   api,
@@ -67,6 +68,7 @@ import { WorkspaceContext, useWorkspace } from "./state";
 import type { Space as Workspace } from "./state";
 import { NavigationProvider, useNavigation } from "./navigation";
 import { GlossaryProvider } from "./help";
+import LeisureCorner from "./leisure/LeisureCorner";
 import { navigationHidden, orderedNavigation } from "./navigation-model";
 import {
   ThemePreferences,
@@ -81,6 +83,7 @@ import {
   ConfigurationLibrary,
 } from "./pages/ManagementExtras";
 const AdminConsole = lazy(() => import("./pages/AdminConsole"));
+const ChatAssistant = lazy(() => import("./pages/ChatAssistant"));
 const AdminDataManagement = lazy(() => import("./pages/AdminDataManagement"));
 const Home = lazy(() => import("./pages/Home"));
 const Assets = lazy(() => import("./pages/Assets"));
@@ -147,12 +150,34 @@ export default function App() {
     );
   if (!auth.user)
     return <AuthPage initial={!!auth.setup_required} onSuccess={load} />;
-  if (!auth.spaces?.length && !auth.user.is_platform_admin)
-    return <NoSpace onDone={load} username={auth.user.username} />;
   return (
     <GlossaryProvider key={auth.user.id}>
       <NavigationProvider isAdmin={!!auth.user.is_platform_admin}>
         <Routes>
+          <Route
+            path="/chat"
+            element={
+              <Suspense
+                fallback={
+                  <div className="full-loader">
+                    <Spin />
+                  </div>
+                }
+              >
+                <ChatAssistant
+                  user={auth.user}
+                  returnPath={
+                    auth.user.is_platform_admin
+                      ? "/admin"
+                      : auth.spaces.length
+                        ? `/spaces/${auth.spaces[0].id}/home`
+                        : "/"
+                  }
+                  onAuthChange={load}
+                />
+              </Suspense>
+            }
+          />
           <Route
             path="/admin"
             element={
@@ -172,16 +197,20 @@ export default function App() {
           <Route
             path="*"
             element={
-              <Navigate
-                to={
-                  auth.user.is_platform_admin
-                    ? "/admin"
-                    : auth.spaces.length
-                      ? `/spaces/${auth.spaces[0].id}/home`
-                      : "/"
-                }
-                replace
-              />
+              !auth.spaces.length && !auth.user.is_platform_admin ? (
+                <NoSpace onDone={load} username={auth.user.username} />
+              ) : (
+                <Navigate
+                  to={
+                    auth.user.is_platform_admin
+                      ? "/admin"
+                      : auth.spaces.length
+                        ? `/spaces/${auth.spaces[0].id}/home`
+                        : "/"
+                  }
+                  replace
+                />
+              )
             }
           />
         </Routes>
@@ -452,6 +481,9 @@ function NoSpace({
         >
           {join ? "返回创建独立空间" : "使用邀请码加入已有空间"}
         </Button>
+        <p style={{ marginTop: 18 }}>
+          <NavLink to="/chat">打开个人聊天助手</NavLink>
+        </p>
         <WorkspaceTrash onChanged={onDone} />
       </div>
     </div>
@@ -705,7 +737,19 @@ function WorkspaceApp({
               </NavLink>
             ))}
           </nav>
+          <LeisureCorner />
           <div className="sidebar-bottom">
+            <NavLink
+              className="nav-item"
+              to="/chat"
+              title="聊天助手"
+              aria-label="聊天助手"
+            >
+              <MessageCircle size={20} />
+              <span>
+                {auth.user?.is_platform_admin ? "我的聊天" : "聊天助手"}
+              </span>
+            </NavLink>
             {auth.user?.is_platform_admin && (
               <NavLink
                 className={({ isActive }) =>

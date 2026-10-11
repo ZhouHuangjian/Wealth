@@ -11,6 +11,7 @@ import {
   InputNumber,
   Modal,
   Select,
+  Segmented,
   Space,
   Table,
   Tabs,
@@ -32,6 +33,7 @@ import type { Item } from "../api";
 import { useResource, useWorkspace } from "../state";
 import { Occurrences } from "./Cashbook";
 import { Chart } from "./Home";
+import { newestFirst, shiftBusinessDay } from "../date-ordering";
 export default function Planning() {
   const { space, reload, hidden, requestReveal } = useWorkspace();
   const { message, modal } = App.useApp();
@@ -476,34 +478,7 @@ export default function Planning() {
     {
       key: "calendar",
       label: "业务日历",
-      children: (
-        <ResourceTable
-          resource="calendar"
-          title="业务日历"
-          description="按当前计划和已知证据列出。预计确认日到达不会自动增持或扣款。"
-          columns={[
-            { title: "日期", render: (_, r) => r.date || r.due_date },
-            {
-              title: "事项",
-              render: (_, r) =>
-                hidden && r.kind === "event"
-                  ? "内容已隐藏"
-                  : r.title || r.name || r.kind,
-            },
-            {
-              title: "金额",
-              render: (_, r) => (
-                <Money value={r.amount} currency={r.currency} />
-              ),
-            },
-            {
-              title: "状态",
-              dataIndex: "status",
-              render: (v) => <Status value={v} />,
-            },
-          ]}
-        />
-      ),
+      children: <BusinessCalendar />,
     },
     {
       key: "recurring",
@@ -890,7 +865,7 @@ function Forecast() {
             <Table
               rowKey="date"
               size="small"
-              dataSource={chartRows}
+              dataSource={newestFirst(chartRows)}
               columns={helpColumns([
                 { title: "日期", dataIndex: "date" },
                 {
@@ -913,6 +888,84 @@ function Forecast() {
           </details>
         </Panel>
       )}
+    </>
+  );
+}
+
+function BusinessCalendar() {
+  const { hidden } = useWorkspace();
+  const today = dateToday();
+  const [scope, setScope] = useState("recent"),
+    [start, setStart] = useState(shiftBusinessDay(today, -29)),
+    [end, setEnd] = useState(today);
+  const queryParams: Record<string, string> =
+    scope === "custom" ? { start, end } : { scope };
+  return (
+    <>
+      <Space wrap className="form-alert">
+        <Segmented
+          aria-label="业务日历范围"
+          value={scope}
+          onChange={(value) => setScope(String(value))}
+          options={[
+            { label: "最近 30 天", value: "recent" },
+            { label: "未来 30 天", value: "upcoming" },
+            { label: "选择日期", value: "custom" },
+          ]}
+        />
+        {scope === "custom" && (
+          <>
+            <Input
+              type="date"
+              aria-label="业务日历开始日期"
+              value={start}
+              max={end}
+              onChange={(event) =>
+                event.target.value && setStart(event.target.value)
+              }
+            />
+            <span>至</span>
+            <Input
+              type="date"
+              aria-label="业务日历结束日期"
+              value={end}
+              min={start}
+              onChange={(event) =>
+                event.target.value && setEnd(event.target.value)
+              }
+            />
+          </>
+        )}
+      </Space>
+      <ResourceTable
+        resource="calendar"
+        title="业务日历"
+        queryParams={queryParams}
+        description={
+          scope === "upcoming"
+            ? "未来安排按日期从新到旧展示，不代表已经记账。"
+            : "最近日期在前；可切换未来安排或选择日期。"
+        }
+        columns={[
+          { title: "日期", render: (_, r) => r.date || r.due_date },
+          {
+            title: "事项",
+            render: (_, r) =>
+              hidden && r.kind === "event"
+                ? "内容已隐藏"
+                : r.title || r.name || r.kind,
+          },
+          {
+            title: "金额",
+            render: (_, r) => <Money value={r.amount} currency={r.currency} />,
+          },
+          {
+            title: "状态",
+            dataIndex: "status",
+            render: (v) => <Status value={v} />,
+          },
+        ]}
+      />
     </>
   );
 }

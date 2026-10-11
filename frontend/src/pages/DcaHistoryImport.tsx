@@ -30,6 +30,7 @@ import {
   dcaWithRounding,
 } from "../dca-import";
 import type { DcaImportDraft } from "../dca-import";
+import { newestFirst } from "../date-ordering";
 
 const fundKinds = ["bank", "cash", "wallet", "fund", "broker", "securities"];
 export default function DcaHistoryImport({
@@ -531,7 +532,7 @@ export default function DcaHistoryImport({
               <Table<DcaImportDraft>
                 size="small"
                 rowKey="scheduled_date"
-                dataSource={rows}
+                dataSource={newestFirst(rows, ["scheduled_date"])}
                 pagination={{ pageSize: 10, showSizeChanger: true }}
                 scroll={{ x: 720 }}
                 expandable={{

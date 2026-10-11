@@ -72,7 +72,7 @@ class ReturnEvidence:
         # Retrospective analytics can use confirmations already known now, with
         # their actual NAV dates. Cash/in-transit and future openings stay intact.
         known_on = timezone.localdate()
-        for row in (
+        movement_rows = list(
             PositionMovement.objects.filter(
                 tenant=space,
                 account_id__in=self.accounts,
@@ -86,10 +86,20 @@ class ReturnEvidence:
             )
             .select_related("event__related")
             .order_by("event__economic_date", "event__created_at")
-        ):
+        )
+        from .fund_reconciliation import actual_confirmation_ids
+
+        verified = actual_confirmation_ids(
+            space,
+            [row.event_id for row in movement_rows if row.event.kind == "fund_confirm"],
+        )
+        for row in movement_rows:
             event = row.event
             value = analytical_movement(
-                row, self.instruments[str(row.instrument_id)], known_on=known_on
+                row,
+                self.instruments[str(row.instrument_id)],
+                known_on=known_on,
+                shares_verified=str(row.event_id) in verified,
             )
             if value["date"] > when:
                 continue
@@ -369,6 +379,22 @@ class ReturnEvidence:
                 and (timezone.now() - observed).total_seconds() > 600
             ):
                 return _unavailable(item, "盘中行情超过更新时间，待更新")
+            if when == timezone.localdate():
+                # A fresh fetch does not make an old/undated observation current.
+                published = reference.published_at
+                if published is None:
+                    return _unavailable(item, "估值缺少报价时间，不能核实今日收益")
+                if timezone.is_naive(published):
+                    published = timezone.make_aware(published)
+                age = (timezone.now() - published).total_seconds()
+                quote = state.get("quote") or {}
+                indicative = quote.get("estimate") or quote
+                if (
+                    age < 0
+                    or age > 1200
+                    or indicative.get("data_state") in {"delayed", "stale"}
+                ):
+                    return _unavailable(item, "估值报价已经延迟或时间异常，待更新")
             item["status"] = "estimated"
         return item
 

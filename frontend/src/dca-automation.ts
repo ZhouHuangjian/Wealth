@@ -219,8 +219,13 @@ export function dcaAutomationSummary(data: Values | null): string {
   const states = priorities.filter(
     (status) => Number.isSafeInteger(summary[status]) && summary[status] > 0,
   );
-  if (!states.length)
-    return data.enabled ? "等待下一期自动执行" : "自动补录已关闭";
+  if (!states.length) {
+    if (!data.enabled) return "自动补录已关闭";
+    if (data.plan_status === "completed") return "计划已结束，无新期次";
+    if (["paused", "archived", "draft"].includes(data.plan_status))
+      return "计划已停止生成新期次";
+    return "等待下一期自动执行";
+  }
   const text = states
     .slice(0, 2)
     .map(

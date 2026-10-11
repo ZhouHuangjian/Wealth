@@ -18,6 +18,7 @@ import { LoadState, Money } from "../components";
 import { HelpText, helpColumns } from "../help";
 import { useResource, useWorkspace } from "../state";
 import { profitTone } from "../investment";
+import { newestFirst } from "../date-ordering";
 import {
   hasOptionValue,
   optionDecimal,
@@ -383,7 +384,7 @@ export function OptionHoldingHistory() {
       <LoadState {...state}>
         <Table<Item>
           rowKey="id"
-          dataSource={listOf<Item>(state.data)}
+          dataSource={newestFirst(listOf<Item>(state.data), ["as_of"])}
           pagination={{ pageSize: 10 }}
           scroll={{ x: 900 }}
           columns={helpColumns<Item>([

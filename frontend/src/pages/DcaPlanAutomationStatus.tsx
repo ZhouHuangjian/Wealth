@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Alert, App, Button, Drawer, Space, Table, Tag, Tooltip } from "antd";
 import type { Item } from "../api";
 import { ApiError, send } from "../api";
 import { LoadState, Money } from "../components";
 import { helpColumns } from "../help";
+import { marketTime } from "../market-quality";
 import { useResource, useWorkspace } from "../state";
+import { dcaNextAction } from "../business-action";
+import { newestFirst } from "../date-ordering";
 import {
   dcaAutomationNotice,
   dcaAutomationRunRequest,
@@ -14,6 +18,7 @@ import {
 
 export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
   const { space, reload, hidden, requestReveal } = useWorkspace();
+  const navigate = useNavigate();
   const { message } = App.useApp();
   const state = useResource(`plans/${plan.id}/automation`);
   const [open, setOpen] = useState(false),
@@ -66,12 +71,14 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
   return (
     <>
       <div className="dca-progress-heading">
-        <Tag color={enabled && plan.status !== "paused" ? "green" : undefined}>
+        <Tag color={enabled && plan.status === "active" ? "green" : undefined}>
           {plan.status === "paused"
             ? "已暂停"
-            : enabled
-              ? "自动记账"
-              : "仅提醒"}
+            : plan.status === "completed"
+              ? "已结束"
+              : enabled
+                ? "自动记账"
+                : "仅提醒"}
         </Tag>
         {enabled && plan.automation?.start_date && (
           <small>{plan.automation.start_date} 起</small>
@@ -110,17 +117,28 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
       >
         <div className="dca-progress-intro">
           <strong>
-            {plan.status === "paused"
-              ? "定投已暂停，已有记录保留"
-              : enabled
-                ? "每天处理到期计划，无需逐期确认"
-                : "自动记账已关闭"}
+            {!enabled
+              ? "自动记账已关闭"
+              : plan.status === "completed"
+                ? "计划已结束，已扣款期次继续处理"
+                : plan.status === "paused"
+                  ? "定投已暂停，已有记录保留"
+                  : "每天处理到期计划，无需逐期确认"}
           </strong>
-          <p>{dcaAutomationNotice}</p>
+          <details className="dca-progress-help">
+            <summary>自动记账说明</summary>
+            <p>{dcaAutomationNotice}</p>
+          </details>
         </div>
         <Space wrap style={{ marginBottom: 16 }}>
           {plan.automation?.start_date && (
             <span>生效日期：{plan.automation.start_date}</span>
+          )}
+          {state.data && (
+            <span>
+              最近检查（北京时间）：
+              {marketTime(state.data.last_checked_at, "尚无检查记录")}
+            </span>
           )}
           <Button
             loading={busy}
@@ -186,9 +204,7 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
           <Table<Item>
             rowKey="occurrence_id"
             size="small"
-            dataSource={[...(state.data?.items || [])].sort((a, b) =>
-              String(b.date).localeCompare(String(a.date)),
-            )}
+            dataSource={newestFirst<Item>(state.data?.items || [], ["date"])}
             scroll={{ x: 650 }}
             pagination={{ pageSize: 10, showSizeChanger: false }}
             locale={{
@@ -249,12 +265,42 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
                     {row.message && (
                       <Tooltip title={hidden ? "说明已隐藏" : row.message}>
                         <small className="dca-status-explanation" tabIndex={0}>
-                          {hidden ? "说明已隐藏" : row.message}
+                          {hidden ? "说明已隐藏" : "查看本期原因"}
                         </small>
                       </Tooltip>
                     )}
                   </div>
                 ),
+              },
+              {
+                title: "下一步",
+                width: 160,
+                render: (_, row) => {
+                  const action = dcaNextAction(space.id, row, plan);
+                  if (!action)
+                    return row.processing_state === "waiting" ? (
+                      <small className="muted">系统继续重试</small>
+                    ) : (
+                      "—"
+                    );
+                  return (
+                    <Tooltip
+                      title={`${action.description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
+                    >
+                      <Button
+                        disabled={busy}
+                        size="small"
+                        type="link"
+                        onClick={() => {
+                          close();
+                          navigate(action.to);
+                        }}
+                      >
+                        {action.label}
+                      </Button>
+                    </Tooltip>
+                  );
+                },
               },
               {
                 title: "净值 / 日期",

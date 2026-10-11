@@ -43,6 +43,8 @@ import type { Item } from "./api";
 import { useDebounced, useResource, useWorkspace } from "./state";
 import { formatDecimal } from "./format";
 import { HelpText, helpColumns } from "./help";
+import { newestFirst, resourceDateFields } from "./date-ordering";
+import { initializeMountedEntityForm } from "./entity-form";
 export function PageTitle({
   title,
   description,
@@ -423,6 +425,12 @@ function ForeignSelect({
     />
   );
 }
+function EntityFormInitialization() {
+  const form = Form.useFormInstance();
+  useEffect(() => initializeMountedEntityForm(form), [form]);
+  return null;
+}
+
 export function EntityManager({
   resource,
   title,
@@ -498,7 +506,8 @@ export function EntityManager({
     };
   }, [open, editing?.id, editAttempt, space.id, resource]);
   const debouncedQuery = useDebounced(query);
-  useEffect(() => setPage(1), [debouncedQuery, kindFilter]);
+  const queryScope = new URLSearchParams(queryParams).toString();
+  useEffect(() => setPage(1), [debouncedQuery, kindFilter, queryScope]);
   const params = new URLSearchParams({
     offset: String((page - 1) * pageSize),
     limit: String(pageSize),
@@ -511,6 +520,9 @@ export function EntityManager({
     typeof state.data?.count === "number" && state.data?.limit !== undefined;
   const canWrite = space.role !== "viewer";
   let rows = listOf<Item>(state.data);
+  // Server-paged lists are ordered in the database before page slicing.
+  if (!serverPaged && resourceDateFields[resource])
+    rows = newestFirst(rows, resourceDateFields[resource]);
   if (filter) rows = rows.filter(filter);
   if (!serverPaged && query)
     rows = rows.filter((r) =>
@@ -760,6 +772,7 @@ export function EntityManager({
               onValuesChange={() => setDirty(true)}
               onFinish={save}
             >
+              <EntityFormInitialization />
               {error && (
                 <Alert
                   className="form-alert"
@@ -1440,17 +1453,20 @@ export function ResourceTable({
   columns,
   title,
   description,
+  queryParams,
 }: {
   resource: string;
   columns: ColumnsType<Item>;
   title: string;
   description?: string;
+  queryParams?: Record<string, string>;
 }) {
   return (
     <EntityManager
       resource={resource}
       title={title}
       description={description}
+      queryParams={queryParams}
       columns={helpColumns(columns)}
       allowEdit={false}
     />

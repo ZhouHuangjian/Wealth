@@ -1,0 +1,292 @@
+{
+  "recorded_at": "2026-10-09T14:31:59.671648+00:00",
+  "phase": "authorized isolated repair; not committed or deployed",
+  "baseline_sha": "e379dfe67a715d9913af246eba021c7b26ce45d1",
+  "branch": "codex/system-audit-2026-10-09",
+  "source_hashes": {
+    "backend/wealth/daily_returns.py": "4537915ec57b261efda7f86370bafc5c222d880f7b1e3fd5d7817276a55e752c",
+    "backend/wealth/dca_automation.py": "ac3f9629a46cd6e1ea8d8b840e749aa30e3395ee182b010cfe0312892b7c243e",
+    "backend/wealth/fund_orders.py": "f498ee9e0a11dfd83f29a761c233243ac1e7a2766c67dc666d46c13cc079318b",
+    "backend/wealth/fund_reconciliation.py": "371a78b727b067a1f694244f345f1e3815b049b61a8a3a80ccdda688fe33a87c",
+    "backend/wealth/investments.py": "821f98ca6fc731b7cbee8f5aca20e2cff73abec4007b69ad2bcf6e43ca7e0c2b",
+    "backend/wealth/market_quality.py": "4cfa4843ef4b618a99b3768bf43a80af3c803b0b32984c33c2bb27990d4c244b",
+    "backend/wealth/planning.py": "eb06b320dddf57d1fb4522105629e3f6722e40f91b5750f2fbee8d772a0785c6",
+    "backend/wealth/return_dates.py": "06c533d4997b1428e9846f4cfac7b7deb17cfe4660cfa36861d43952fa230fde",
+    "frontend/src/dca-automation.ts": "cba4cc01edb810e168d802bd17120bca4313951ab89c51dbb6301ac6d9cbb7cc",
+    "frontend/src/pages/DcaPlanAutomationStatus.tsx": "c9d811e6b23eb49d98116d235e15d86aa52513b30670d929416db3317734e3f6",
+    "frontend/src/pages/FundReconciliation.tsx": "2043d89bd55b4f4275594faed2d410e9fd48cf1b73b04368e1642c41bd5b8e28",
+    "frontend/tests/dca-automation.test.mjs": "971446d3536847fea98048418712e66372c928adee00e92c19a9e2ca537d5358",
+    "frontend/tests/fund-reconciliation.test.mjs": "8e34d4cc7289d2fe611bcfad1859e1f194fa9d63d3940383fbda6de429944343",
+    "scripts/database_privileges.py": "933ef441e6a1a8e8c5a669ef081c6de47e9a8169f2246d97131185fac79de4df",
+    "scripts/local_dev.py": "73ff0c517121a9f87404e93177c11b9335e8f85a6e2dd3c1e5568ebea74d1729",
+    "scripts/backup.py": "81c941a092aed35b71fda0539e4bf9b39a1b23af3cb59f5e295f81f9981dbb15",
+    "scripts/test_restore_local.py": "30dde885a9a2fd2e6f70eead3d8e9a373d6220a76fccdc109e7454bbb4aa9ea0",
+    "scripts/audit_local.py": "717681e231a4c1d7be9ac13591209fe3f73be2e7253fa65a4f962e24c7272b9e",
+    "backend/tests/test_audit_repairs_20261009.py": "d299b0bfcae70e20a4318ec5b9769a5a54caf4b4c3c103fd7097d904993f15a6",
+    "backend/audit_scenarios/test_system_audit_20261009.py": "521d0d520f78a9e0598e8ca5d3b289141e088a193769e659487828e0133e2d70",
+    "backend/audit_scenarios/probes.py": "0519e84dea2be9dbeefc641be6c551adac1888742a597dc943dd4e4d40c891a8",
+    "backend/audit_scenarios/ui_probe.py": "08ae584c2123557936027ea6e5a1f2cd1453cf33a4dc7cfbbae592342e718f59",
+    "backend/pytest.ini": "daeeecaeaca1205090ac974f71e9598f30c9d3f3e3f1030996f934584d500527"
+  },
+  "original_audit_evidence_preserved": true,
+  "core_ledger_models_migrations_unchanged": true,
+  "production_or_history_repair_executed": false,
+  "environment": {
+    "python": "3.12.3",
+    "django": "5.2.17",
+    "node": "22.22.1",
+    "postgresql": "18.6",
+    "db_port": 55441,
+    "web_port": 18091,
+    "databases": [
+      "wealth_test",
+      "wealth_ui_test"
+    ],
+    "runtime_role": "wealth_app, nonowner, NOSUPERUSER, NOBYPASSRLS",
+    "market_network": false,
+    "credentials": "private random test environment, not exported"
+  },
+  "findings": [
+    {
+      "id": "AUD-003",
+      "priority": "P1",
+      "status": "implemented/isolated_verified/not_deployed",
+      "batch": "B1",
+      "result": "statement NAV day preserved; paid-only late confirmation D1/D2=2/2; date-only conflict uses replacement; unknown date not guessed; parser remains fund-confirmation-1"
+    },
+    {
+      "id": "AUD-001",
+      "priority": "P1",
+      "status": "implemented/isolated_verified/not_deployed",
+      "batch": "B2",
+      "result": "completed drains existing paid periods only; off/cancel/reversal remain blocked; no new debit or period"
+    },
+    {
+      "id": "AUD-002",
+      "priority": "P2",
+      "status": "implemented/isolated_verified/not_deployed",
+      "batch": "B3",
+      "result": "complete active evidence promotes quantity provenance; partial/revoked does not; batch query; no financial event change"
+    },
+    {
+      "id": "AUD-004",
+      "priority": "P2",
+      "status": "implemented/isolated_verified/not_deployed",
+      "batch": "B4",
+      "result": "current-day reference requires known nonfuture publication <=20min; delayed/stale unavailable; existing <=10min fetched guard retained; full product basis/interval validation incomplete"
+    },
+    {
+      "id": "AUD-006",
+      "priority": "P1",
+      "status": "implemented/isolated_verified/not_deployed",
+      "batch": "B4",
+      "result": "shared availability excludes future publication; null official publication not fabricated; observations preserved"
+    },
+    {
+      "id": "AUD-005",
+      "priority": "P2",
+      "status": "implemented/isolated_verified/not_deployed",
+      "batch": "B5",
+      "result": "unchanged due DCA generation retains progress; revision/version stable; real changes honored; additive plan_status/last_checked_at"
+    },
+    {
+      "id": "AUD-007",
+      "priority": "P0",
+      "status": "implemented/isolated_verified/not_deployed",
+      "batch": "B0",
+      "result": "repeat init and ACL-free restore exclude private cleanup capability, revoke PUBLIC/runtime table access, restore 4 protected function ACLs; production ACL not verified"
+    }
+  ],
+  "checks": [
+    {
+      "command": "python scripts/audit_local.py test --junitxml=../.runtime/audit-local/repair-backend.xml --tb=short",
+      "exit_code": 0,
+      "passed": 1476,
+      "subtests_passed": 12,
+      "warnings": 253,
+      "seconds": 145.71,
+      "log": "repair-backend.log",
+      "junit": "repair-backend.xml"
+    },
+    {
+      "command": "python scripts/audit_local.py test audit_scenarios --junitxml=../.runtime/audit-local/repair-audit-scenarios.xml --tb=short",
+      "exit_code": 0,
+      "passed": 20,
+      "warnings": 2,
+      "seconds": 6.09,
+      "log": "repair-audit-scenarios.log",
+      "junit": "repair-audit-scenarios.xml"
+    },
+    {
+      "command": "npm test (frontend)",
+      "exit_code": 0,
+      "passed": 153,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "executed tool output; no raw log copied"
+    },
+    {
+      "command": "npm run build (frontend)",
+      "exit_code": 0,
+      "seconds": 4.68,
+      "typecheck": true,
+      "warnings": [
+        "chunks over 500kB; loading performance not measured"
+      ]
+    },
+    {
+      "command": "npm run format:check (frontend)",
+      "exit_code": 0
+    },
+    {
+      "command": "ruff format --check backend scripts",
+      "exit_code": 0,
+      "formatted_files": 166
+    },
+    {
+      "command": "ruff check --select E9,F63,F7,F82 backend scripts",
+      "exit_code": 0,
+      "scope": "specified rules only, not all lint rules"
+    },
+    {
+      "command": "python scripts/audit_local.py check",
+      "exit_code": 0,
+      "result": "no system check issue or model migration changes"
+    },
+    {
+      "command": "python -m unittest discover -s scripts -p 'test_*.py' -v",
+      "exit_code": 0,
+      "passed": 5,
+      "seconds": 0.48
+    },
+    {
+      "command": "python scripts/audit_local.py probe concurrency",
+      "exit_code": 0,
+      "workers": [
+        1,
+        1
+      ],
+      "debit": 1,
+      "confirm": 1,
+      "cash": "898",
+      "shares": "100",
+      "scope": "2 real PostgreSQL connections"
+    },
+    {
+      "command": "restart-completed-prepare, process exits, then restart-recover",
+      "exit_code": 0,
+      "debit": 1,
+      "confirm": 1,
+      "cash": "898",
+      "shares": "100",
+      "scope": "new Python process and duplicate scans, not real broker restart"
+    },
+    {
+      "command": "python scripts/audit_local.py restore-drill",
+      "exit_code": 0,
+      "result_file": "repair-restore-drill.json",
+      "migrations": "0001-0012",
+      "scope": "real native PostgreSQL, encrypted backup, 2 synthetic spaces, private media, least privilege, immutable/RLS/viewer checks, tick twice"
+    },
+    {
+      "command": "ordinary UI and controlled ui-* probes",
+      "result": "passed",
+      "cash": "898",
+      "shares": "200 including initial 100",
+      "debit": 1,
+      "confirm": 1,
+      "occurrences": 1,
+      "plan_status": "completed",
+      "evidence_link_action": "linked 1, corrected 0, skipped 0",
+      "formal_return": "2 on 2026-10-09",
+      "limits": [
+        "completed fixture set via save_resource: editor only active/paused",
+        "NAV arrival and scan_all injected offline, not beat health proof",
+        "synthetic standard CSV, not native institution sample"
+      ]
+    },
+    {
+      "command": "local changed Markdown path/anchor verification",
+      "result": {
+        "checked_local_links": 190,
+        "issues": []
+      }
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "failures_not_hidden": [
+    {
+      "phase": "before business repairs",
+      "result": "6 original finding assertions reproduced failure; original finding-results.txt preserved"
+    },
+    {
+      "phase": "first repaired default suite",
+      "passed": 1475,
+      "failed": 1,
+      "subtests_passed": 12,
+      "seconds": 148.1,
+      "failure": "existing immutable/private cleanup denial assertion at test_administration_v25 line 354",
+      "resolution": "found AUD-007 broad bootstrap grants; assertion retained"
+    },
+    {
+      "phase": "new restore ACL assertion",
+      "failure": "initial query also included trigger functions; not a directly callable function ACL invariant",
+      "resolution": "limit new check to protected nontrigger SECURITY DEFINER functions; private cleanup/immutable assertions unchanged"
+    },
+    {
+      "phase": "browser automation",
+      "failure": "Ant virtual option and transient loading selector locators timed out",
+      "resolution": "fresh visible state, keyboard/visible screenshot actions; final UI result verified; no code workaround"
+    }
+  ],
+  "not_verified": [
+    "production SHA/image/ACL/task/backup health",
+    "real broker/worker failure recovery",
+    "full institution samples or target product rules",
+    "cross-timezone full UI",
+    "full estimate basis/interval and product freshness SLA",
+    "controlled official correction of known conflicts",
+    "wait timeout/job liveness notifications",
+    "full fund evidence/replacement restoration fixture and Docker restore",
+    "load/performance",
+    "all administration/loan/correction pages",
+    "historical recalculation or ledger repair"
+  ],
+  "screenshots": [
+    {
+      "file": "repair-ui-completed.jpg",
+      "sha256": "36fe2c07cbcabf22f798083f5485545ed3738e0d1b77ccb57f6481e7c1a10dd1"
+    },
+    {
+      "file": "repair-ui-formal-return.jpg",
+      "sha256": "34c1f476662ff75a91b61c34a3f1aabfdbd7ee391dc7bc725612f40e3ed5dc1c"
+    },
+    {
+      "file": "repair-ui-nav-mapping.jpg",
+      "sha256": "93f778393a5c84176241ea9715da852c71bb9dd9ee2dfa4756fec89ce4ac8e48"
+    },
+    {
+      "file": "repair-ui-reconciled.jpg",
+      "sha256": "5f95ddf50d03985785d95b3d53f4dccb973f4e84cd4afe40a13efd450d7aa29e"
+    },
+    {
+      "file": "repair-ui-waiting.jpg",
+      "sha256": "c9537e362ca704911af324dd134363f2eb1ca99213eed215a6bad3ea65fe673e"
+    }
+  ],
+  "original_worktree": {
+    "git_status": "only preexisting untracked docs/manuals/",
+    "manual_sha256": "d37cd7b1720485ddcb0ac5e85152355a18d2500e93f5a6ea244bd560e2b524c4",
+    "unchanged": true
+  },
+  "cleanup": {
+    "web_stopped": true,
+    "audit_pg_stopped": true,
+    "temporary_node_modules_symlink_removed": true,
+    "original_dependency_target_preserved": true,
+    "created_browser_tab_closed": true
+  }
+}

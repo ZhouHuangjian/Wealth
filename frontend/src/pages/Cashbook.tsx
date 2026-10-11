@@ -3,7 +3,7 @@ import { NavigationTabs } from "../navigation";
 import Dividends from "./Dividends";
 import { FundOrders } from "./FundBuy";
 import FundReconciliation from "./FundReconciliation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   App,
@@ -17,9 +17,12 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
 } from "antd";
 import { Download, FileUp, Plus, Check, ArrowRight } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { dcaNextAction } from "../business-action";
+import { dcaAutomationStatusLabel } from "../dca-automation";
 import {
   Blank,
   EntityManager,
@@ -148,12 +151,50 @@ function EventList({ investmentOnly = false }: { investmentOnly?: boolean }) {
     [end, setEnd] = useState("");
   const [page, setPage] = useState(1),
     [pageSize, setPageSize] = useState(12);
+  const [routeParams, setRouteParams] = useSearchParams();
+  const accountId = routeParams.get("account_id"),
+    targetEventId = routeParams.get("event_id");
+  const [targetError, setTargetError] = useState("");
+  const openedEvent = useRef("");
+  useEffect(() => {
+    if (!targetEventId) {
+      openedEvent.current = "";
+      setTargetError("");
+      return;
+    }
+    if (
+      (routeParams.get("tab") || "events") !==
+      (investmentOnly ? "investments" : "events")
+    )
+      return;
+    if (
+      !targetEventId ||
+      openedEvent.current === `${space.id}:${targetEventId}`
+    )
+      return;
+    let active = true;
+    setTargetError("");
+    api<Item>(`/spaces/${space.id}/events/${encodeURIComponent(targetEventId)}`)
+      .then((event) => {
+        if (!active) return;
+        openedEvent.current = `${space.id}:${targetEventId}`;
+        requestReveal(() => showDetail(event));
+      })
+      .catch(() => {
+        if (active)
+          setTargetError("原记录不存在或你无权查看，请返回期次列表重新选择。");
+      });
+    return () => {
+      active = false;
+    };
+  }, [space.id, targetEventId, routeParams.get("tab"), investmentOnly]);
   const query = useDebounced(search);
   useEffect(() => setPage(1), [query, kind, currency, start, end]);
   const params = new URLSearchParams({
     offset: String((page - 1) * pageSize),
     limit: String(pageSize),
     q: query,
+    ...(accountId ? { account_id: accountId } : {}),
     ...(kind
       ? { kind }
       : investmentOnly
@@ -166,12 +207,46 @@ function EventList({ investmentOnly = false }: { investmentOnly?: boolean }) {
     ...(end ? { end } : {}),
   });
   const state = useResource("events", `?${params}`);
-  const rows = listOf<Item>(state.data);
+  const targetAccount = listOf<Item>(accountsState.data).find(
+    (account) => account.id === accountId,
+  );
+  const rows = accountId && !targetAccount ? [] : listOf<Item>(state.data);
   return (
     <Panel
       title={investmentOnly ? "投资交易" : "收支流水"}
       subtitle="转账、投资本金与还款本金不计为日常消费。"
     >
+      {targetError && <Alert type="warning" showIcon message={targetError} />}
+      {accountId && !accountsState.loading && (
+        <Alert
+          type={targetAccount ? "info" : "warning"}
+          showIcon
+          message={
+            targetAccount
+              ? `当前账户：${targetAccount.name}`
+              : "指定账户不存在或不在当前空间。"
+          }
+          description={
+            targetAccount
+              ? `对照实际扣款与关联份额核实差异，录入有误时使用原记录的更正入口。${space.role === "viewer" ? "修正请联系空间管理员。" : ""}`
+              : "请返回待办重新选择，或查看全部流水。"
+          }
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                const next = new URLSearchParams(routeParams);
+                next.delete("account_id");
+                next.delete("event_id");
+                setRouteParams(next);
+              }}
+            >
+              全部流水
+            </Button>
+          }
+          style={{ marginBottom: 12 }}
+        />
+      )}
       <div className="table-toolbar">
         <Space wrap>
           <Input.Search
@@ -377,11 +452,22 @@ function Imports() {
     [mappingDefaults, setMappingDefaults] = useState<any>({});
   const [fundBatch, setFundBatch] = useState<Item | null>(null),
     [fundOpen, setFundOpen] = useState(false);
-  const [importParams] = useSearchParams();
+  const [importParams, setImportParams] = useSearchParams();
   useEffect(() => {
     if (importParams.get("upload") && space.role !== "viewer")
       requestReveal(() => setOpen(true));
   }, [importParams.get("upload")]);
+  const fundActionKey = useRef("");
+  useEffect(() => {
+    if (importParams.get("action") !== "fund-check") return;
+    const key = `${space.id}:${importParams.get("account_id")}:${importParams.get("instrument_id")}`;
+    if (fundActionKey.current === key) return;
+    fundActionKey.current = key;
+    requestReveal(() => {
+      setFundBatch(null);
+      setFundOpen(true);
+    });
+  }, [space.id, importParams.toString()]);
   const [uploadForm] = Form.useForm(),
     [mappingForm] = Form.useForm();
   const accounts = listOf<Item>(accountsState.data).map((a) => ({
@@ -685,7 +771,21 @@ function Imports() {
       {fundOpen && (
         <FundReconciliation
           initialBatch={fundBatch || undefined}
-          onClose={() => setFundOpen(false)}
+          initialContext={
+            !fundBatch && importParams.get("action") === "fund-check"
+              ? {
+                  account_id: importParams.get("account_id") || undefined,
+                  instrument_id: importParams.get("instrument_id") || undefined,
+                }
+              : undefined
+          }
+          onClose={() => {
+            setFundOpen(false);
+            fundActionKey.current = "";
+            const next = new URLSearchParams(importParams);
+            next.delete("action");
+            setImportParams(next, { replace: true });
+          }}
           onDone={() => {
             void state.retry();
           }}
@@ -1174,7 +1274,9 @@ export function Occurrences({
 }: {
   resource?: string;
 }) {
-  const { space, reload, openEvent, requestReveal } = useWorkspace();
+  const { space, reload, openEvent, requestReveal, hidden } = useWorkspace();
+  const navigate = useNavigate();
+  const [routeParams] = useSearchParams();
   const state = useResource(resource),
     eventState = useResource("events", "?limit=1000"),
     planState = useResource("plans", "?limit=1000"),
@@ -1192,6 +1294,47 @@ export function Occurrences({
   const allEvents = listOf<Item>(eventState.data).filter(
     (e) => !e.reversed && e.kind !== "reversal",
   );
+  function actionFor(row: Item) {
+    return dcaNextAction(
+      space.id,
+      row,
+      plans.find((plan) => plan.id === row.plan_id),
+    );
+  }
+  function followAction(row: Item) {
+    const action = actionFor(row);
+    if (!action) return;
+    if (action.kind === "match" && space.role !== "viewer")
+      requestReveal(() => {
+        setSelected(row);
+        setEventId(undefined);
+        setError("");
+      });
+    else navigate(action.to);
+  }
+  const locatedOccurrence = useRef("");
+  useEffect(() => {
+    const id = routeParams.get("occurrence_id");
+    if (!id || resource !== "occurrences" || state.loading || state.error)
+      return;
+    const key = `${space.id}:${id}`;
+    if (locatedOccurrence.current === key) return;
+    locatedOccurrence.current = key;
+    const row = listOf<Item>(state.data).find((item) => item.id === id);
+    if (!row) {
+      setError("本期记录不存在或不在当前空间，请重新选择。");
+      return;
+    }
+    if (space.role === "viewer") {
+      setError("请对照实际扣款查看原记录，关联或修正请联系空间管理员。");
+      return;
+    }
+    requestReveal(() => {
+      setSelected(row);
+      setEventId(undefined);
+      setError("");
+    });
+  }, [space.id, state.data, routeParams.get("occurrence_id")]);
   return (
     <>
       <Panel
@@ -1206,6 +1349,14 @@ export function Occurrences({
             : "定投按设置自动记账；其他计划可关联实际收支。"
         }
       >
+        {error && !selected && (
+          <Alert
+            type="warning"
+            showIcon
+            message={error}
+            style={{ marginBottom: 12 }}
+          />
+        )}
         <LoadState {...state}>
           <Table
             rowKey="id"
@@ -1241,13 +1392,36 @@ export function Occurrences({
               {
                 title: "状态",
                 dataIndex: "status",
-                render: (v, r) => (
-                  <span title={r.subscription_day?.reason}>
-                    <Status value={v} />
-                    {r.automation_enabled && <small>自动记账</small>}
-                    {r.auto_skip && <small>休市</small>}
-                  </span>
-                ),
+                render: (v, r) => {
+                  const action = actionFor(r);
+                  return (
+                    <span
+                      title={hidden ? undefined : r.subscription_day?.reason}
+                    >
+                      {action &&
+                      (r.automation?.requires_action ||
+                        v === "needs_reconciliation") ? (
+                        <Tooltip
+                          title={`${action.description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
+                        >
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => followAction(r)}
+                          >
+                            {v === "needs_reconciliation"
+                              ? "待核对"
+                              : dcaAutomationStatusLabel(r.automation?.status)}
+                          </Button>
+                        </Tooltip>
+                      ) : (
+                        <Status value={v} />
+                      )}
+                      {r.automation_enabled && <small>自动记账</small>}
+                      {r.auto_skip && <small>休市</small>}
+                    </span>
+                  );
+                },
                 filters: [
                   { text: "待处理", value: "pending" },
                   { text: "未到期", value: "scheduled" },
@@ -1260,14 +1434,44 @@ export function Occurrences({
                 title: "处理",
                 fixed: "right",
                 render: (_, r) =>
-                  r.automation_enabled ? (
-                    <span className="muted" title={r.automation?.message}>
-                      {r.automation?.requires_action
-                        ? r.automation.action_label
-                        : r.event_id
-                          ? "已自动记账"
-                          : "系统自动处理"}
-                    </span>
+                  r.automation_enabled || r.automation?.requires_action ? (
+                    (() => {
+                      const action = actionFor(r);
+                      if (!action)
+                        return (
+                          <Tooltip
+                            title={
+                              hidden
+                                ? "说明已隐藏"
+                                : r.details?.automation?.message ||
+                                  r.automation.message
+                            }
+                          >
+                            <span className="muted">
+                              {r.automation.processing_state === "inactive"
+                                ? "已停止自动处理"
+                                : r.event_id
+                                  ? "已自动记账"
+                                  : "系统自动处理"}
+                            </span>
+                          </Tooltip>
+                        );
+                      return (
+                        <Tooltip
+                          title={`${action.description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
+                        >
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => followAction(r)}
+                          >
+                            {space.role === "viewer" && action.kind === "match"
+                              ? "查看核对说明"
+                              : action.label}
+                          </Button>
+                        </Tooltip>
+                      );
+                    })()
                   ) : r.event_id ? (
                     <Tag color="green">已关联实账</Tag>
                   ) : space.role !== "viewer" &&

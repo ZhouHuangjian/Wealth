@@ -418,6 +418,30 @@ test("human statuses distinguish automatic estimates, existing facts and missing
   assert.equal(
     dcaAutomationSummary({
       enabled: true,
+      plan_status: "completed",
+      summary: {},
+    }),
+    "计划已结束，无新期次",
+  );
+  assert.equal(
+    dcaAutomationSummary({
+      enabled: true,
+      plan_status: "completed",
+      summary: { waiting_nav: 1 },
+    }),
+    "等待正式净值 1 期",
+  );
+  assert.equal(
+    dcaAutomationSummary({
+      enabled: false,
+      plan_status: "completed",
+      summary: {},
+    }),
+    "自动补录已关闭",
+  );
+  assert.equal(
+    dcaAutomationSummary({
+      enabled: true,
       has_more: true,
       summary: { recorded_estimate: 500 },
     }),

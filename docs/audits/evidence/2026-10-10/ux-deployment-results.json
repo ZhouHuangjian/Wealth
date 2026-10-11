@@ -1,0 +1,181 @@
+{
+  "version": "2.12.0",
+  "status": "deployed_and_runtime_verified",
+  "source_commit": "c99d3b35bc82e38cb52559333a30e7f86e527605",
+  "source_manifest_sha256": "1d513170d60ebc1d7dd0015ab0e6bda52f0cfb8bb3e54284890b9bed4cc5bd81",
+  "image_id": "sha256:c9fffa59a720f3e972b3b3460cfa512551012a4cda9ebcc85c0a16217685fa94",
+  "checked_at": "2026-10-10T00:13:25.961318+00:00",
+  "checked_at_asia_shanghai": "2026-10-10T08:13:25.961318+08:00",
+  "deployment_started_at": "2026-10-10T00:11:11.563076+00:00",
+  "application_healthy_at": "2026-10-10T00:12:51.005859+00:00",
+  "source_archive_sha256": "66d4bbd7849c09d1539858d97c4834b0ba7c7457e7ef441274a461fbd0d6c6c5",
+  "source_file_count": 384,
+  "environment": {
+    "server": "Ubuntu 24.04 LTS amd64",
+    "candidate_python": "3.13.16",
+    "database": "PostgreSQL 18",
+    "broker": "RabbitMQ 4.3",
+    "frontend_build_node": "22.22.1",
+    "local_database": "isolated PostgreSQL 18, port 55441",
+    "server_test_database": "wealth_v212_test",
+    "production_database_used_for_regression": false,
+    "local_backend_python": "3.12.3",
+    "local_release_tools_and_ui_proxy_python": "3.10.2",
+    "server_host_python": "3.12.3"
+  },
+  "tests": {
+    "backend_full_passed": 1498,
+    "backend_subtests_passed": 12,
+    "backend_skipped": 0,
+    "backend_seconds": 375.73,
+    "backend_critical_passed": 459,
+    "backend_critical_seconds": 83.7,
+    "frontend_passed": 178,
+    "frontend_skipped": 0,
+    "cache_occurrence_jobs_passed": 20,
+    "cache_occurrence_jobs_seconds": 7.71,
+    "backup_script_passed": 5,
+    "release_safety_passed": 51,
+    "source_backend_files_verified": 170,
+    "public_frontend_files_verified": 21
+  },
+  "browser": {
+    "status": "passed",
+    "scope": "independent frozen frontend / current source, isolated synthetic ordinary-user space",
+    "checks": [
+      "home_waiting_cash_opens_exact_debit_account_reconciliation",
+      "reconciliation_explanation_initially_collapsed_and_expands",
+      "newest_first_todos_and_events",
+      "recent_calendar_default_and_explicit_upcoming_switch",
+      "coin_entry_below_analytics_keyboard_first_round_six_rounds_hexagram_no_moving_lines_branch",
+      "coin_reset",
+      "account_form_current_date_CNY_zero_initial_amount",
+      "fresh_frontend_build_all_output_hashes_match_exercised_frontend"
+    ],
+    "screenshot_sha256": {
+      "home-account-link-20261010.jpg": "f452d9f31e4fe78ff54f6b13cf56dde51dbe4de2ac21d1852163bf40348c9faf",
+      "coin-result-20261010.jpg": "54d66081e2ec3dc9baf48d3646e6efcab268d4b22b74e38c31d16bd8f8b062bd",
+      "todo-order-20261010.jpg": "7114b75b0aff7d5169bea63913f69b5a7425847a715cdce870a8738a3c53e15e",
+      "recent-calendar-20261010.jpg": "90763cbd0656c15c8b33fb63615825fce6eb1c0cddeeb60d06c27d71e6d54f86",
+      "account-defaults-20261010.jpg": "878df61569511c67d80d835a61c57bb14aa019abd2a2f834589959a4ff43daef"
+    },
+    "prior_mobile_and_moving_lines": "supplemental unchanged frontend checks from 2026-10-09; not repeated on 2026-10-10",
+    "production_browser_login_performed": false
+  },
+  "preservation": {
+    "tables": 40,
+    "existing_sessions": 4,
+    "sequences": 11,
+    "all_paused_write_fingerprints_equal": true,
+    "schema": "0012_workspace_admin_access",
+    "schema_changes": false,
+    "runtime_env_unchanged": true,
+    "no_data_reset": true,
+    "no_financial_transactions_created_by_verification": true,
+    "no_historical_recalculation": true,
+    "no_production_restore": true,
+    "no_production_acl_changes": true,
+    "normal_background_jobs_resumed": "legitimate changes after resume are not claimed to remain fingerprint-identical"
+  },
+  "backup": {
+    "remote_path": "/var/backups/wealth/wealth-20261010T001125Z.backup.enc",
+    "sha256": "6aabb76d78566e104a0ab6f56008c4e1ce21c733083170374a38accb480455d2",
+    "server_authenticated": true,
+    "local_copy_authenticated": true,
+    "private_files_in_snapshot": 0,
+    "authentication_is_not_restore_drill": true,
+    "key_stored_in_repository": false
+  },
+  "runtime": {
+    "services_healthy": [
+      "web",
+      "worker",
+      "beat",
+      "db",
+      "rabbitmq"
+    ],
+    "application_images_equal": true,
+    "worker_ping_passed": true,
+    "single_beat": true,
+    "backup_timer": "active",
+    "certificate_renewal_timer": "active",
+    "dca_plan_projections": 4,
+    "admin_consent_denials_actually_exercised": 0,
+    "explanation": "Current active space is owner-authorized; denial branch tested in isolated regression, not exercised on production.",
+    "space_read_requests_checked": 14,
+    "count_breakdown": {
+      "basic_queries": 9,
+      "dca_plan_status_queries": 4,
+      "owner_authorization_status_queries": 1,
+      "total_space_gets": 14,
+      "source_directory": "separate read, not added to space GET count"
+    }
+  },
+  "cache_compatibility": {
+    "finding": "UX-005",
+    "initial_regression": "3 failed, 2 warnings, 2.41s; tool output only, no original failure log file",
+    "old_version": "account-equity-v24",
+    "current_version": "account-equity-v25",
+    "recovery": "GET bypasses incompatible cached payload and computes current response read-only; old Projection rows remain",
+    "new_default_regressions": 3,
+    "priority": "P2"
+  },
+  "actual_commands": [
+    "python3 .runtime/v212/deploy/build_reference.py --execute --npm /opt/homebrew/opt/node@22/bin/npm",
+    "python3 .runtime/v212/deploy/build_candidate.py --execute --replace-test-database",
+    "python3 .runtime/v212/deploy/verify_candidate.py --execute",
+    "/Volumes/mi/Wealth/.venv/bin/python scripts/audit_local.py test tests/test_overview_projection_version.py tests/test_occurrence_navigation.py tests/test_jobs.py -o addopts= -q",
+    "python3 -m unittest discover -s .runtime/v212/deploy -p test_*.py -v",
+    "python3 .runtime/v212/deploy/cutover_orchestrator.py --execute"
+  ],
+  "failed_or_superseded_runs": [
+    "Initial server critical list referenced nonexistent test_akshare_integration_v212.py; candidate test failed before production writers were stopped. Corrected to existing v211 suite and added pre-DB path gate. Failure log retained locally.",
+    "d959844 candidate passed 1495 backend tests, but was superseded by c99d3b3 cache compatibility fix; final release was rebuilt and all 1498 tests rerun. Earlier candidate proof retained in superseded-d959844.",
+    "2026-10-09 SSH authorization failure is historical; later human-provided server access resolved it. No credentials recorded."
+  ],
+  "tracked_proof_sha256": {
+    "final-acceptance.json": "0589b8f7a3c6111b2d2bab1e33e9004e5bae3dd4e3c6be298f16c3bff279908e",
+    "production-readonly.json": "3c6aad219c7c7d20922a8ee88ea93d3213b878b326b2018b038cdd9aaa5619d2",
+    "runtime-state.json": "c306a0b67f65575efa40883171ba53d18183d3eef564fab87082c798df4e186e",
+    "https-verification.json": "86086cf0e0dfd97b20b1b12425cb9a5ef773d0b18348469a80ff3734152051c9",
+    "release-tool-manifest.json": "17399320f0d6b2d84b0b82f39886529788f1d699e4f12e07d3de83f1cd932bdd",
+    "backend-full.log": "ea392dc8b5ecbd2b2f59377c68e50e17a9fd5791dc592462a05ba1e845e83ea7",
+    "backend-critical.log": "7f73545705952e251481eabe9917d585652acead985e71156f5b724538be9eef",
+    "cache-regression-20261010.log": "ae3b3cd1e05782492817dff24718045b9f94c200008a89c57d65823f7f0ef409",
+    "frontend-c99d3b3-20261010.log": "838917666599392fc06b459b7850ccbf681020973dc983507576322dec1b7853"
+  },
+  "local_proof_sha256": {
+    "source-commit-verification.json": "c002aebd72d7e3aa0e0c3e841ff48d7bb9ddbc6fde097aba9053a9737f183578",
+    "server-acceptance.json": "150efb38feddd6bbdfcc2d00a927513608215a06c0e5cfcfb1da5b290604c868",
+    "server-full-regression.json": "74f811798681bfaaec80b17f052c74447b90dd4341260521b60535946bcdde8c",
+    "server-candidate-verification.json": "371fe26315503fb155ab0b9f7ef6c05ea477c7597cb50bd0e63b2c862f6e6f95",
+    "frontend-reference-verification.json": "3882365167fad262b487e1b46e625d601993318af70f252e2b30767f5adf2715",
+    "browser-acceptance.json": "7383853c96b2a5726c718a6609a7e1953fe2444a0c6eac04aeee752c2545de42",
+    "deployment-record.json": "8e3795b0a1c7ebd3b02ffa70f3a8b81bb50100d6f34a351be0d08debfdb8acba",
+    "v212-data-before.json": "2302b1ff17fbd82abdd65a903fd94c285608bc0ffb93b5be9ca756328561f633",
+    "v212-data-after.json": "2302b1ff17fbd82abdd65a903fd94c285608bc0ffb93b5be9ca756328561f633",
+    "local-backup-receipt.json": "220787a70d9967af90c972d6fa19e49d5183e101de29aa25b6c76de4038de32b",
+    "host-operations-receipt.json": "e9484955f4b38d5b1d46088258bcbe750f2e4db5ee14c16cb2d840a7e1134631",
+    "production-preflight-20261010.json": "ab91be34cf5d228a558691946e7830386ce0024c4b0514c98a7d589e3bf1c33d"
+  },
+  "local_proof_directory": ".runtime/v212/deploy/",
+  "unverified": [
+    "actual OS reduced-motion preference",
+    "all real product calendars and institution-native statements",
+    "live market-provider availability at deployment",
+    "full QDII estimate baselines/coverage/timezones",
+    "all management/loan/correction UI paths",
+    "broker/worker failure-and-recovery drill",
+    "production-scale restore RPO/RTO",
+    "historical income recalculation and actual-data corrections"
+  ],
+  "historical_evidence": "../2026-10-09/ux-release-results.json remains unchanged as the pre-deployment record",
+  "cleanup": {
+    "isolated_browser_tab_closed": true,
+    "isolated_web_and_reference_proxy_stopped": true,
+    "isolated_database_stopped_data_retained": true,
+    "temporary_ssh_connection_closed": true,
+    "server_final_acceptance_records_retained": true,
+    "original_main_and_untracked_manual_unchanged": true
+  }
+}

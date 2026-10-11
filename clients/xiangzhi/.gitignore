@@ -1,0 +1,35 @@
+# Private source data and generated stores
+/private/
+/data/
+/imports/
+/exports/
+/backups/
+/logs/
+/models/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.draft-sync/
+
+# Development outputs
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+node_modules/
+dist/
+build/
+.DS_Store

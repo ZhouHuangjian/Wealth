@@ -26,6 +26,8 @@ import time
 from urllib.parse import quote
 from urllib.request import urlopen
 
+from database_privileges import RUNTIME_GRANTS_SQL
+
 ROOT = Path(__file__).resolve().parent.parent
 RUNTIME = ROOT / ".runtime"
 STATE = RUNTIME / "local-services.json"
@@ -210,12 +212,8 @@ def configure_database(name, *, marker=None):
         connection.execute(
             "ALTER DEFAULT PRIVILEGES FOR ROLE wealth_owner IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO wealth_app"
         )
-        connection.execute(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO wealth_app"
-        )
-        connection.execute(
-            "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO wealth_app"
-        )
+        with connection.transaction():
+            connection.execute(RUNTIME_GRANTS_SQL)
 
 
 def setup_dependencies():

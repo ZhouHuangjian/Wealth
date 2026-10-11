@@ -22,6 +22,8 @@ import sys
 import tarfile
 import tempfile
 
+from database_privileges import RUNTIME_GRANTS_SQL
+
 ROOT = Path(__file__).resolve().parent.parent
 MAGIC = b"WEALTH-BACKUP-V1\n"
 CHUNK = 1024 * 1024
@@ -397,9 +399,7 @@ def restore(args):
         END $$;""")
         # Restored schema belongs to the migration owner. Reapply runtime grants;
         # RLS remains in the dump, and the app role remains a non-owner.
-        compose.sql(
-            "GRANT USAGE ON SCHEMA public TO wealth_app; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO wealth_app; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO wealth_app;"
-        )
+        compose.sql("BEGIN;" + RUNTIME_GRANTS_SQL + "COMMIT;")
         with (stage / "private-media.tar").open("rb") as source:
             compose.run(
                 "run",

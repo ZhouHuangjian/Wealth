@@ -690,6 +690,24 @@ def generate_schedule(space, user, resource, horizon_date=None):
             if due <= current_day
             else "scheduled",
         }
+        if (
+            due_only
+            and old
+            and "automation" in old.details
+            and {
+                key: value for key, value in old.details.items() if key != "automation"
+            }
+            == details
+            and all(
+                getattr(old, key) == value
+                for key, value in values.items()
+                if key != "details"
+            )
+        ):
+            # The generated plan facts did not change. Retain its processing
+            # result so a no-op poll does not erase and re-create the same state.
+            # A changed plan version/calendar/amount still invalidates it.
+            values["details"] = old.details
         if old:
             if any(getattr(old, key) != value for key, value in values.items()):
                 for key, value in values.items():

@@ -152,6 +152,7 @@ export const navigationCatalog: Record<
     title: "管理工作台",
     items: [
       ["users", "用户管理"],
+      ["chat", "聊天管理"],
       ["spaces", "空间管理"],
       ["trash", "空间回收站"],
       ["glossary", "名词帮助配置"],

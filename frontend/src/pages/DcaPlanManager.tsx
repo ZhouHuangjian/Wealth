@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   App,
@@ -83,6 +84,48 @@ export default function DcaPlanManager({
   const instruments = listOf<Item>(instrumentState.data);
   const rows = listOf<Item>(state.data);
   const canWrite = space.role !== "viewer";
+  const [routeParams, setRouteParams] = useSearchParams();
+  const locatedPlan = useRef("");
+  const [actionError, setActionError] = useState("");
+  useEffect(() => {
+    const id = routeParams.get("plan_id");
+    if (routeParams.get("action") !== "edit-plan" || !id) {
+      locatedPlan.current = "";
+      return;
+    }
+    const key = `${space.id}:${id}`;
+    if (locatedPlan.current === key) return;
+    let active = true;
+    setActionError("");
+    api<Item>(`/spaces/${space.id}/plans/${encodeURIComponent(id)}`)
+      .then((plan) => {
+        if (!active) return;
+        locatedPlan.current = key;
+        if (plan.kind !== "dca") {
+          setActionError("指定记录不是定投计划，请重新选择。");
+          return;
+        }
+        if (canWrite) openForm(plan);
+        else {
+          setActionError(
+            "已定位计划设置。修改扣款账户、费用或自动化规则请联系空间管理员。",
+          );
+          showDetail(plan);
+        }
+        const next = new URLSearchParams(routeParams);
+        next.delete("action");
+        setRouteParams(next, { replace: true });
+      })
+      .catch(() => {
+        if (active)
+          setActionError(
+            "指定计划不存在或不在当前空间，请返回期次列表重新选择。",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [space.id, routeParams.get("action"), routeParams.get("plan_id")]);
   useEffect(() => {
     if (open && !editing && frequency && !form.isFieldTouched("holiday_policy"))
       form.setFieldValue(
@@ -207,6 +250,14 @@ export default function DcaPlanManager({
           </Space>
         }
       >
+        {actionError && (
+          <Alert
+            type="info"
+            showIcon
+            message={actionError}
+            style={{ marginBottom: 12 }}
+          />
+        )}
         <div className="table-toolbar">
           <Input
             prefix={<Search size={15} />}

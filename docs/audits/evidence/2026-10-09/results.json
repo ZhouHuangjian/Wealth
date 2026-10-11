@@ -1,0 +1,343 @@
+{
+  "audit_date": "2026-10-09",
+  "timezone": "Asia/Shanghai",
+  "generated_at_utc": "2026-10-09T12:39:22.572333+00:00",
+  "source_sha": "e379dfe67a715d9913af246eba021c7b26ce45d1",
+  "source_remote_default": "main",
+  "source_original_branch": "main",
+  "audit_branch": "codex/system-audit-2026-10-09",
+  "environment": {
+    "os": "macOS arm64",
+    "python": "3.12.3",
+    "django": "5.2.17",
+    "pytest": "9.1.1",
+    "psycopg": "3.3.6",
+    "postgres": "18.6",
+    "node": "22.22.1",
+    "npm": "10.9.4",
+    "initial_cluster_port": 55439,
+    "portable_harness_cluster_port": 55441,
+    "role": "wealth_app, not table owner, not superuser, no BYPASSRLS"
+  },
+  "production_public_health": {
+    "url": "https://124.223.23.76/api/health/",
+    "tls_verification": true,
+    "fetched_at_utc": "2026-10-09T12:28:23.765186+00:00",
+    "response": {
+      "status": "ok",
+      "version": "2.11.0",
+      "mode": "production"
+    },
+    "runtime_sha": "unverified",
+    "worker_beat_backups": "unverified"
+  },
+  "checks": [
+    {
+      "id": "baseline-backend",
+      "command": ".venv/bin/python .runtime/audit-2026-10-09/driver.py test --junitxml=../.runtime/audit-2026-10-09/backend-baseline.xml --tb=short",
+      "portable_equivalent": ".venv/bin/python scripts/audit_local.py test",
+      "exit": 0,
+      "passed": 1447,
+      "subtests_passed": 12,
+      "warnings": 504,
+      "seconds": 136.22,
+      "log": "backend-baseline.log",
+      "log_sha256": "565192fd611d4416a1b6ee960f1ddff419a3638a42e276653f84cad14c64803d"
+    },
+    {
+      "id": "frontend-tests",
+      "command": "npm test (cwd frontend)",
+      "exit": 0,
+      "passed": 152,
+      "failed": 0,
+      "skipped": 0,
+      "log": "frontend-tests.log",
+      "log_sha256": "a9584877a905465681e4bb126d43ce3e14ca396a1397c861feb75f39d27202a8"
+    },
+    {
+      "id": "frontend-build",
+      "command": "npm run build (cwd frontend)",
+      "exit": 0,
+      "seconds": 4.39,
+      "warnings": [
+        "chunks over 500 kB; no loading/performance test"
+      ],
+      "log": "frontend-build.log",
+      "log_sha256": "6495acf1885d4e1a0851f4ce2a1059a0ea442bb894dfb3f52bb30d8c01283c7a"
+    },
+    {
+      "id": "script-tests",
+      "command": "python -m unittest discover -s scripts -p 'test_*.py' -v",
+      "exit": 0,
+      "passed": 5,
+      "seconds": 0.501,
+      "log": "script-tests.log",
+      "log_sha256": "215586d19cce0c3ff20cfc7335a41355d6a8f2a47c47c3a41a6f14b73f5ffa06"
+    },
+    {
+      "id": "audit-invariants",
+      "command": ".venv/bin/python scripts/audit_local.py test audit_scenarios -m audit_invariant --junitxml=../.runtime/audit-2026-10-09/audit-invariants.xml --tb=short",
+      "exit": 0,
+      "passed": 14,
+      "deselected": 6,
+      "warnings": 1,
+      "seconds": 4.42,
+      "log": "audit-invariants.log",
+      "log_sha256": "79e6173ef6b73e19457d0fa6085ebc1ff60906ff401e8ab21a13a484647f6c05"
+    },
+    {
+      "id": "audit-findings",
+      "command": ".venv/bin/python scripts/audit_local.py test audit_scenarios -m audit_finding --junitxml=../.runtime/audit-2026-10-09/audit-findings.xml --tb=short",
+      "exit": 1,
+      "failed": 6,
+      "deselected": 14,
+      "warnings": 1,
+      "seconds": 1.98,
+      "log": "audit-findings.log",
+      "meaning": "Unfixed desired-behavior assertions fail. No xfail/skip.",
+      "log_sha256": "93f9721997e0e2ef2e07a694cfca30eba13472e75a498e7ccc80513f426e1c51"
+    },
+    {
+      "id": "audit-init",
+      "command": ".venv/bin/python scripts/audit_local.py init",
+      "exit": 0,
+      "migrations": "0001 through 0012",
+      "log": "harness-init.log",
+      "log_sha256": "8c4618774c029b2640e41596e9752bcd6e5317aba5a40e5239c72e36274e4764"
+    },
+    {
+      "id": "audit-model-check",
+      "command": ".venv/bin/python scripts/audit_local.py check",
+      "exit": 0,
+      "result": "System check no issues; no model changes",
+      "log": "harness-check.log",
+      "log_sha256": "c0f41e9d77fda2dc38b65183611472aa000dc0dc520211e6ca4ca14f52e1024d"
+    },
+    {
+      "id": "audit-port-guard",
+      "command": ".venv/bin/python scripts/audit_local.py --pg-port 55432 init",
+      "exit": 2,
+      "result": "Expected rejection before database operation",
+      "log": "harness-guard.log",
+      "log_sha256": "460637e29937b371fbb49e790b84cafb13038848529ec847824730bf0331037b"
+    },
+    {
+      "id": "python-format",
+      "command": ".venv/bin/ruff format --check backend scripts",
+      "exit": 0,
+      "result": "163 files formatted",
+      "log": "python-format.log",
+      "log_sha256": "27b0eb549ee60b2db607fc774f8030ac1994dcb38c3fd6db8e5ef09861482a03"
+    },
+    {
+      "id": "python-critical-lint",
+      "command": ".venv/bin/ruff check --select E9,F63,F7,F82 backend scripts",
+      "exit": 0,
+      "log": "python-lint.log",
+      "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "id": "frontend-typecheck",
+      "command": "npm run typecheck (cwd frontend)",
+      "exit": 0,
+      "log": "frontend-typecheck.log",
+      "log_sha256": "ec4c344b6d02f39495acd1338bf9bc0b49cce3a6922191a9c2ce45066074270f"
+    },
+    {
+      "id": "frontend-format",
+      "command": "npm run format:check (cwd frontend)",
+      "exit": 0,
+      "log": "frontend-format.log",
+      "log_sha256": "a498b6eb50bc42958223ad5f717d4dda93dbcefa61eb62a12638a22ef763a925"
+    },
+    {
+      "id": "private-model-check",
+      "command": ".venv/bin/python .runtime/audit-2026-10-09/driver.py manage check",
+      "exit": 0,
+      "log": "model-check.log",
+      "log_sha256": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1"
+    },
+    {
+      "id": "private-migration-check",
+      "command": ".venv/bin/python .runtime/audit-2026-10-09/driver.py manage makemigrations --check --dry-run",
+      "exit": 0,
+      "log": "migration-check.log",
+      "log_sha256": "a2bfa7b376c38062f77ce2b1e703876aaa04662f96355cdf5dc9d0d075302b05"
+    },
+    {
+      "id": "harness-stop",
+      "command": ".venv/bin/python scripts/audit_local.py stop",
+      "exit": 0,
+      "result": "owned isolated cluster stopped; data retained",
+      "log": "harness-stop.log",
+      "log_sha256": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    },
+    {
+      "id": "initial-cluster-stop",
+      "command": "pg_ctl -D audit-worktree/.runtime/pgdata -m fast -w stop",
+      "exit": 0,
+      "result": "owned isolated cluster stopped; data retained",
+      "log": "initial-cluster-stop.log",
+      "log_sha256": "ca19178a35ab4153b75b494963b66ce8243e1b94c173107c87b44d09db23652d"
+    }
+  ],
+  "probes": [
+    {
+      "command": ".venv/bin/python scripts/audit_local.py probe concurrency",
+      "exit": 0,
+      "result": {
+        "probe": "concurrency",
+        "workers": [
+          1,
+          1
+        ],
+        "debit": 1,
+        "confirm": 1,
+        "cash": "898.000000000000",
+        "shares": "100.000000000000000000"
+      },
+      "log_sha256": "18af0ee328994c81ae141424c8cbc79f9b848f6ae51f6a24643cdbe8300dd44c"
+    },
+    {
+      "command": ".venv/bin/python scripts/audit_local.py probe restart-prepare",
+      "exit": 0,
+      "result": {
+        "probe": "restart-prepare",
+        "state": "waiting_nav",
+        "debit": 1,
+        "confirm": 0
+      },
+      "log_sha256": "a6481669c64129513df181290ff5e178729b218623253d9c37455e3423455560"
+    },
+    {
+      "command": ".venv/bin/python scripts/audit_local.py probe restart-recover",
+      "exit": 0,
+      "result": {
+        "probe": "restart-recover",
+        "debit": 1,
+        "confirm": 1,
+        "cash": "898.000000000000",
+        "shares": "100.000000000000000000"
+      },
+      "log_sha256": "286a9610f92bc2b1e1f376e4b86dab10acb0cd98f9ac3d031046b7ab83c372aa"
+    }
+  ],
+  "findings": [
+    {
+      "id": "AUD-001",
+      "priority": "P1",
+      "actual": "completed paid plan: confirmations 0",
+      "expected": "already-paid period finishes once; no new debit",
+      "status": "confirmed_unfixed"
+    },
+    {
+      "id": "AUD-002",
+      "priority": "P2",
+      "actual": "actual evidence, daily quantity_source automatic_estimate",
+      "expected": "effective actual evidence upgrades read-side provenance",
+      "status": "confirmed_unfixed"
+    },
+    {
+      "id": "AUD-003",
+      "priority": "P1",
+      "actual": {
+        "nav_date": null,
+        "d1": "2",
+        "d2": "1"
+      },
+      "expected": {
+        "nav_date": "2026-09-29",
+        "d1": "2",
+        "d2": "2"
+      },
+      "status": "confirmed_unfixed"
+    },
+    {
+      "id": "AUD-004",
+      "priority": "P2",
+      "actual": "six-hour-old estimate freshly fetched yields daily amount 2",
+      "expected": "no supported current-day estimate; old time disclosed",
+      "status": "confirmed_unfixed"
+    },
+    {
+      "id": "AUD-005",
+      "priority": "P2",
+      "actual": "same waiting_cash revision 4 -> 6",
+      "expected": "unchanged progress does not change financial revision",
+      "status": "confirmed_unfixed"
+    },
+    {
+      "id": "AUD-006",
+      "priority": "P1",
+      "actual": "prices API200; future publication selected as formal D1",
+      "expected": "wait for publication; earlier D0 remains eligible",
+      "status": "confirmed_unfixed"
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "ui-dca-waiting-nav.png",
+      "sha256": "4449eadb2b48ed73fec36f00ff1f7b3aaaafb65a95fe848acee5d7aa67852059",
+      "data": "synthetic local ordinary-user account only"
+    },
+    {
+      "file": "ui-dca-auto-completed.png",
+      "sha256": "356c1365beaf87f1e7250084cd64ad0be77756b257406b6f6fca23d3ba2446d5",
+      "data": "synthetic local ordinary-user account only"
+    }
+  ],
+  "browser_scope": "ordinary user login, current navigation, save automatic DCA, waiting NAV, read automatic completed period. NAV insertion and scan_all were controlled backend actions; not beat execution.",
+  "docs_links": {
+    "checked_markdown_files": 18,
+    "introduced": [],
+    "pre_existing": [],
+    "all_local_file_and_heading_links_valid": true,
+    "project_map_test_names_valid": true,
+    "checked_at_utc": "2026-10-09T12:42:19.930987+00:00"
+  },
+  "raw_evidence_location": ".runtime/audit-2026-10-09 (ignored, local); finding-results.txt is the portable captured failure output; harness and fixtures reproduce it",
+  "initial_attempts": [
+    "Audit harness init initially failed: managed path exceeded macOS Unix socket length; fixed private short state path, init succeeded.",
+    "New redemption diagnostic initially used inconsistent fixture account; corrected the fixture to fund holding + actual target bank, same desired amounts passed.",
+    "Final added harness check action required ruff formatting; formatted audit_local.py only, whole formatter/lint passed."
+  ],
+  "not_run": [
+    "production login/private data queries/writes/deployment/merge",
+    "production code SHA/image/worker/beat/backup health",
+    "live market provider connectivity/paid provider authorization/full market coverage",
+    "native financial institution statements/product-specific QDII date chain",
+    "current 0012 restore drill/offsite backup/alert verification",
+    "real Celery/RabbitMQ interruption/restart",
+    "all-module browser flow, admin/import/loan/full accessibility, cross-browser timezone boundaries",
+    "production-scale or representative load/performance benchmark"
+  ],
+  "business_code_modified": false,
+  "financial_defects_fixed": false,
+  "production_mutations": false,
+  "original_worktree_unchanged": true,
+  "original_untracked_manual_sha256": "d37cd7b1720485ddcb0ac5e85152355a18d2500e93f5a6ea244bd560e2b524c4",
+  "manual_read_only": {
+    "paragraphs": 257,
+    "characters": 9613,
+    "rendered_pages": 12,
+    "visually_inspected_pages": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "layout_result": "Chinese glyphs missing in bundled render; layout not validated; no DOCX changes or delivery",
+    "sha256_after": "d37cd7b1720485ddcb0ac5e85152355a18d2500e93f5a6ea244bd560e2b524c4",
+    "text_log_sha256": "ae0c93460d113fc7bd6639cc0b575f9882e2c06aa7639f3272335bebc5aefafc"
+  },
+  "cleanup": {
+    "browser_tab_closed": true,
+    "verified_local_web_stopped": true,
+    "audit_postgres_ports_stopped": [
+      55439,
+      55441
+    ],
+    "synthetic_data_and_private_logs_retained": true,
+    "temporary_dependency_symlinks_removed": true
+  }
+}
