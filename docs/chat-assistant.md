@@ -34,6 +34,14 @@
 
 ## 开发与部署
 
+### 图片与语音的后续接入
+
+当前 Mac 客户端只保留媒体占位及人工说明，尚未接入 OCR、语音转写或图片理解。建议按单条消息在本机取得媒体：语音优先本机 whisper.cpp，图片中的文字优先 Apple Vision OCR；照片、表情等语义理解再按需使用支持图片的模型接口。OCR 只读取图片中的文字，不能代替完整看图能力。依据：[Apple Vision](https://developer.apple.com/documentation/vision/recognizing-text-in-images)、[whisper.cpp](https://github.com/ggml-org/whisper.cpp)。
+
+媒体提取与识别是两个环节，AI 接口同样需要有效文件，无法绕过导出器媒体处理失败。`wx-cli` 帮助提供单条图片定位/解码、语音提取命令，但本次未读取真实媒体；图片 V2 密钥、解密缓存依赖及单条输出仍需实测。后续应在独立队列中设置超时、缓存、失败重试和识别结果修正，让媒体失败不阻断文本采集。识别文字若交给远端回复模型，仍会作为上下文外发；腾讯云继续只接收回复草稿。
+
+### 服务结构与发布
+
 云端后端是 Django，直接沿用 Session 与 CSRF；固定的 `/api/v1/chat/ingest` 上传和 `/api/v1/chat/device/check` 验证接口使用独立 Bearer 设备凭据。聊天数据库表独立于财务租户表，所有页面读写按当前用户过滤。入口显示、导航隐藏都不能代替后端授权。
 
 Mac 客户端源码位于 [`clients/xiangzhi`](../clients/xiangzhi/README.md)，不包含个人聊天、密钥、数据库、习惯档案或模型登录文件。云端 Docker 镜像不包含 Mac 客户端，也不需要安装微信和 Codex。发布新增迁移，不重新初始化已有数据库、不创建默认账户，不重置原有登录、密码和财务数据。
