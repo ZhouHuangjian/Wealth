@@ -23,6 +23,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError, send } from "../api";
@@ -47,7 +48,9 @@ type DraftBatch = {
   conversation_key: string;
   conversation_name: string;
   based_on_message_id: string;
-  created_at: string;
+  created_at: string | null;
+  deleted_at: string | null;
+  can_restore: boolean;
   received_at: string;
   provider: string;
   profile_version: string | null;
@@ -114,6 +117,7 @@ export default function ChatAssistant({
   const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<string | undefined>();
   const [tab, setTab] = useState("drafts");
+  const [trash, setTrash] = useState(false);
   const [adding, setAdding] = useState(false);
   const [createError, setCreateError] = useState("");
   const [binding, setBinding] = useState<Binding | null>(null);
@@ -125,11 +129,15 @@ export default function ChatAssistant({
     historyMode = useRef(false),
     generation = useRef(0),
     deviceRevision = useRef(0),
+    draftRevision = useRef(0),
+    readEpoch = useRef(0),
+    trashMode = useRef(false),
     refreshAuth = useRef(onAuthChange);
   refreshAuth.current = onAuthChange;
 
   const clearPrivate = useCallback(() => {
     generation.current++;
+    readEpoch.current++;
     reading.current = false;
     Modal.destroyAll();
     setLoading(false);
@@ -169,11 +177,15 @@ export default function ChatAssistant({
       if (reading.current) return;
       reading.current = true;
       const current = generation.current;
+      const epoch = ++readEpoch.current;
       const requestedDeviceRevision = deviceRevision.current;
+      const requestedDraftRevision = draftRevision.current;
+      const requestedTrash = trashMode.current;
       setLoading(true);
       setError("");
       try {
         const status = await api<ChatAccess>("/chat/me");
+        if (epoch !== readEpoch.current) return;
         if (!acceptResponse(status, current)) return;
         setAccess(status);
         if (!status.enabled) {
@@ -185,10 +197,11 @@ export default function ChatAssistant({
           api<AccountResponse & { items: Device[] }>("/chat/devices"),
           shouldReadDrafts
             ? api<DraftPage>(
-                `/chat/drafts?limit=50${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+                `/chat/drafts?limit=50${requestedTrash ? "&deleted=true" : ""}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
               )
             : Promise.resolve(null),
         ]);
+        if (epoch !== readEpoch.current) return;
         if (
           !acceptResponse(deviceResult, current) ||
           (draftResult && !acceptResponse(draftResult, current))
@@ -202,7 +215,11 @@ export default function ChatAssistant({
             deviceRevision.current,
           ),
         );
-        if (draftResult) {
+        if (
+          draftResult &&
+          requestedTrash === trashMode.current &&
+          requestedDraftRevision === draftRevision.current
+        ) {
           setBatches((previous) =>
             before
               ? [
@@ -219,11 +236,16 @@ export default function ChatAssistant({
         }
         setCheckedAt(new Date().toISOString());
       } catch (e) {
-        if (!active.current || current !== generation.current) return;
+        if (
+          !active.current ||
+          current !== generation.current ||
+          epoch !== readEpoch.current
+        )
+          return;
         rejectAccess(e);
         setError((e as Error).message);
       } finally {
-        if (current === generation.current) {
+        if (current === generation.current && epoch === readEpoch.current) {
           reading.current = false;
           if (active.current) setLoading(false);
         }
@@ -297,34 +319,88 @@ export default function ChatAssistant({
       message.error((e as Error).message);
     }
   }
-  async function remove(path: string, key: string) {
+  function refreshAfterMutation() {
+    readEpoch.current++;
+    reading.current = false;
+    void read(true);
+  }
+  function switchTab(next: string) {
+    setTab(next);
+    if (next === "devices") return;
+    const deleted = next === "trash";
+    if (deleted === trashMode.current) return;
+    trashMode.current = deleted;
+    setTrash(deleted);
+    draftRevision.current++;
+    setBatches([]);
+    setCursor(null);
+    setQuery("");
+    setConversation(undefined);
+    historyMode.current = false;
+    setHistory(false);
+    refreshAfterMutation();
+  }
+  async function remove(
+    path: string,
+    key: string,
+    action: "trash" | "restore" | "permanent" | "revoke" = "revoke",
+  ) {
     const current = generation.current;
     setBusy(key);
     try {
       const result = await api<AccountResponse>(path, {
-        method: "DELETE",
+        method: action === "restore" ? "POST" : "DELETE",
         body: JSON.stringify({}),
         headers: { "X-Chat-User-Id": String(user.id) },
       });
       if (!acceptResponse(result, current)) return;
-      if (key.startsWith("draft:"))
-        setBatches((items) => items.filter((item) => item.id !== key.slice(6)));
-      else {
+      if (key.startsWith("draft:")) {
+        draftRevision.current++;
+        if (
+          action === "permanent" ||
+          (action === "restore" && trashMode.current) ||
+          (action === "trash" && !trashMode.current)
+        )
+          setBatches((items) =>
+            items.filter((item) => item.id !== key.slice(6)),
+          );
+      } else {
         deviceRevision.current++;
-        setDevices((items) =>
-          items.map((item) =>
-            item.id === key.slice(7)
-              ? {
-                  ...item,
-                  revoked_at: new Date().toISOString(),
-                  config_available: false,
-                  connection_state: "revoked" as const,
-                }
-              : item,
-          ),
-        );
+        if (action === "permanent") {
+          draftRevision.current++;
+          setDevices((items) =>
+            items.filter((item) => item.id !== key.slice(7)),
+          );
+          setBatches((items) =>
+            items.filter((item) => item.device_id !== key.slice(7)),
+          );
+          setBinding((currentBinding) =>
+            currentBinding?.device.id === key.slice(7) ? null : currentBinding,
+          );
+        } else
+          setDevices((items) =>
+            items.map((item) =>
+              item.id === key.slice(7)
+                ? {
+                    ...item,
+                    revoked_at: new Date().toISOString(),
+                    config_available: false,
+                    connection_state: "revoked" as const,
+                  }
+                : item,
+            ),
+          );
       }
-      message.success(key.startsWith("draft:") ? "草稿已删除" : "设备已撤销");
+      message.success(
+        action === "trash"
+          ? "草稿已移到回收站"
+          : action === "restore"
+            ? "草稿已恢复"
+            : action === "permanent"
+              ? "已永久删除"
+              : "设备已撤销",
+      );
+      if (action !== "revoke") refreshAfterMutation();
     } catch (e) {
       if (current !== generation.current || !active.current) return;
       rejectAccess(e);
@@ -383,6 +459,37 @@ export default function ChatAssistant({
       onOk: () => loadConfiguration(device, true),
     });
   }
+  function confirmPermanentDraft(batch: DraftBatch) {
+    modal.confirm({
+      title: "永久删除这批回复草稿？",
+      content:
+        "将从服务器永久删除，此操作不可恢复。Mac 原始记录保留；手动重新同步已永久删除的草稿会再次出现。",
+      okText: "永久删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () =>
+        remove(
+          `/chat/drafts/${batch.id}/permanent`,
+          `draft:${batch.id}`,
+          "permanent",
+        ),
+    });
+  }
+  function confirmPermanentDevice(device: Device) {
+    modal.confirm({
+      title: `永久删除“${device.name}”？`,
+      content: `将永久删除此设备及全部关联云端草稿（目前 ${device.draft_count ?? 0} 批，含回收站），不可恢复。旧凭据失效，需要重新添加设备。Mac 原始记录保留；手动重新同步已永久删除的草稿会再次出现。`,
+      okText: "永久删除设备和草稿",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () =>
+        remove(
+          `/chat/devices/${device.id}/permanent`,
+          `device:${device.id}`,
+          "permanent",
+        ),
+    });
+  }
   const inboxEmpty = chatInboxEmptyState(devices);
   const activeDevices = devices.filter(
     (device) => deviceConnectionState(device) !== "revoked",
@@ -392,6 +499,205 @@ export default function ChatAssistant({
   const uploadUrl = binding
     ? new URL(binding.upload_path, window.location.origin).href
     : "";
+
+  const draftContent = (
+    <>
+      {trash && (
+        <Alert
+          className="form-alert"
+          type="info"
+          showIcon
+          message="草稿回收站"
+          description="移到回收站的草稿可以恢复。永久删除不可恢复；Mac 原始记录保留，手动重新同步已永久删除的草稿会再次出现。"
+        />
+      )}
+      <div className="chat-filters">
+        <Input.Search
+          aria-label="搜索已加载草稿"
+          placeholder="搜索已加载的联系人或草稿"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          allowClear
+        />
+        <Select
+          aria-label="按会话筛选"
+          placeholder="全部会话"
+          allowClear
+          value={conversation}
+          onChange={setConversation}
+          options={contacts.map(([value, label]) => ({
+            value,
+            label,
+          }))}
+        />
+      </div>
+      {history && (
+        <Alert
+          className="form-alert"
+          type="info"
+          message="正在浏览历史草稿，自动更新列表已暂停。点击刷新可返回最近草稿。"
+        />
+      )}
+      {loading && !batches.length ? (
+        <div className="chat-empty">
+          <Spin />
+        </div>
+      ) : !batches.length ? (
+        <Panel>
+          <Empty description={trash ? "回收站是空的" : inboxEmpty.title} />
+          {!trash && <p className="chat-center">{inboxEmpty.description}</p>}
+          {!trash && (
+            <div className="chat-center">
+              <Button
+                type="primary"
+                icon={<Laptop size={16} />}
+                onClick={() => setTab("devices")}
+              >
+                {inboxEmpty.action}
+              </Button>
+            </div>
+          )}
+        </Panel>
+      ) : !filtered.length ? (
+        <Panel>
+          <Empty description="已加载草稿中没有匹配内容" />
+          <Button
+            onClick={() => {
+              setQuery("");
+              setConversation(undefined);
+            }}
+          >
+            清除筛选
+          </Button>
+        </Panel>
+      ) : (
+        <div className="chat-draft-list">
+          {filtered.map((batch) => (
+            <article className="chat-batch paper-panel" key={batch.id}>
+              <div className="chat-batch-heading">
+                <div>
+                  <h2>{batch.conversation_name || "未命名会话"}</h2>
+                  <p>
+                    {batch.created_at
+                      ? `${chatTime(batch.created_at)} 生成`
+                      : "原生成时间不可用"}{" "}
+                    · {batch.device_name || "已绑定设备"}
+                  </p>
+                </div>
+                <Space className="chat-batch-actions" wrap>
+                  {trash ? (
+                    <Button
+                      icon={<Undo2 size={15} />}
+                      disabled={!batch.can_restore || !!busy}
+                      onClick={() =>
+                        void remove(
+                          `/chat/drafts/${batch.id}/restore`,
+                          `draft:${batch.id}`,
+                          "restore",
+                        )
+                      }
+                    >
+                      恢复
+                    </Button>
+                  ) : (
+                    <Button
+                      icon={<Trash2 size={15} />}
+                      disabled={!!busy}
+                      onClick={() =>
+                        modal.confirm({
+                          title: "将这批草稿移到回收站？",
+                          content:
+                            "之后可以在回收站恢复或永久删除。Mac 原始记录保留。",
+                          okText: "移到回收站",
+                          cancelText: "取消",
+                          onOk: () =>
+                            remove(
+                              `/chat/drafts/${batch.id}`,
+                              `draft:${batch.id}`,
+                              "trash",
+                            ),
+                        })
+                      }
+                    >
+                      移到回收站
+                    </Button>
+                  )}
+                  <Button
+                    danger
+                    disabled={!!busy}
+                    onClick={() => confirmPermanentDraft(batch)}
+                  >
+                    永久删除
+                  </Button>
+                </Space>
+              </div>
+              <div className="chat-draft-options">
+                {trash && !batch.can_restore && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="旧版内容已清除，无法恢复"
+                    description="这条旧记录仍可永久删除。"
+                  />
+                )}
+                {batch.drafts.map((draft, index) => (
+                  <section className="chat-draft" key={index}>
+                    <div className="chat-draft-label">
+                      <strong>{draft.label || `回复 ${index + 1}`}</strong>
+                      <Button
+                        size="small"
+                        icon={<Copy size={14} />}
+                        onClick={() => void copy(draft.text, "回复")}
+                      >
+                        复制回复
+                      </Button>
+                    </div>
+                    <p className="chat-draft-text">{draft.text}</p>
+                    {draft.reason && (
+                      <p className="chat-draft-reason">{draft.reason}</p>
+                    )}
+                  </section>
+                ))}
+              </div>
+              <div className="chat-batch-meta">
+                <span>
+                  {batch.provider || "生成来源不可用"}
+                  {batch.profile_version
+                    ? ` · 习惯版本 ${batch.profile_version}`
+                    : ""}
+                </span>
+                <span>同步于 {chatTime(batch.received_at)}</span>
+                {batch.deleted_at && (
+                  <span>移入回收站于 {chatTime(batch.deleted_at)}</span>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      {!!batches.length && (
+        <div className="chat-load-more">
+          <span>
+            已加载 {batches.length} 批草稿
+            {filtered.length !== batches.length
+              ? `，匹配 ${filtered.length} 批`
+              : ""}
+          </span>
+          {cursor ? (
+            <Button
+              loading={loading}
+              disabled={!!busy}
+              onClick={() => void read(false, cursor)}
+            >
+              加载更早草稿
+            </Button>
+          ) : (
+            <span>已显示全部</span>
+          )}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <Container
@@ -511,177 +817,19 @@ export default function ChatAssistant({
           </div>
           <Tabs
             activeKey={tab}
-            onChange={setTab}
+            onChange={switchTab}
             items={[
               {
                 key: "drafts",
                 label: "回复草稿",
-                children: (
-                  <>
-                    <div className="chat-filters">
-                      <Input.Search
-                        aria-label="搜索已加载草稿"
-                        placeholder="搜索已加载的联系人或草稿"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        allowClear
-                      />
-                      <Select
-                        aria-label="按会话筛选"
-                        placeholder="全部会话"
-                        allowClear
-                        value={conversation}
-                        onChange={setConversation}
-                        options={contacts.map(([value, label]) => ({
-                          value,
-                          label,
-                        }))}
-                      />
-                    </div>
-                    {history && (
-                      <Alert
-                        className="form-alert"
-                        type="info"
-                        message="正在浏览历史草稿，自动更新列表已暂停。点击刷新可返回最近草稿。"
-                      />
-                    )}
-                    {loading && !batches.length ? (
-                      <div className="chat-empty">
-                        <Spin />
-                      </div>
-                    ) : !batches.length ? (
-                      <Panel>
-                        <Empty description={inboxEmpty.title} />
-                        <p className="chat-center">{inboxEmpty.description}</p>
-                        <div className="chat-center">
-                          <Button
-                            type="primary"
-                            icon={<Laptop size={16} />}
-                            onClick={() => setTab("devices")}
-                          >
-                            {inboxEmpty.action}
-                          </Button>
-                        </div>
-                      </Panel>
-                    ) : !filtered.length ? (
-                      <Panel>
-                        <Empty description="已加载草稿中没有匹配内容" />
-                        <Button
-                          onClick={() => {
-                            setQuery("");
-                            setConversation(undefined);
-                          }}
-                        >
-                          清除筛选
-                        </Button>
-                      </Panel>
-                    ) : (
-                      <div className="chat-draft-list">
-                        {filtered.map((batch) => (
-                          <article
-                            className="chat-batch paper-panel"
-                            key={batch.id}
-                          >
-                            <div className="chat-batch-heading">
-                              <div>
-                                <h2>
-                                  {batch.conversation_name || "未命名会话"}
-                                </h2>
-                                <p>
-                                  {chatTime(batch.created_at)} 生成 ·{" "}
-                                  {batch.device_name || "已绑定设备"}
-                                </p>
-                              </div>
-                              <Button
-                                type="text"
-                                danger
-                                aria-label={`删除${batch.conversation_name || "此会话"}的这批草稿`}
-                                icon={<Trash2 size={16} />}
-                                loading={busy === `draft:${batch.id}`}
-                                disabled={
-                                  !!busy && busy !== `draft:${batch.id}`
-                                }
-                                onClick={() =>
-                                  modal.confirm({
-                                    title: "删除这批回复草稿？",
-                                    content:
-                                      "删除此批次在服务器保存的草稿，Mac 上的记录保留。",
-                                    okText: "删除草稿",
-                                    okButtonProps: { danger: true },
-                                    cancelText: "取消",
-                                    onOk: () =>
-                                      remove(
-                                        `/chat/drafts/${batch.id}`,
-                                        `draft:${batch.id}`,
-                                      ),
-                                  })
-                                }
-                              />
-                            </div>
-                            <div className="chat-draft-options">
-                              {batch.drafts.map((draft, index) => (
-                                <section className="chat-draft" key={index}>
-                                  <div className="chat-draft-label">
-                                    <strong>
-                                      {draft.label || `回复 ${index + 1}`}
-                                    </strong>
-                                    <Button
-                                      size="small"
-                                      icon={<Copy size={14} />}
-                                      onClick={() =>
-                                        void copy(draft.text, "回复")
-                                      }
-                                    >
-                                      复制回复
-                                    </Button>
-                                  </div>
-                                  <p className="chat-draft-text">
-                                    {draft.text}
-                                  </p>
-                                  {draft.reason && (
-                                    <p className="chat-draft-reason">
-                                      {draft.reason}
-                                    </p>
-                                  )}
-                                </section>
-                              ))}
-                            </div>
-                            <div className="chat-batch-meta">
-                              <span>
-                                {batch.provider || "本地生成"}
-                                {batch.profile_version
-                                  ? ` · 习惯版本 ${batch.profile_version}`
-                                  : ""}
-                              </span>
-                              <span>同步于 {chatTime(batch.received_at)}</span>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                    {!!batches.length && (
-                      <div className="chat-load-more">
-                        <span>
-                          已加载 {batches.length} 批草稿
-                          {filtered.length !== batches.length
-                            ? `，匹配 ${filtered.length} 批`
-                            : ""}
-                        </span>
-                        {cursor ? (
-                          <Button
-                            loading={loading}
-                            disabled={!!busy}
-                            onClick={() => void read(false, cursor)}
-                          >
-                            加载更早草稿
-                          </Button>
-                        ) : (
-                          <span>已显示全部</span>
-                        )}
-                      </div>
-                    )}
-                  </>
-                ),
+                destroyOnHidden: true,
+                children: draftContent,
+              },
+              {
+                key: "trash",
+                label: "回收站",
+                destroyOnHidden: true,
+                children: draftContent,
               },
               {
                 key: "devices",
@@ -765,58 +913,67 @@ export default function ChatAssistant({
                                   </p>
                                 )}
                               </div>
-                              {state !== "revoked" && (
-                                <Space className="chat-device-actions" wrap>
-                                  <Button
-                                    type="primary"
-                                    loading={busy === `config:${device.id}`}
-                                    disabled={
-                                      !!busy && busy !== `config:${device.id}`
-                                    }
-                                    onClick={() =>
-                                      configurationAction === "rotate"
-                                        ? confirmRotation(device)
-                                        : void loadConfiguration(device)
-                                    }
-                                  >
-                                    {configurationAction === "rotate"
-                                      ? "重新生成配置"
-                                      : "查看连接配置"}
-                                  </Button>
-                                  {configurationAction === "config" && (
+                              <Space className="chat-device-actions" wrap>
+                                {state !== "revoked" && (
+                                  <>
                                     <Button
-                                      disabled={!!busy}
-                                      onClick={() => confirmRotation(device)}
+                                      type="primary"
+                                      loading={busy === `config:${device.id}`}
+                                      disabled={
+                                        !!busy && busy !== `config:${device.id}`
+                                      }
+                                      onClick={() =>
+                                        configurationAction === "rotate"
+                                          ? confirmRotation(device)
+                                          : void loadConfiguration(device)
+                                      }
                                     >
-                                      重新生成
+                                      {configurationAction === "rotate"
+                                        ? "重新生成配置"
+                                        : "查看连接配置"}
                                     </Button>
-                                  )}
-                                  <Button
-                                    danger
-                                    loading={busy === `device:${device.id}`}
-                                    disabled={
-                                      !!busy && busy !== `device:${device.id}`
-                                    }
-                                    onClick={() =>
-                                      modal.confirm({
-                                        title: `撤销“${device.name}”的连接？`,
-                                        content:
-                                          "此设备将不能继续连接和上传。已同步草稿保留，重新连接需添加新的设备。",
-                                        okText: "撤销设备",
-                                        okButtonProps: { danger: true },
-                                        cancelText: "取消",
-                                        onOk: () =>
-                                          remove(
-                                            `/chat/devices/${device.id}`,
-                                            `device:${device.id}`,
-                                          ),
-                                      })
-                                    }
-                                  >
-                                    撤销
-                                  </Button>
-                                </Space>
-                              )}
+                                    {configurationAction === "config" && (
+                                      <Button
+                                        disabled={!!busy}
+                                        onClick={() => confirmRotation(device)}
+                                      >
+                                        重新生成
+                                      </Button>
+                                    )}
+                                    <Button
+                                      danger
+                                      loading={busy === `device:${device.id}`}
+                                      disabled={
+                                        !!busy && busy !== `device:${device.id}`
+                                      }
+                                      onClick={() =>
+                                        modal.confirm({
+                                          title: `撤销“${device.name}”的连接？`,
+                                          content:
+                                            "此设备将不能继续连接和上传。已同步草稿保留，重新连接需添加新的设备。",
+                                          okText: "撤销设备",
+                                          okButtonProps: { danger: true },
+                                          cancelText: "取消",
+                                          onOk: () =>
+                                            remove(
+                                              `/chat/devices/${device.id}`,
+                                              `device:${device.id}`,
+                                            ),
+                                        })
+                                      }
+                                    >
+                                      撤销
+                                    </Button>
+                                  </>
+                                )}
+                                <Button
+                                  danger
+                                  disabled={!!busy}
+                                  onClick={() => confirmPermanentDevice(device)}
+                                >
+                                  永久删除
+                                </Button>
+                              </Space>
                             </div>
                           );
                         })}

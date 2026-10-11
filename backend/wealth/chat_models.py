@@ -42,7 +42,7 @@ class ChatDraftBatch(models.Model):
     payload = models.JSONField(default=dict)
     payload_digest = models.CharField(max_length=64)
     received_at = models.DateTimeField(auto_now_add=True)
-    # Keep only an opaque receipt after deletion, so delayed retries cannot restore it.
+    # Soft deletion retains the payload; retries never restore a trashed batch.
     deleted_at = models.DateTimeField(null=True)
 
     class Meta:

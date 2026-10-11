@@ -5,6 +5,7 @@ export type ChatDevice = {
   last_seen_at: string | null;
   revoked_at: string | null;
   config_available: boolean;
+  draft_count: number;
   connection_state: "awaiting_connection" | "connected" | "revoked";
 };
 

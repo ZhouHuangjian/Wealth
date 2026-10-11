@@ -227,7 +227,7 @@ def test_idempotency_conflict_and_deleted_payload_does_not_return(actors):
     row = ChatDraftBatch.objects.get()
     assert call(actors.f, f"chat/drafts/{row.id}", method="delete").status_code == 200
     row.refresh_from_db()
-    assert row.payload == {} and row.deleted_at is not None
+    assert row.payload == packet() and row.deleted_at is not None
     assert upload(token).json()["duplicate"] is True
     assert upload(token, changed).status_code == 409
     assert actors.f.get("/api/v1/chat/drafts").json()["items"] == []
@@ -680,3 +680,210 @@ def test_old_application_can_insert_device_without_new_ciphertext_column(actors)
         == "device_config_unavailable"
     )
     assert call(actors.f, f"chat/devices/{ident}/rotate").status_code == 200
+
+
+def test_trash_keeps_payload_restores_same_batch_and_ignores_upload_retries(actors):
+    info = device(actors, actors.first, actors.f)
+    assert upload(info["token"]).status_code == 200
+    row = ChatDraftBatch.objects.get()
+    ident = row.pk
+    assert call(actors.f, f"chat/drafts/{ident}", method="delete").status_code == 200
+    assert actors.f.get("/api/v1/chat/drafts").json()["items"] == []
+    trash = actors.f.get("/api/v1/chat/drafts?deleted=true").json()["items"]
+    assert len(trash) == 1 and trash[0]["id"] == str(ident)
+    assert trash[0]["can_restore"] is True and trash[0]["deleted_at"]
+    assert trash[0]["drafts"] == packet()["drafts"]
+    assert upload(info["token"]).json()["duplicate"] is True
+    row.refresh_from_db()
+    assert row.deleted_at is not None and row.payload == packet()
+    assert call(actors.f, f"chat/drafts/{ident}/restore").status_code == 200
+    row.refresh_from_db()
+    assert row.pk == ident and row.deleted_at is None and row.payload == packet()
+    assert actors.f.get("/api/v1/chat/drafts?deleted=true").json()["items"] == []
+    assert (
+        actors.f.get("/api/v1/chat/drafts").json()["items"][0]["can_restore"] is False
+    )
+    assert upload(info["token"]).json()["duplicate"] is True
+    assert call(actors.f, f"chat/drafts/{ident}/restore").status_code == 409
+
+
+def test_legacy_cleared_trash_cannot_restore_but_can_be_permanently_deleted(actors):
+    from django.utils import timezone
+
+    info = device(actors, actors.first, actors.f)
+    upload(info["token"])
+    row = ChatDraftBatch.objects.get()
+    row.payload = {}
+    row.deleted_at = timezone.now()
+    row.save(update_fields=["payload", "deleted_at"])
+    trash = actors.f.get("/api/v1/chat/drafts?deleted=true").json()["items"][0]
+    assert (
+        trash["can_restore"] is False
+        and trash["drafts"] == []
+        and trash["created_at"] is None
+    )
+    result = call(actors.f, f"chat/drafts/{row.pk}/restore")
+    assert result.status_code == 409 and result.json()["code"] == "draft_unrecoverable"
+    assert upload(info["token"]).json()["duplicate"] is True
+    row.refresh_from_db()
+    assert row.payload == {} and row.deleted_at is not None
+    assert (
+        call(actors.f, f"chat/drafts/{row.pk}/permanent", method="delete").status_code
+        == 200
+    )
+    assert not ChatDraftBatch.objects.exists()
+
+
+def test_trash_pagination_owner_isolation_and_admin_cannot_restore_or_erase(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    enable(p, p.second)
+    enable(p, p.admin)
+    for number in range(3):
+        upload(info["token"], packet(f"trash_{number}"))
+    for ident in ChatDraftBatch.objects.values_list("pk", flat=True):
+        assert call(p.f, f"chat/drafts/{ident}", method="delete").status_code == 200
+    page = p.f.get("/api/v1/chat/drafts?deleted=true&limit=2").json()
+    assert len(page["items"]) == 2 and page["next_cursor"]
+    more = p.f.get(
+        "/api/v1/chat/drafts?deleted=true&limit=2&before=" + page["next_cursor"]
+    ).json()
+    assert len(more["items"]) == 1 and more["next_cursor"] is None
+    ident = page["items"][0]["id"]
+    for client in (p.s, p.a):
+        assert client.get("/api/v1/chat/drafts?deleted=true").json()["items"] == []
+        assert call(client, f"chat/drafts/{ident}/restore").status_code == 404
+        assert (
+            call(client, f"chat/drafts/{ident}/permanent", method="delete").status_code
+            == 404
+        )
+        assert (
+            call(
+                client,
+                f"chat/devices/{info['device']['id']}/permanent",
+                method="delete",
+            ).status_code
+            == 404
+        )
+    assert p.f.get("/api/v1/chat/drafts?deleted=invalid").status_code == 400
+    assert ChatDraftBatch.objects.count() == 3
+
+
+@pytest.mark.parametrize("trashed", [False, True])
+def test_permanent_draft_delete_removes_receipt_and_explicit_resync_creates_new_batch(
+    actors, trashed
+):
+    info = device(actors, actors.first, actors.f)
+    upload(info["token"])
+    row = ChatDraftBatch.objects.get()
+    ident = row.pk
+    if trashed:
+        call(actors.f, f"chat/drafts/{ident}", method="delete")
+    assert (
+        call(actors.f, f"chat/drafts/{ident}/permanent", method="delete").status_code
+        == 200
+    )
+    assert not ChatDraftBatch.objects.filter(pk=ident).exists()
+    result = upload(info["token"])
+    assert result.status_code == 200 and result.json()["duplicate"] is False
+    new_row = ChatDraftBatch.objects.get()
+    assert new_row.pk != ident and new_row.deleted_at is None
+    assert new_row.payload == packet()
+
+
+def test_permanent_device_delete_removes_all_its_drafts_and_credentials_only(actors):
+    from wealth.chat import bearer_candidate, locked_device
+    from wealth.common import DomainError
+    from django.test import RequestFactory
+
+    p = actors
+    doomed = device(p, p.first, p.f, "待永久删除设备")
+    retained = device(p, p.first, p.f, "保留设备")
+    foreign = device(p, p.second, p.s, "另一用户的设备")
+    for info in (doomed, retained, foreign):
+        assert upload(info["token"]).status_code == 200
+    assert upload(doomed["token"], packet("to_trash")).status_code == 200
+    trashed = ChatDraftBatch.objects.get(
+        device_id=doomed["device"]["id"], batch_id="to_trash"
+    )
+    call(p.f, f"chat/drafts/{trashed.pk}", method="delete")
+    listing = p.f.get("/api/v1/chat/devices").json()["items"]
+    assert (
+        next(item for item in listing if item["id"] == doomed["device"]["id"])[
+            "draft_count"
+        ]
+        == 2
+    )
+    # Simulate a request that resolved the token before deletion and acquires the lock later.
+    candidate, token_hash = bearer_candidate(
+        RequestFactory().post("/", HTTP_AUTHORIZATION="Bearer " + doomed["token"])
+    )
+    assert (
+        call(
+            p.f, f"chat/devices/{doomed['device']['id']}/permanent", method="delete"
+        ).status_code
+        == 200
+    )
+    assert not ChatDevice.objects.filter(pk=doomed["device"]["id"]).exists()
+    assert not ChatDraftBatch.objects.filter(device_id=doomed["device"]["id"]).exists()
+    assert (
+        ChatDraftBatch.objects.filter(device_id=retained["device"]["id"]).count() == 1
+    )
+    assert ChatDraftBatch.objects.filter(device_id=foreign["device"]["id"]).count() == 1
+    assert upload(doomed["token"]).status_code == 401
+    assert check_device(doomed["token"]).status_code == 401
+    with pytest.raises(DomainError) as error:
+        with locked_device(candidate, token_hash):
+            pytest.fail("Deleted device must not pass the locked authorization recheck")
+    assert error.value.code == "invalid_device_token"
+    audit = PlatformAudit.objects.get(
+        action="chat.device.permanently_deleted", target=doomed["device"]["id"]
+    )
+    assert audit.detail == {}
+    assert doomed["token"] not in json.dumps(
+        list(PlatformAudit.objects.values("action", "detail"))
+    )
+
+
+def test_restore_and_permanent_delete_keep_disabled_csrf_and_identity_guards(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    upload(info["token"])
+    row = ChatDraftBatch.objects.get()
+    call(p.f, f"chat/drafts/{row.pk}", method="delete")
+    operations = [
+        (f"chat/drafts/{row.pk}/restore", "post"),
+        (f"chat/drafts/{row.pk}/permanent", "delete"),
+        (f"chat/devices/{info['device']['id']}/permanent", "delete"),
+    ]
+    strict = Client(enforce_csrf_checks=True)
+    strict.force_login(p.first)
+    csrf = strict.get("/api/v1/auth/me").json()["csrf_token"]
+    for path, method in operations:
+        assert call(strict, path, method=method).status_code == 403
+        assert (
+            call(
+                strict,
+                path,
+                method=method,
+                HTTP_X_CSRFTOKEN=csrf,
+                HTTP_X_CHAT_USER_ID=str(p.second.pk),
+            ).status_code
+            == 403
+        )
+    call(p.a, f"admin/chat/users/{p.first.pk}", {"enabled": False}, "patch")
+    for path, method in operations:
+        assert call(p.f, path, method=method).status_code == 403
+    assert ChatDevice.objects.filter(pk=info["device"]["id"]).exists()
+    row.refresh_from_db()
+    assert row.deleted_at is not None and row.payload == packet()
+
+
+def test_revoked_device_can_be_permanently_removed_without_restoring_its_token(actors):
+    info = device(actors, actors.first, actors.f)
+    assert upload(info["token"]).status_code == 200
+    path = f"chat/devices/{info['device']['id']}"
+    assert call(actors.f, path, method="delete").status_code == 200
+    assert call(actors.f, path + "/permanent", method="delete").status_code == 200
+    assert ChatDevice.objects.count() == 0 and ChatDraftBatch.objects.count() == 0
+    assert check_device(info["token"]).status_code == 401

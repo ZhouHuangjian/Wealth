@@ -181,6 +181,12 @@
   .chat-batch {
     padding: 16px;
   }
+  .chat-batch-heading {
+    flex-direction: column;
+  }
+  .chat-batch-actions {
+    width: 100%;
+  }
   .chat-draft {
     padding: 13px;
   }

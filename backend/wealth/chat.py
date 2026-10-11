@@ -133,6 +133,7 @@ def device_record(device):
         "last_seen_at": device.last_seen_at,
         "revoked_at": device.revoked_at,
         "config_available": read_device_token(device) is not None,
+        "draft_count": device.batches.count(),
         "connection_state": "revoked"
         if device.revoked_at
         else "connected"
@@ -149,21 +150,31 @@ def device_binding(device, token):
     }
 
 
+def restorable_payload(batch):
+    try:
+        body = validate_batch(batch.payload)
+        return body["id"] == batch.batch_id and digest(body) == batch.payload_digest
+    except DomainError:
+        return False
+
+
 def batch_record(batch):
-    body = batch.payload
+    body = batch.payload if restorable_payload(batch) else {}
     return {
         "id": batch.id,
         "device_id": batch.device_id,
         "device_name": batch.device.name,
         "batch_id": batch.batch_id,
-        "conversation_key": body["conversationKey"],
-        "conversation_name": body["conversationName"],
-        "based_on_message_id": body["basedOnMessageId"],
-        "created_at": body["createdAt"],
+        "conversation_key": body.get("conversationKey", ""),
+        "conversation_name": body.get("conversationName", "内容已清除的旧草稿"),
+        "based_on_message_id": body.get("basedOnMessageId", ""),
+        "created_at": body.get("createdAt"),
         "received_at": batch.received_at,
-        "provider": body["provider"],
-        "profile_version": body["profileVersion"],
-        "drafts": body["drafts"],
+        "provider": body.get("provider", ""),
+        "profile_version": body.get("profileVersion"),
+        "drafts": body.get("drafts", []),
+        "deleted_at": batch.deleted_at,
+        "can_restore": batch.deleted_at is not None and bool(body),
     }
 
 
@@ -234,14 +245,21 @@ def dispatch_chat(request, path, body):
                 log_admin(owner, "chat.device.rotated", device.pk)
         return device_binding(device, token)
     if path.startswith("chat/devices/") and request.method == "DELETE":
-        ident = uuid_value(path.removeprefix("chat/devices/"))
+        parts = path.split("/")
+        if len(parts) not in {3, 4} or (len(parts) == 4 and parts[3] != "permanent"):
+            raise DomainError("接口不存在", "not_found", 404)
+        ident = uuid_value(parts[2])
+        permanent = len(parts) == 4
         with transaction.atomic():
             owner = User.objects.select_for_update().get(pk=user.pk)
             require_enabled(owner)
             device = ChatDevice.objects.filter(owner=owner, pk=ident).first()
             if not device:
                 raise DomainError("设备不存在", "not_found", 404)
-            if device.revoked_at is None:
+            if permanent:
+                device.delete()
+                log_admin(owner, "chat.device.permanently_deleted", ident)
+            elif device.revoked_at is None:
                 device.revoked_at = timezone.now()
                 device.token_ciphertext = ""
                 device.save(update_fields=["revoked_at", "token_ciphertext"])
@@ -249,7 +267,12 @@ def dispatch_chat(request, path, body):
         return {"ok": True}
     if path == "chat/drafts" and request.method == "GET":
         limit = bounded_limit(request)
-        query = ChatDraftBatch.objects.filter(owner=user, deleted_at__isnull=True)
+        deleted = request.GET.get("deleted", "false")
+        if deleted not in {"true", "false"}:
+            raise DomainError("deleted 须为 true 或 false", "invalid", 400)
+        query = ChatDraftBatch.objects.filter(
+            owner=user, deleted_at__isnull=deleted != "true"
+        )
         before = request.GET.get("before")
         if before:
             anchor = ChatDraftBatch.objects.filter(
@@ -268,19 +291,39 @@ def dispatch_chat(request, path, body):
             "items": [batch_record(batch) for batch in batches[:limit]],
             "next_cursor": batches[limit - 1].id if len(batches) > limit else None,
         }
-    if path.startswith("chat/drafts/") and request.method == "DELETE":
-        ident = uuid_value(path.removeprefix("chat/drafts/"))
+    if path.startswith("chat/drafts/") and request.method in {"DELETE", "POST"}:
+        parts = path.split("/")
+        action = parts[3] if len(parts) == 4 else "trash" if len(parts) == 3 else ""
+        if not (
+            (request.method == "DELETE" and action in {"trash", "permanent"})
+            or (request.method == "POST" and action == "restore")
+        ):
+            raise DomainError("接口不存在", "not_found", 404)
+        ident = uuid_value(parts[2])
+        exact_fields(body, set())
         with transaction.atomic():
             owner = User.objects.select_for_update().get(pk=user.pk)
             require_enabled(owner)
             batch = ChatDraftBatch.objects.filter(owner=owner, pk=ident).first()
             if not batch:
                 raise DomainError("草稿不存在", "not_found", 404)
-            if batch.deleted_at is None:
+            if action == "permanent":
+                batch.delete()
+                log_admin(owner, "chat.draft.permanently_deleted", ident)
+            elif action == "restore":
+                if batch.deleted_at is None:
+                    raise DomainError("草稿不在回收站", "draft_not_deleted", 409)
+                if not restorable_payload(batch):
+                    raise DomainError(
+                        "旧草稿内容已清除，无法恢复", "draft_unrecoverable", 409
+                    )
+                batch.deleted_at = None
+                batch.save(update_fields=["deleted_at"])
+                log_admin(owner, "chat.draft.restored", ident)
+            elif batch.deleted_at is None:
                 batch.deleted_at = timezone.now()
-                batch.payload = {}
-                batch.save(update_fields=["payload", "deleted_at"])
-                log_admin(owner, "chat.draft.deleted", batch.pk)
+                batch.save(update_fields=["deleted_at"])
+                log_admin(owner, "chat.draft.deleted", ident)
         return {"ok": True}
     if path in {"chat/me", "chat/devices", "chat/drafts"}:
         raise DomainError("不支持此方法", "method_not_allowed", 405)
