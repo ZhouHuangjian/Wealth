@@ -463,7 +463,7 @@ export default function ChatAssistant({
     modal.confirm({
       title: "永久删除这批回复草稿？",
       content:
-        "将从服务器永久删除，此操作不可恢复。Mac 原始记录保留；手动重新同步已永久删除的草稿会再次出现。",
+        "将从服务器永久删除，此操作不可恢复。Mac 原始记录保留；已永久删除的草稿之后再次同步可能重新出现。",
       okText: "永久删除",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -478,7 +478,7 @@ export default function ChatAssistant({
   function confirmPermanentDevice(device: Device) {
     modal.confirm({
       title: `永久删除“${device.name}”？`,
-      content: `将永久删除此设备及全部关联云端草稿（目前 ${device.draft_count ?? 0} 批，含回收站），不可恢复。旧凭据失效，需要重新添加设备。Mac 原始记录保留；手动重新同步已永久删除的草稿会再次出现。`,
+      content: `将永久删除此设备及全部关联云端草稿（目前 ${device.draft_count ?? 0} 批，含回收站），不可恢复。旧凭据失效，需要重新添加设备。Mac 原始记录保留；已永久删除的草稿之后再次同步可能重新出现。`,
       okText: "永久删除设备和草稿",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -508,7 +508,7 @@ export default function ChatAssistant({
           type="info"
           showIcon
           message="草稿回收站"
-          description="移到回收站的草稿可以恢复。永久删除不可恢复；Mac 原始记录保留，手动重新同步已永久删除的草稿会再次出现。"
+          description="移到回收站的草稿可以恢复。永久删除不可恢复；Mac 原始记录保留，已永久删除的草稿之后再次同步可能重新出现。"
         />
       )}
       <div className="chat-filters">
