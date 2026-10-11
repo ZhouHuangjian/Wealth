@@ -263,3 +263,91 @@ body:has(.chat-topbar) .theme-floating {
     min-width: 0;
   }
 }
+.chat-remote-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  color: var(--theme-text-secondary);
+  font-size: 12px;
+}
+.chat-remote-note {
+  color: var(--theme-text-secondary);
+  line-height: 1.8;
+  font-size: 13px;
+  margin: 12px 0 20px;
+}
+.chat-remote-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+}
+.chat-remote-form-grid .ant-input-number {
+  width: 100%;
+}
+.chat-remote-search {
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--theme-border);
+}
+.chat-remote-contact-list,
+.chat-remote-command-list {
+  display: grid;
+  gap: 12px;
+}
+.chat-remote-contact,
+.chat-remote-command {
+  padding: 14px;
+  border: 1px solid var(--theme-border);
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+}
+.chat-remote-contact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.chat-remote-contact > div {
+  min-width: 0;
+}
+.chat-remote-contact > .ant-btn {
+  flex-shrink: 0;
+}
+.chat-remote-contact small {
+  display: block;
+  color: var(--theme-text-secondary);
+  margin: 5px 0 8px;
+  white-space: pre-wrap;
+}
+.chat-remote-contact-list:not(:empty) {
+  margin-top: 14px;
+}
+.chat-remote-command > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+.chat-remote-command p {
+  color: var(--theme-text-secondary);
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.chat-remote-command .chat-remote-command-error {
+  color: var(--theme-danger, #c0392b);
+}
+@media (max-width: 520px) {
+  .chat-remote-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .chat-remote-contact {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .chat-remote-drawer .ant-drawer-body {
+    padding: 18px 14px;
+  }
+}

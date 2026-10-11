@@ -36,6 +36,7 @@ import {
   reconcileDeviceList,
 } from "../chat-device-model";
 import type { ChatDevice as Device } from "../chat-device-model";
+import DeviceRemoteControl from "./DeviceRemoteControl";
 import "./chat-assistant.css";
 
 type AccountResponse = { user_id: string | number };
@@ -121,6 +122,7 @@ export default function ChatAssistant({
   const [adding, setAdding] = useState(false);
   const [createError, setCreateError] = useState("");
   const [binding, setBinding] = useState<Binding | null>(null);
+  const [remoteDeviceId, setRemoteDeviceId] = useState<string | null>(null);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
   const [form] = Form.useForm();
@@ -146,6 +148,7 @@ export default function ChatAssistant({
     setBatches([]);
     setCursor(null);
     setBinding(null);
+    setRemoteDeviceId(null);
     setAdding(false);
     setConversation(undefined);
     setHistory(false);
@@ -366,6 +369,9 @@ export default function ChatAssistant({
           );
       } else {
         deviceRevision.current++;
+        setRemoteDeviceId((selected) =>
+          selected === key.slice(7) ? null : selected,
+        );
         if (action === "permanent") {
           draftRevision.current++;
           setDevices((items) =>
@@ -478,7 +484,7 @@ export default function ChatAssistant({
   function confirmPermanentDevice(device: Device) {
     modal.confirm({
       title: `永久删除“${device.name}”？`,
-      content: `将永久删除此设备及全部关联云端草稿（目前 ${device.draft_count ?? 0} 批，含回收站），不可恢复。旧凭据失效，需要重新添加设备。Mac 原始记录保留；已永久删除的草稿之后再次同步可能重新出现。`,
+      content: `将永久删除此设备、远程配置与操作记录及全部关联云端草稿（目前 ${device.draft_count ?? 0} 批，含回收站），不可恢复。旧凭据失效，需要重新添加设备。Mac 原始记录保留；已永久删除的草稿之后再次同步可能重新出现。`,
       okText: "永久删除设备和草稿",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -490,6 +496,11 @@ export default function ChatAssistant({
         ),
     });
   }
+  const remoteDevice = devices.find(
+    (device) =>
+      device.id === remoteDeviceId &&
+      deviceConnectionState(device) !== "revoked",
+  );
   const inboxEmpty = chatInboxEmptyState(devices);
   const activeDevices = devices.filter(
     (device) => deviceConnectionState(device) !== "revoked",
@@ -837,7 +848,7 @@ export default function ChatAssistant({
                 children: (
                   <Panel
                     title="我的 Mac 设备"
-                    subtitle="连接配置可以随时查看和复制。Mac 验证连接或上传草稿后，会更新最近验证时间。"
+                    subtitle="可随时查看连接配置、远程管理 Mac，或永久删除设备及关联云端数据。"
                     action={
                       <Button
                         type="primary"
@@ -917,6 +928,14 @@ export default function ChatAssistant({
                                 {state !== "revoked" && (
                                   <>
                                     <Button
+                                      disabled={!!busy}
+                                      onClick={() =>
+                                        setRemoteDeviceId(device.id)
+                                      }
+                                    >
+                                      远程管理
+                                    </Button>
+                                    <Button
                                       type="primary"
                                       loading={busy === `config:${device.id}`}
                                       disabled={
@@ -985,6 +1004,21 @@ export default function ChatAssistant({
             ]}
           />
         </>
+      )}
+      {remoteDevice && access?.enabled && (
+        <DeviceRemoteControl
+          key={`${user.id}:${remoteDevice.id}`}
+          userId={String(user.id)}
+          device={remoteDevice}
+          onClose={() => setRemoteDeviceId(null)}
+          onAccessError={rejectAccess}
+          onPrivateError={() => {
+            clearPrivate();
+            setAccess(null);
+            setError("登录账号已变化，正在重新载入…");
+            void refreshAuth.current();
+          }}
+        />
       )}
       <Modal
         title="添加 Mac 设备"
