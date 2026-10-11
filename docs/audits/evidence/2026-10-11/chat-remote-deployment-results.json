@@ -1,0 +1,212 @@
+{
+  "version": "2.14.0",
+  "deployed_at": "2026-10-11T07:44:03.423917+00:00",
+  "source_commit": "6f2824c8a9188db8200f95e6e2bb9dff786daf7b",
+  "github_merge_commit": "2cb7d0a01cd3020d974a6a55d99c293a80a625cf",
+  "pull_request": "https://github.com/ZhouHuangjian/Wealth/pull/7",
+  "image": {
+    "version": "2.14.0",
+    "image_id": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf",
+    "source_commit": "6f2824c8a9188db8200f95e6e2bb9dff786daf7b",
+    "source_manifest_sha256": "9506f6e1403453b4a8a5b37c9f93566f77ff05a3fd90826a2ea2d7a7e9435d9a",
+    "image_files_manifest_sha256": "e5e940622f04573f2265b8bce05b6ddb9013a00a2fc4067ee40e0d17772dd1d7",
+    "source_backend_files": 179,
+    "frontend_files": 23,
+    "parent_image": "sha256:6b8e8e2f2a6c20e8b577ff25291395127e48fe903583a903dc3c646a64f48c12",
+    "verified_at": "2026-10-11T07:33:17.398638+00:00",
+    "status": "passed"
+  },
+  "regression": {
+    "status": "passed",
+    "version": "2.14.0",
+    "image_id": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf",
+    "image_tag": "wealth:release-2.14.0-20261011-remote",
+    "database": "wealth_chat_v2140_remote_test",
+    "production_database_used": false,
+    "checked_at": "2026-10-11T07:42:00.683840+00:00",
+    "source_manifest_sha256": "9506f6e1403453b4a8a5b37c9f93566f77ff05a3fd90826a2ea2d7a7e9435d9a",
+    "source_commit": "6f2824c8a9188db8200f95e6e2bb9dff786daf7b",
+    "migration": "0015_chat_remote_controls",
+    "baseline_migrations_preserved": true,
+    "data_reset_performed": false,
+    "candidate_health_version_verified": "2.14.0",
+    "tests_passed": 1598,
+    "tests_skipped": 0,
+    "subtests_passed": 12,
+    "synthetic_credential_encryption_tests_included": true,
+    "scope": "full_regression",
+    "test_files": []
+  },
+  "preservation": {
+    "existing_tables_preserved": 43,
+    "new_tables": 1,
+    "sessions_preserved": true,
+    "files_preserved": true,
+    "backup_verified": true,
+    "backup_sha256": "046eaabe0e41f788d926d903c9f9c80bc89a0bccb5ded971ed9101f7b289dc65",
+    "backup_timer_restored": true
+  },
+  "encrypted_backup_local_copy_hash_and_authentication_verified": true,
+  "public_checks": {
+    "health": {
+      "status": "ok",
+      "version": "2.14.0",
+      "mode": "production"
+    },
+    "tls_certificate_and_hostname_verified": true,
+    "unauthenticated_endpoints": [
+      {
+        "path": "/api/v1/chat/me",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/devices",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/drafts",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/admin/chat/users",
+        "method": "GET",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/ingest",
+        "method": "POST",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/device/check",
+        "method": "POST",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/device/poll",
+        "method": "POST",
+        "status": 401
+      },
+      {
+        "path": "/api/v1/chat/devices/00000000-0000-0000-0000-000000000000/remote",
+        "method": "GET",
+        "status": 401
+      }
+    ],
+    "public_frontend_files_verified": 23,
+    "chat_route_status": 200
+  },
+  "host_checks": {
+    "version": "2.14.0",
+    "checked_at": "2026-10-11T07:44:04.284651+00:00",
+    "containers": [
+      {
+        "service": "web",
+        "healthy": true,
+        "image_id": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf"
+      },
+      {
+        "service": "worker",
+        "healthy": true,
+        "image_id": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf"
+      },
+      {
+        "service": "beat",
+        "healthy": true,
+        "image_id": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf"
+      },
+      {
+        "service": "db",
+        "healthy": true,
+        "image_id": "sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650"
+      },
+      {
+        "service": "rabbitmq",
+        "healthy": true,
+        "image_id": "sha256:2531fe16e1cb4ec4086d3eaa63118c8f074dd98620d55f022f453a397b18f037"
+      }
+    ],
+    "timers": {
+      "wealth-backup.timer": "active",
+      "wealth-certbot.timer": "active"
+    },
+    "disposable_test_database_removed": true,
+    "production_database_reset": false
+  },
+  "github_ci": {
+    "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38121704743",
+    "head_sha": "6f2824c8a9188db8200f95e6e2bb9dff786daf7b",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "frontend",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38121704743/job/114417590789"
+      },
+      {
+        "name": "mac-client",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38121704743/job/114417590903"
+      },
+      {
+        "name": "backend",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38121704743/job/114417590963"
+      },
+      {
+        "name": "container",
+        "conclusion": "success",
+        "url": "https://github.com/ZhouHuangjian/Wealth/actions/runs/38121704743/job/114418557792"
+      }
+    ]
+  },
+  "local_tests": {
+    "chat_backend": 100,
+    "frontend": 188,
+    "mac_client": 166
+  },
+  "synthetic_http": {
+    "status": "passed",
+    "checks": [
+      "真实 HTTP 心跳同步有限配置",
+      "云端设置实际写入 Mac 并回执",
+      "按需搜索只返回联系人元数据",
+      "相同请求重传幂等且添加默认暂停",
+      "联系人备注及采集草稿开关实际生效",
+      "暂停回传并确认未读取消息或生成发送"
+    ],
+    "realWechatAccess": false,
+    "modelCalls": 0,
+    "sends": 0
+  },
+  "browser_checks": [
+    "管理员个人设备入口",
+    "永久删除显示完整范围并取消确认",
+    "联系人搜索返回",
+    "添加第二联系人后默认暂停",
+    "修改等待13秒并收到真实回执",
+    "无浏览器控制台错误"
+  ],
+  "mac_preservation": {
+    "records_preserved": true,
+    "settings_preserved": true,
+    "profile_preserved": true,
+    "remote_management_enabled": true,
+    "auto_reply_enabled": false
+  },
+  "mac_runtime": {
+    "http": 200,
+    "remoteManagementEnabled": true,
+    "remoteStatus": "error",
+    "syncConfigured": true,
+    "codexAvailable": true,
+    "wechatAvailable": true,
+    "lastConnectedAt": null,
+    "binding_validation_http": 401,
+    "binding_state": "existing_credentials_revoked_or_invalid"
+  },
+  "real_message_sends": 0
+}
