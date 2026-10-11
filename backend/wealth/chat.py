@@ -183,6 +183,15 @@ def dispatch_chat(request, path, body):
     if path == "chat/me" and request.method == "GET":
         return {"enabled": enabled(user), "is_admin": is_platform_admin(user)}
     require_enabled(user)
+    parts = path.split("/")
+    if (
+        len(parts) == 4
+        and parts[:2] == ["chat", "devices"]
+        and parts[3] in {"remote", "commands"}
+    ):
+        from .chat_remote import dispatch_remote
+
+        return dispatch_remote(request, parts[2], parts[3], body)
     if path == "chat/devices" and request.method == "GET":
         devices = ChatDevice.objects.filter(owner=user).order_by(
             F("revoked_at").asc(nulls_first=True), "-created_at", "-id"
@@ -235,12 +244,23 @@ def dispatch_chat(request, path, body):
                     )
                 log_admin(owner, "chat.device.config.viewed", device.pk)
             else:
+                from .chat_remote import cancel_commands
+
+                cancel_commands(device)
                 token = "wchat_" + secrets.token_urlsafe(32)
                 device.token_hash = hashlib.sha256(token.encode()).hexdigest()
                 device.token_ciphertext = encrypt_device_token(device, token)
                 device.last_seen_at = None
+                device.remote_snapshot = {}
+                device.last_poll_at = None
                 device.save(
-                    update_fields=["token_hash", "token_ciphertext", "last_seen_at"]
+                    update_fields=[
+                        "token_hash",
+                        "token_ciphertext",
+                        "last_seen_at",
+                        "remote_snapshot",
+                        "last_poll_at",
+                    ]
                 )
                 log_admin(owner, "chat.device.rotated", device.pk)
         return device_binding(device, token)
@@ -260,6 +280,9 @@ def dispatch_chat(request, path, body):
                 device.delete()
                 log_admin(owner, "chat.device.permanently_deleted", ident)
             elif device.revoked_at is None:
+                from .chat_remote import cancel_commands
+
+                cancel_commands(device)
                 device.revoked_at = timezone.now()
                 device.token_ciphertext = ""
                 device.save(update_fields=["revoked_at", "token_ciphertext"])

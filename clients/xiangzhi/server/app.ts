@@ -18,6 +18,7 @@ import { draftSyncConfig, isDraftSyncConfigured, isDraftInboxConfigured, buildDr
 import { DraftSyncConnection } from './draft-sync-connection.js';
 import { checkDraftConnection, draftConnectionCheckUrl, DraftConnectionCheckError } from './draft-sync-check.js';
 import { bridgeConfig, createSender, isBridgeConfigured, isBridgeReceiveConfigured, secureEqual, validateEndpoint, type BridgeConfig } from './bridge.js';
+import { RemoteManagement, remoteSettingsSchema, remoteSettings, remoteConversation, wechatAddSchema, conversationPatchSchema, searchCommandSchema, patchCommandSchema } from './remote-management.js';
 import type { AppState, Conversation, Message, PublicState, Settings } from '../shared/types.js';
 
 const text = z.string().trim().min(1).max(10000);
@@ -27,6 +28,7 @@ const settingsSchema = z.object({
   autoReplyEnabled: z.boolean().optional(),
   autoReplyMode: z.enum(['draft','send']).optional(),
   syncDraftsEnabled: z.boolean().optional(),
+  remoteManagementEnabled: z.boolean().optional(),
   provider: z.enum(['demo','ollama','compatible','codex']).optional(),
   modelUrl: z.string().trim().max(2048).optional(), modelName: z.string().trim().max(200).optional(),
   apiKey: z.string().max(4096).optional(), allowRemoteModel: z.boolean().optional(),
@@ -67,6 +69,7 @@ export function createApplication(options: {
   draftSync?: DraftSyncConfig;
   uploadDrafts?: typeof uploadDraftBatch;
   checkDraftConnection?: typeof checkDraftConnection;
+  remoteFetch?: typeof fetch;
   generate?: typeof generateDrafts; send?: ReturnType<typeof createSender>;
 }) {
   const app = express();
@@ -83,6 +86,8 @@ export function createApplication(options: {
   reloadProfile();
   const config = options.bridge ?? bridgeConfig();
   const syncConnection = new DraftSyncConnection(options.databasePath, options.draftSync ?? draftSyncConfig());
+  // An explicit local remote-management choice survives rebinding.
+  if(store.read().settings.remoteManagementEnabled===undefined) store.update(s=>{s.settings.remoteManagementEnabled=true;});
   let syncRevision = 0;
   let checkSequence = 0;
   let activeConnectionCheck: AbortController | null = null;
@@ -194,7 +199,7 @@ export function createApplication(options: {
     return { ...s, settings:{...settings,hasApiKey:!!apiKey}, knowledge:KNOWLEDGE,
       runtime: { channel:isBridgeReceiveConfigured(config)?'webhook':'simulator',bridgeConfigured:isBridgeConfigured(config),bridgeReceiveConfigured:isBridgeReceiveConfigured(config),bridgeSendConfigured:isBridgeConfigured(config),learnedProfileError,
         codexAvailable:codexStatus.available,codexVersion:codexStatus.version,codexStatus:codexStatus.message,
-        draftSyncConfigured:isDraftSyncConfigured(syncConnection.config()),draftInboxConfigured:isDraftInboxConfigured(syncConnection.config()),draftSyncConnection:syncConnection.status(),
+        draftSyncConfigured:isDraftSyncConfigured(syncConnection.config()),draftInboxConfigured:isDraftInboxConfigured(syncConnection.config()),draftSyncConnection:syncConnection.status(),remoteManagement:remote.status(),
         wechatAvailable:wechatInspection().available,wechatStatus:wechatInspection().message,
         autoRunning:settings.autoReplyEnabled,modelLabel:settings.provider==='demo'?'本机规则演示':settings.provider==='codex'?`Codex · ${settings.modelName||'默认模型'}`:settings.modelName||'尚未设置模型' } };
   };
@@ -221,7 +226,7 @@ export function createApplication(options: {
   };
   const changeSyncConnection = (change: () => void) => {
     // Persist before changing runtime state. An I/O or validation failure preserves the active binding.
-    change(); syncRevision++;
+    change(); syncRevision++; remote.invalidate();
     checkSequence++; activeConnectionCheck?.abort(); activeConnectionCheck = null;
     for (const upload of uploads.values()) upload.controller.abort();
     uploads.clear();
@@ -251,9 +256,9 @@ export function createApplication(options: {
     try {res.json(await (options.searchWechatContacts??searchWechatContacts)(query,controller.signal));}
     finally {res.off('close',abort);}
   });
-  app.post('/api/wechat/conversations',(req,res)=>{
+  const addWechatConversation = (input: unknown) => {
     if(!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
-    const body=z.object({name:z.string().trim().min(1).max(80),externalId:z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_@.-]{0,199}$/)}).strict().parse(req.body);
+    const body=wechatAddSchema.parse(input);
     const state=store.read();
     if(state.conversations.some(c=>c.channel==='wechat'&&c.externalId===body.externalId)) throw new Error('该微信会话已经绑定。');
     if(state.conversations.filter(c=>c.channel==='wechat').length>=8) throw new Error('本版最多接入八个微信会话。');
@@ -262,15 +267,18 @@ export function createApplication(options: {
       color:'#e7eddf',note:'',autoReplyEnabled:false,createdAt:now,updatedAt:now,
       wechat:{enabled:false,initialized:false,cursor:null,accountFingerprint:null,lastCheckedAt:null,status:'paused',detail:'已绑定，尚未读取。首次只载入最近 50 条上下文。'}};
     store.update(s=>{s.conversations.push(conversation);addActivity(s,'info','微信会话已绑定','采集与自动草稿均未开启。',conversation.id);});
-    res.status(201).json(conversation);
-  });
+    return conversation;
+  };
+  app.post('/api/wechat/conversations',(req,res)=>res.status(201).json(addWechatConversation(req.body)));
+  const setWechatEnabled = (cid:string, enabled:boolean) => {
+    if(enabled&&!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
+    collector.setEnabled(cid,enabled);
+    engine.conversationChanged(cid);suggestionRequests.delete(cid);
+    store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});
+  };
   app.patch('/api/conversations/:id/wechat',(req,res)=>{
     const {enabled}=z.object({enabled:z.boolean()}).strict().parse(req.body);
-    if(enabled&&!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
-    collector.setEnabled(param(req),enabled);
-    engine.conversationChanged(param(req));suggestionRequests.delete(param(req));
-    store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==param(req));});
-    res.json(publicState());
+    setWechatEnabled(param(req),enabled);res.json(publicState());
   });
   app.post('/api/conversations/:id/wechat/poll',async(req,res)=>{
     if(!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
@@ -315,8 +323,8 @@ export function createApplication(options: {
     res.json(publicState());
   });
 
-  app.patch('/api/settings', (req,res) => {
-    const patch = settingsSchema.parse(req.body);
+  const patchSettings = (input:unknown) => {
+    const patch = settingsSchema.parse(input);
     const old = store.read().settings;
     const next = { ...old, ...patch };
     if (next.autoReplyMode !== old.autoReplyMode) next.autoReplyEnabled = false;
@@ -331,15 +339,16 @@ export function createApplication(options: {
       if(next.provider==='demo') throw new Error('规则演示不能自动发送到外部会话，请关闭自动回复或选择真实模型。');
     }
     // Model or scheduling changes cancel pending work; newly arriving messages use the new settings.
-    const needsCancel = Object.entries(patch).some(([key,value])=>key!=='autoReplyEnabled' && key!=='syncDraftsEnabled' && old[key as keyof Settings]!==value) || patch.autoReplyEnabled===false;
+    const needsCancel = Object.entries(patch).some(([key,value])=>key!=='autoReplyEnabled' && key!=='syncDraftsEnabled' && key!=='remoteManagementEnabled' && old[key as keyof Settings]!==value) || patch.autoReplyEnabled===false;
     if (needsCancel) {engine.pause(); suggestionRequests.clear();}
     store.update(s=>{
       s.settings = next;
       if(needsCancel) s.drafts=[];
       addActivity(s,'info',next.autoReplyEnabled?'自动回复已开启':'设置已保存',next.autoReplyEnabled?'只对已开启的联系人生效。':'自动回复当前关闭。');
     });
-    res.json(publicState());
-  });
+    if(patch.remoteManagementEnabled!==undefined && old.remoteManagementEnabled!==patch.remoteManagementEnabled)remote.invalidate(!patch.remoteManagementEnabled);
+  };
+  app.patch('/api/settings',(req,res)=>{patchSettings(req.body);res.json(publicState());});
   app.post('/api/auto/pause', (_req,res)=>{ engine.pause(); res.json(publicState()); });
   app.post('/api/model/test', async (_req,res)=>{ checkModelReady(store.read().settings); res.json(await testModel(store.read().settings)); });
 
@@ -351,9 +360,9 @@ export function createApplication(options: {
     const c:Conversation={id:randomUUID(),name:body.name,avatar:body.name.slice(0,1),color:'#e7eddf',note:'',autoReplyEnabled:false,channel:body.channel,externalId:body.externalId??null,createdAt:now,updatedAt:now};
     store.update(s=>s.conversations.push(c)); res.status(201).json(c);
   });
-  app.patch('/api/conversations/:id', (req,res)=>{
-    const body=z.object({ name:z.string().trim().min(1).max(80).optional(),note:z.string().max(2000).optional(),autoReplyEnabled:z.boolean().optional() }).strict().parse(req.body);
-    const cid=param(req); const c=conversationOf(store.read(),cid);
+  const patchConversation = (cid:string,input:unknown) => {
+    const body=conversationPatchSchema.parse(input);
+    const c=conversationOf(store.read(),cid);
     if(body.autoReplyEnabled && c.channel==='wechat') {
       if(store.read().settings.autoReplyMode!=='draft') throw new Error('微信采集通道只支持自动草稿，请先切换为草稿模式。');
       checkModelReady(store.read().settings);
@@ -368,8 +377,9 @@ export function createApplication(options: {
     }
     engine.conversationChanged(cid); suggestionRequests.delete(cid);
     store.update(s=>{Object.assign(conversationOf(s,cid),body);s.drafts=s.drafts.filter(d=>d.conversationId!==cid);addActivity(s,'info','对话设置已更新',body.autoReplyEnabled===true?'此联系人已加入自动处理范围。':body.autoReplyEnabled===false?'此联系人已暂停自动处理。':'已保存对话信息。',cid);});
-    res.json(conversationOf(store.read(),cid));
-  });
+    return conversationOf(store.read(),cid);
+  };
+  app.patch('/api/conversations/:id',(req,res)=>res.json(patchConversation(param(req),req.body)));
   app.delete('/api/conversations/:id', (req,res)=>{
     const cid=param(req); conversationOf(store.read(),cid);
     if(manualSending.has(cid)||activeSends.has(cid)) return res.status(409).json({error:'该会话有发送正在确认，请稍后删除。'});
@@ -521,5 +531,41 @@ export function createApplication(options: {
     const safe=typeof e.message==='string'&&/^[\u4e00-\u9fff]/.test(e.message)&&e.message.length<240;
     res.status(e.status??400).json({error:safe?e.message:'操作未完成，请检查输入或模型设置后重试。'});
   });
-  return {app,store,engine,collector,publicState,close:()=>{closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
+  const remote = new RemoteManagement(store, {
+    config:()=>syncConnection.config(),enabled:()=>store.read().settings.remoteManagementEnabled===true,
+    fetch:options.remoteFetch,
+    onFailure:error=>{
+      const message=error instanceof Error?error.message:'';
+      const safe=/^[\u4e00-\u9fff]/.test(message)&&message.length<240&&!message.includes(syncConnection.config().token||'\0');
+      store.update(s=>addActivity(s,'warning','网页远程操作未完成',safe?message:'请检查远程操作的输入格式与本机配置后重试。'));
+    },
+    snapshot:()=>{const state=store.read();return {version:1,remoteEnabled:true,settings:remoteSettings(state.settings),
+      conversations:state.conversations.filter(c=>c.channel==='wechat').slice(0,8).map(remoteConversation),
+      capabilities:{wechatAvailable:wechatInspection().available,codexAvailable:codexStatus.available}};},
+    execute:async(command,signal)=>{
+      if(signal.aborted)throw new Error('远程操作已取消。');
+      if(command.type==='settings.patch') {
+        const patch=remoteSettingsSchema.parse(command.payload);
+        patchSettings({...patch,autoReplyMode:'draft'});return {};
+      }
+      if(command.type==='contacts.search') {
+        if(!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');
+        const {query,limit}=searchCommandSchema.parse(command.payload);
+        const page=await (options.searchWechatContacts??searchWechatContacts)(query,signal);
+        if(signal.aborted)throw new Error('远程操作已取消。');
+        // Only explicit search results leave the Mac; no message or account fields.
+        const contacts=page.contacts.slice(0,limit).map(({externalId,name})=>wechatAddSchema.parse({externalId,name}));
+        return {contacts,hasMore:page.hasMore||page.contacts.length>limit};
+      }
+      if(command.type==='conversation.add')return {conversation:remoteConversation(addWechatConversation(command.payload))};
+      const {id:cid,enabled,...patch}=patchCommandSchema.parse(command.payload);
+      const target=conversationOf(store.read(),cid);
+      if(target.channel!=='wechat')throw new Error('远程管理只支持微信会话。');
+      if(enabled&&!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');
+      if(Object.keys(patch).length)patchConversation(cid,patch);
+      if(enabled!==undefined)setWechatEnabled(cid,enabled);
+      return {conversation:remoteConversation(conversationOf(store.read(),cid))};
+    },
+  });
+  return {app,store,engine,collector,remote,publicState,close:()=>{remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
 }

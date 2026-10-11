@@ -4,6 +4,7 @@ export interface Settings {
   autoReplyEnabled: boolean;
   autoReplyMode: AutoReplyMode;
   syncDraftsEnabled?: boolean;
+  remoteManagementEnabled?: boolean;
   provider: Provider;
   modelUrl: string;
   modelName: string;
@@ -104,6 +105,7 @@ export interface PublicState extends Omit<AppState, 'settings'> {
     codexAvailable: boolean; codexVersion: string | null; codexStatus: string;
     draftSyncConfigured: boolean; draftInboxConfigured: boolean;
     draftSyncConnection?: DraftSyncConnectionStatus;
+    remoteManagement?: {status: 'disabled' | 'waiting' | 'connected' | 'error'; lastConnectedAt: string | null; detail: string};
     wechatAvailable: boolean; wechatStatus: string;
   };
 }
