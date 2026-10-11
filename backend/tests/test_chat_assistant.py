@@ -113,7 +113,7 @@ def test_default_off_admin_cannot_bypass_and_grants_are_explicit(actors):
     assert Client().get("/api/v1/chat/devices").status_code == 401
 
 
-def test_token_is_one_time_hash_only_and_limited_to_upload(actors):
+def test_token_is_not_listed_and_cannot_authenticate_session_routes(actors):
     info = device(actors, actors.first, actors.f)
     token = info["token"]
     assert info["user_id"] == actors.first.pk
@@ -447,3 +447,236 @@ def test_identity_header_prevents_cross_tab_account_switch_writes(actors):
     assert response.status_code == 403
     assert ChatAccess.objects.get(user=p.first).enabled is True
     assert upload(info["token"]).status_code == 200
+
+
+def check_device(token, body=None, client=None):
+    return call(
+        client or Client(enforce_csrf_checks=True),
+        "chat/device/check",
+        {} if body is None else body,
+        HTTP_AUTHORIZATION="Bearer " + token,
+    )
+
+
+def test_device_configuration_is_encrypted_recoverable_and_not_listed(actors):
+    info = device(actors, actors.first, actors.f)
+    ident, token = info["device"]["id"], info["token"]
+    row = ChatDevice.objects.get(pk=ident)
+    assert row.token_ciphertext and token not in row.token_ciphertext
+    assert info["device"]["config_available"] is True
+    assert info["device"]["connection_state"] == "awaiting_connection"
+    for _ in range(2):
+        response = call(actors.f, f"chat/devices/{ident}/config")
+        assert response.status_code == 200 and response.json()["token"] == token
+        assert response["Cache-Control"] == "no-store"
+        assert response.json()["user_id"] == actors.first.pk
+    listing = actors.f.get("/api/v1/chat/devices").content.decode()
+    assert (
+        token not in listing
+        and row.token_ciphertext not in listing
+        and "token_hash" not in listing
+    )
+    audit = json.dumps(list(PlatformAudit.objects.values("action", "detail")))
+    assert token not in audit and row.token_ciphertext not in audit
+
+
+def test_config_and_rotate_are_owner_only_including_admin(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    enable(p, p.second)
+    enable(p, p.admin)
+    for action in ("config", "rotate"):
+        path = f"chat/devices/{info['device']['id']}/{action}"
+        for client in (p.s, p.a):
+            assert call(client, path).status_code == 404
+        assert call(Client(), path).status_code == 401
+        assert p.f.get("/api/v1/" + path).status_code == 404
+        assert call(p.f, path, {"owner_id": p.second.pk}).status_code == 422
+    assert check_device(info["token"]).status_code == 200
+
+
+def test_check_connects_device_without_creating_drafts(actors):
+    info = device(actors, actors.first, actors.f)
+    response = check_device(info["token"])
+    assert response.status_code == 200 and response["Cache-Control"] == "no-store"
+    assert response.json()["device"] == {"id": info["device"]["id"], "name": "测试 Mac"}
+    assert response.json()["ok"] is True
+    from django.utils.dateparse import parse_datetime
+
+    assert parse_datetime(response.json()["checkedAt"]) is not None
+    assert not ChatDraftBatch.objects.exists()
+    row = actors.f.get("/api/v1/chat/devices").json()["items"][0]
+    assert row["last_seen_at"] and row["connection_state"] == "connected"
+
+
+def test_rotation_invalidates_old_token_but_preserves_device_and_drafts(actors):
+    info = device(actors, actors.first, actors.f)
+    assert upload(info["token"]).status_code == 200
+    draft_id = ChatDraftBatch.objects.get().pk
+    response = call(actors.f, f"chat/devices/{info['device']['id']}/rotate")
+    assert response.status_code == 200 and response["Cache-Control"] == "no-store"
+    newer = response.json()
+    assert newer["token"] != info["token"]
+    assert newer["device"]["id"] == info["device"]["id"]
+    assert newer["device"]["last_seen_at"] is None
+    assert newer["device"]["connection_state"] == "awaiting_connection"
+    assert ChatDraftBatch.objects.get().pk == draft_id
+    assert upload(info["token"]).status_code == 401
+    assert check_device(info["token"]).status_code == 401
+    assert check_device(newer["token"]).status_code == 200
+    assert upload(newer["token"]).json()["duplicate"] is True
+    assert (
+        call(actors.f, f"chat/devices/{info['device']['id']}/config").json()["token"]
+        == newer["token"]
+    )
+
+
+def test_legacy_hash_only_device_remains_usable_and_can_rotate(actors):
+    info = device(actors, actors.first, actors.f)
+    ident = info["device"]["id"]
+    ChatDevice.objects.filter(pk=ident).update(token_ciphertext="")
+    listing = actors.f.get("/api/v1/chat/devices").json()["items"][0]
+    assert listing["config_available"] is False
+    response = call(actors.f, f"chat/devices/{ident}/config")
+    assert (
+        response.status_code == 409
+        and response.json()["code"] == "device_config_unavailable"
+    )
+    assert check_device(info["token"]).status_code == 200
+    assert upload(info["token"]).status_code == 200
+    rotated = call(actors.f, f"chat/devices/{ident}/rotate")
+    assert (
+        rotated.status_code == 200
+        and rotated.json()["device"]["config_available"] is True
+    )
+    assert check_device(info["token"]).status_code == 401
+
+
+def test_configuration_encryption_is_device_bound_and_supports_explicit_key_fallback(
+    actors, settings
+):
+    from wealth.chat_credentials import read_device_token
+
+    info = device(actors, actors.first, actors.f)
+    other = device(actors, actors.first, actors.f, "另一合成设备")
+    row = ChatDevice.objects.get(pk=info["device"]["id"])
+    copied = ChatDevice.objects.get(pk=other["device"]["id"])
+    copied.token_ciphertext = row.token_ciphertext
+    copied.save(update_fields=["token_ciphertext"])
+    assert read_device_token(copied) is None
+    assert (
+        call(actors.f, f"chat/devices/{copied.pk}/config").json()["code"]
+        == "device_config_unavailable"
+    )
+    original = settings.SECRET_KEY
+    settings.SECRET_KEY = "synthetic-rotated-key-only-for-chat-test"
+    assert read_device_token(row) is None
+    settings.SECRET_KEY_FALLBACKS = [original]
+    assert read_device_token(row) == info["token"]
+    row.token_hash = "0" * 64
+    assert read_device_token(row) is None
+
+
+def test_disabled_revoked_and_inactive_devices_cannot_get_config_rotate_or_check(
+    actors,
+):
+    p = actors
+    info = device(p, p.first, p.f)
+    ident = info["device"]["id"]
+    call(p.a, f"admin/chat/users/{p.first.pk}", {"enabled": False}, "patch")
+    for action in ("config", "rotate"):
+        assert call(p.f, f"chat/devices/{ident}/{action}").status_code == 403
+    assert check_device(info["token"]).status_code == 403
+    enable(p, p.first)
+    assert call(p.f, f"chat/devices/{ident}", method="delete").status_code == 200
+    for action in ("config", "rotate"):
+        response = call(p.f, f"chat/devices/{ident}/{action}")
+        assert (
+            response.status_code == 409 and response.json()["code"] == "device_revoked"
+        )
+    assert check_device(info["token"]).status_code == 401
+    listing = p.f.get("/api/v1/chat/devices").json()["items"][0]
+    assert (
+        listing["connection_state"] == "revoked"
+        and listing["config_available"] is False
+    )
+    assert ChatDevice.objects.get(pk=ident).token_ciphertext == ""
+    fresh = device(p, p.first, p.f)
+    p.first.is_active = False
+    p.first.save(update_fields=["is_active"])
+    assert check_device(fresh["token"]).status_code == 403
+
+
+def test_config_routes_keep_csrf_and_expected_identity_checks(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    strict = Client(enforce_csrf_checks=True)
+    strict.force_login(p.first)
+    csrf = strict.get("/api/v1/auth/me").json()["csrf_token"]
+    for action in ("config", "rotate"):
+        path = f"chat/devices/{info['device']['id']}/{action}"
+        assert call(strict, path).status_code == 403
+        assert (
+            call(
+                strict,
+                path,
+                HTTP_X_CSRFTOKEN=csrf,
+                HTTP_X_CHAT_USER_ID=str(p.second.pk),
+            ).status_code
+            == 403
+        )
+    assert (
+        call(
+            strict, f"chat/devices/{info['device']['id']}/config", HTTP_X_CSRFTOKEN=csrf
+        ).json()["token"]
+        == info["token"]
+    )
+    # Cookies and X-Chat-User-Id cannot authenticate the CSRF-exempt device probe.
+    assert call(strict, "chat/device/check").status_code == 401
+    assert check_device(info["token"]).status_code == 200
+
+
+def test_device_check_accepts_only_small_empty_json_and_valid_bearer(actors):
+    info = device(actors, actors.first, actors.f)
+    token = info["token"]
+    assert check_device("wchat_" + "z" * 43).status_code == 401
+    assert check_device(token, {"drafts": []}).status_code == 422
+    assert Client().get("/api/v1/chat/device/check").status_code == 405
+    response = Client().post(
+        "/api/v1/chat/device/check",
+        data=b"x" * 1025,
+        content_type="application/json",
+        HTTP_AUTHORIZATION="Bearer " + token,
+    )
+    assert response.status_code == 413
+    assert ChatDevice.objects.get(pk=info["device"]["id"]).last_seen_at is None
+
+
+def test_old_application_can_insert_device_without_new_ciphertext_column(actors):
+    import uuid
+    from django.db import connection
+    from django.utils import timezone
+
+    enable(actors, actors.first)
+    ident = uuid.uuid4()
+    token = "wchat_" + "L" * 43
+    # 2.13 creates the older column set. A persistent DB default keeps rollback safe.
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO wealth_chatdevice (id,owner_id,name,token_hash,created_at,last_seen_at,revoked_at) VALUES (%s,%s,%s,%s,%s,NULL,NULL)",
+            [
+                ident,
+                actors.first.pk,
+                "旧版本合成设备",
+                hashlib.sha256(token.encode()).hexdigest(),
+                timezone.now(),
+            ],
+        )
+    row = ChatDevice.objects.get(pk=ident)
+    assert row.token_ciphertext == ""
+    assert check_device(token).status_code == 200
+    assert (
+        call(actors.f, f"chat/devices/{ident}/config").json()["code"]
+        == "device_config_unavailable"
+    )
+    assert call(actors.f, f"chat/devices/{ident}/rotate").status_code == 200

@@ -16,6 +16,7 @@ import {
 import {
   ArrowLeft,
   Copy,
+  Download,
   Laptop,
   LogOut,
   MessageCircle,
@@ -27,17 +28,17 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiError, send } from "../api";
 import { PageTitle, Panel } from "../components";
 import { ThemeSwitcher } from "../ThemeProvider";
+import {
+  chatInboxEmptyState,
+  deviceConfigurationAction,
+  deviceConnectionState,
+  reconcileDeviceList,
+} from "../chat-device-model";
+import type { ChatDevice as Device } from "../chat-device-model";
 import "./chat-assistant.css";
 
 type AccountResponse = { user_id: string | number };
 type ChatAccess = AccountResponse & { enabled: boolean; is_admin: boolean };
-type Device = {
-  id: string;
-  name: string;
-  created_at: string;
-  last_seen_at: string | null;
-  revoked_at: string | null;
-};
 type DraftBatch = {
   id: string;
   device_id: string;
@@ -93,12 +94,15 @@ export default function ChatAssistant({
   user,
   returnPath,
   onAuthChange,
+  embedded = false,
 }: {
+  embedded?: boolean;
   user: { id: string; username: string; is_platform_admin?: boolean };
   returnPath: string;
   onAuthChange: () => Promise<void>;
 }) {
   const navigate = useNavigate();
+  const Container = embedded ? "section" : "main";
   const { message, modal } = App.useApp();
   const [access, setAccess] = useState<ChatAccess | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -120,6 +124,7 @@ export default function ChatAssistant({
     reading = useRef(false),
     historyMode = useRef(false),
     generation = useRef(0),
+    deviceRevision = useRef(0),
     refreshAuth = useRef(onAuthChange);
   refreshAuth.current = onAuthChange;
 
@@ -164,6 +169,7 @@ export default function ChatAssistant({
       if (reading.current) return;
       reading.current = true;
       const current = generation.current;
+      const requestedDeviceRevision = deviceRevision.current;
       setLoading(true);
       setError("");
       try {
@@ -188,7 +194,14 @@ export default function ChatAssistant({
           (draftResult && !acceptResponse(draftResult, current))
         )
           return;
-        setDevices(deviceResult.items);
+        setDevices((previous) =>
+          reconcileDeviceList(
+            previous,
+            deviceResult.items,
+            requestedDeviceRevision,
+            deviceRevision.current,
+          ),
+        );
         if (draftResult) {
           setBatches((previous) =>
             before
@@ -243,6 +256,7 @@ export default function ChatAssistant({
     document.addEventListener("visibilitychange", visibility);
     return () => {
       active.current = false;
+      Modal.destroyAll();
       generation.current++;
       reading.current = false;
       window.clearInterval(timer);
@@ -295,14 +309,21 @@ export default function ChatAssistant({
       if (!acceptResponse(result, current)) return;
       if (key.startsWith("draft:"))
         setBatches((items) => items.filter((item) => item.id !== key.slice(6)));
-      else
+      else {
+        deviceRevision.current++;
         setDevices((items) =>
           items.map((item) =>
             item.id === key.slice(7)
-              ? { ...item, revoked_at: new Date().toISOString() }
+              ? {
+                  ...item,
+                  revoked_at: new Date().toISOString(),
+                  config_available: false,
+                  connection_state: "revoked" as const,
+                }
               : item,
           ),
         );
+      }
       message.success(key.startsWith("draft:") ? "草稿已删除" : "设备已撤销");
     } catch (e) {
       if (current !== generation.current || !active.current) return;
@@ -312,43 +333,104 @@ export default function ChatAssistant({
       if (current === generation.current && active.current) setBusy(null);
     }
   }
+  async function loadConfiguration(device: Device, rotate = false) {
+    if (busy || deviceConnectionState(device) === "revoked") return;
+    const current = generation.current;
+    setBusy(`config:${device.id}`);
+    setError("");
+    try {
+      const result = await api<Binding>(
+        `/chat/devices/${device.id}/${rotate ? "rotate" : "config"}`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+          headers: { "X-Chat-User-Id": String(user.id) },
+        },
+      );
+      if (!acceptResponse(result, current)) return;
+      deviceRevision.current++;
+      setDevices((items) =>
+        items.map((item) =>
+          item.id === result.device.id ? result.device : item,
+        ),
+      );
+      setBinding(result);
+    } catch (e) {
+      if (current !== generation.current || !active.current) return;
+      rejectAccess(e);
+      setError((e as Error).message);
+      // A device created before encrypted configuration storage may need a
+      // single explicit rotation; a failed fetch never rotates credentials.
+      if (!rotate && e instanceof ApiError && e.status === 409) {
+        deviceRevision.current++;
+        setDevices((items) =>
+          items.map((item) =>
+            item.id === device.id ? { ...item, config_available: false } : item,
+          ),
+        );
+      }
+    } finally {
+      if (current === generation.current && active.current) setBusy(null);
+    }
+  }
+  function confirmRotation(device: Device) {
+    modal.confirm({
+      title: `重新生成“${device.name}”的连接配置？`,
+      content:
+        "旧配置将立即失效，需要把新配置重新导入 Mac。设备和已同步草稿保留，生成后可随时再次查看。",
+      okText: "重新生成配置",
+      cancelText: "取消",
+      onOk: () => loadConfiguration(device, true),
+    });
+  }
+  const inboxEmpty = chatInboxEmptyState(devices);
+  const activeDevices = devices.filter(
+    (device) => deviceConnectionState(device) !== "revoked",
+  );
+  const publicUploadUrl = new URL("/api/v1/chat/ingest", window.location.origin)
+    .href;
   const uploadUrl = binding
     ? new URL(binding.upload_path, window.location.origin).href
     : "";
 
   return (
-    <main className="chat-workspace">
-      <div className="chat-topbar">
-        <Button
-          icon={<ArrowLeft size={16} />}
-          onClick={() => navigate(returnPath)}
-        >
-          {user.is_platform_admin ? "管理工作台" : "返回账簿"}
-        </Button>
-        <Space>
-          <ThemeSwitcher />
+    <Container
+      className={`chat-workspace${embedded ? " chat-workspace-embedded" : ""}`}
+    >
+      {!embedded && (
+        <div className="chat-topbar">
           <Button
-            aria-label="退出登录"
-            icon={<LogOut size={16} />}
-            onClick={() =>
-              modal.confirm({
-                title: "退出当前账户？",
-                okText: "退出登录",
-                cancelText: "取消",
-                onOk: async () => {
-                  await send("/auth/logout");
-                  await onAuthChange();
-                },
-              })
-            }
-          />
-        </Space>
-      </div>
-      <PageTitle
-        eyebrow=""
-        title="聊天助手"
-        description={`${user.username} 的个人会话 · 在 Mac 生成，随时查看回复草稿`}
-        actions={
+            icon={<ArrowLeft size={16} />}
+            onClick={() => navigate(returnPath)}
+          >
+            {user.is_platform_admin ? "管理工作台" : "返回账簿"}
+          </Button>
+          <Space>
+            <ThemeSwitcher />
+            <Button
+              aria-label="退出登录"
+              icon={<LogOut size={16} />}
+              onClick={() =>
+                modal.confirm({
+                  title: "退出当前账户？",
+                  okText: "退出登录",
+                  cancelText: "取消",
+                  onOk: async () => {
+                    await send("/auth/logout");
+                    await onAuthChange();
+                  },
+                })
+              }
+            />
+          </Space>
+        </div>
+      )}
+      {embedded ? (
+        <div className="chat-embedded-heading">
+          <div>
+            <h2>我的聊天</h2>
+            <p>{user.username} 的个人会话 · 无需创建或代管财务空间</p>
+          </div>
           <Button
             icon={<RefreshCw size={16} />}
             loading={loading}
@@ -357,8 +439,24 @@ export default function ChatAssistant({
           >
             刷新
           </Button>
-        }
-      />
+        </div>
+      ) : (
+        <PageTitle
+          eyebrow=""
+          title="聊天助手"
+          description={`${user.username} 的个人会话 · 在 Mac 生成，随时查看回复草稿`}
+          actions={
+            <Button
+              icon={<RefreshCw size={16} />}
+              loading={loading}
+              disabled={!!busy}
+              onClick={() => void read(true)}
+            >
+              刷新
+            </Button>
+          }
+        />
+      )}
       {error && (
         <Alert
           className="form-alert"
@@ -388,7 +486,7 @@ export default function ChatAssistant({
           <Empty description="此账号尚未开启聊天助手" />
           <p className="chat-center">
             {access.is_admin
-              ? "在聊天管理中为自己的账号开启，再绑定 Mac。"
+              ? "在“聊天管理”中为自己的账号开启，再回到“我的聊天”添加 Mac 设备。"
               : "请联系管理员为此账号开启聊天功能，无需建立财务空间。"}
           </p>
           {access.is_admin && (
@@ -453,18 +551,15 @@ export default function ChatAssistant({
                       </div>
                     ) : !batches.length ? (
                       <Panel>
-                        <Empty description="还没有同步的回复草稿" />
-                        <p className="chat-center">
-                          先绑定
-                          Mac，并在相知中导入同步配置。收到新消息生成草稿后，会显示在这里。
-                        </p>
+                        <Empty description={inboxEmpty.title} />
+                        <p className="chat-center">{inboxEmpty.description}</p>
                         <div className="chat-center">
                           <Button
                             type="primary"
                             icon={<Laptop size={16} />}
                             onClick={() => setTab("devices")}
                           >
-                            绑定 Mac 设备
+                            {inboxEmpty.action}
                           </Button>
                         </div>
                       </Panel>
@@ -590,11 +685,11 @@ export default function ChatAssistant({
               },
               {
                 key: "devices",
-                label: `设备绑定${devices.length ? ` (${devices.filter((device) => !device.revoked_at).length})` : ""}`,
+                label: `我的设备${activeDevices.length ? ` (${activeDevices.length})` : ""}`,
                 children: (
                   <Panel
                     title="我的 Mac 设备"
-                    subtitle="在此创建设备凭据，然后在 Mac 的相知设置中导入同步配置。"
+                    subtitle="连接配置可以随时查看和复制。Mac 验证连接或上传草稿后，会更新最近验证时间。"
                     action={
                       <Button
                         type="primary"
@@ -606,52 +701,125 @@ export default function ChatAssistant({
                           form.resetFields();
                         }}
                       >
-                        绑定新设备
+                        添加设备
                       </Button>
                     }
                   >
+                    <div className="chat-upload-address">
+                      <label htmlFor="chat-upload-url">草稿上传地址</label>
+                      <Space.Compact block>
+                        <Input
+                          id="chat-upload-url"
+                          readOnly
+                          value={publicUploadUrl}
+                        />
+                        <Button
+                          icon={<Copy size={14} />}
+                          onClick={() => void copy(publicUploadUrl, "上传地址")}
+                        >
+                          复制地址
+                        </Button>
+                      </Space.Compact>
+                    </div>
                     {!devices.length ? (
-                      <Empty description="尚未绑定设备" />
+                      <Empty description="尚未添加设备" />
                     ) : (
                       <div className="chat-device-list">
-                        {devices.map((device) => (
-                          <div className="chat-device" key={device.id}>
-                            <Laptop size={24} />
-                            <div>
-                              <strong>{device.name}</strong>
-                              <p>创建于 {chatTime(device.created_at)}</p>
-                              <p>最近连接：{chatTime(device.last_seen_at)}</p>
+                        {devices.map((device) => {
+                          const state = deviceConnectionState(device);
+                          const configurationAction =
+                            deviceConfigurationAction(device);
+                          return (
+                            <div className="chat-device" key={device.id}>
+                              <Laptop size={24} />
+                              <div className="chat-device-info">
+                                <div className="chat-device-name">
+                                  <strong>{device.name}</strong>
+                                  <Tag
+                                    color={
+                                      state === "connected"
+                                        ? "green"
+                                        : state === "awaiting_connection"
+                                          ? "gold"
+                                          : undefined
+                                    }
+                                  >
+                                    {state === "revoked"
+                                      ? "已撤销"
+                                      : state === "connected"
+                                        ? "已验证连接"
+                                        : "等待 Mac 连接"}
+                                  </Tag>
+                                </div>
+                                <p>创建于 {chatTime(device.created_at)}</p>
+                                <p>
+                                  最近验证：
+                                  {device.last_seen_at
+                                    ? chatTime(device.last_seen_at)
+                                    : "尚未收到 Mac 验证"}
+                                </p>
+                                {configurationAction === "rotate" && (
+                                  <p>
+                                    此设备的旧配置无法取回，请重新生成后导入
+                                    Mac。
+                                  </p>
+                                )}
+                              </div>
+                              {state !== "revoked" && (
+                                <Space className="chat-device-actions" wrap>
+                                  <Button
+                                    type="primary"
+                                    loading={busy === `config:${device.id}`}
+                                    disabled={
+                                      !!busy && busy !== `config:${device.id}`
+                                    }
+                                    onClick={() =>
+                                      configurationAction === "rotate"
+                                        ? confirmRotation(device)
+                                        : void loadConfiguration(device)
+                                    }
+                                  >
+                                    {configurationAction === "rotate"
+                                      ? "重新生成配置"
+                                      : "查看连接配置"}
+                                  </Button>
+                                  {configurationAction === "config" && (
+                                    <Button
+                                      disabled={!!busy}
+                                      onClick={() => confirmRotation(device)}
+                                    >
+                                      重新生成
+                                    </Button>
+                                  )}
+                                  <Button
+                                    danger
+                                    loading={busy === `device:${device.id}`}
+                                    disabled={
+                                      !!busy && busy !== `device:${device.id}`
+                                    }
+                                    onClick={() =>
+                                      modal.confirm({
+                                        title: `撤销“${device.name}”的连接？`,
+                                        content:
+                                          "此设备将不能继续连接和上传。已同步草稿保留，重新连接需添加新的设备。",
+                                        okText: "撤销设备",
+                                        okButtonProps: { danger: true },
+                                        cancelText: "取消",
+                                        onOk: () =>
+                                          remove(
+                                            `/chat/devices/${device.id}`,
+                                            `device:${device.id}`,
+                                          ),
+                                      })
+                                    }
+                                  >
+                                    撤销
+                                  </Button>
+                                </Space>
+                              )}
                             </div>
-                            {device.revoked_at ? (
-                              <Tag>已撤销</Tag>
-                            ) : (
-                              <Button
-                                danger
-                                loading={busy === `device:${device.id}`}
-                                disabled={
-                                  !!busy && busy !== `device:${device.id}`
-                                }
-                                onClick={() =>
-                                  modal.confirm({
-                                    title: `撤销“${device.name}”的连接？`,
-                                    content:
-                                      "此设备将不能继续上传。已同步草稿保留，重新连接需创建新的设备凭据。",
-                                    okText: "撤销设备",
-                                    okButtonProps: { danger: true },
-                                    cancelText: "取消",
-                                    onOk: () =>
-                                      remove(
-                                        `/chat/devices/${device.id}`,
-                                        `device:${device.id}`,
-                                      ),
-                                  })
-                                }
-                              >
-                                撤销
-                              </Button>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </Panel>
@@ -662,7 +830,7 @@ export default function ChatAssistant({
         </>
       )}
       <Modal
-        title="绑定新设备"
+        title="添加 Mac 设备"
         open={adding}
         onCancel={() => {
           if (busy !== "create") setAdding(false);
@@ -695,6 +863,7 @@ export default function ChatAssistant({
                 headers: { "X-Chat-User-Id": String(user.id) },
               });
               if (!acceptResponse(result, current)) return;
+              deviceRevision.current++;
               setDevices((items) => [result.device, ...items]);
               setBinding(result);
               setAdding(false);
@@ -728,7 +897,7 @@ export default function ChatAssistant({
         </Form>
       </Modal>
       <Modal
-        title="复制设备同步配置"
+        title="设备连接配置"
         open={!!binding}
         onCancel={() => setBinding(null)}
         footer={
@@ -744,8 +913,8 @@ export default function ChatAssistant({
             <Alert
               type="info"
               showIcon
-              message="凭据仅在本次显示"
-              description="复制配置后，到这台 Mac 的相知设置中导入。关闭后无法再次查看；丢失时可撤销设备并重新创建。"
+              message="配置已保存，可随时再次查看"
+              description="复制或下载配置，到 Mac 相知的设置中导入并验证连接。以后可在“我的设备”中再次打开；重新查看不会使原配置失效。"
             />
             <Form layout="vertical">
               <Form.Item label="设备">{binding.device.name}</Form.Item>
@@ -777,6 +946,29 @@ export default function ChatAssistant({
               >
                 复制同步配置
               </Button>
+              <Button
+                icon={<Download size={15} />}
+                onClick={() => {
+                  const blob = new Blob(
+                    [
+                      JSON.stringify(
+                        { uploadUrl, token: binding.token },
+                        null,
+                        2,
+                      ),
+                    ],
+                    { type: "application/json" },
+                  );
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = `xiangzhi-device-${binding.device.id}.json`;
+                  link.click();
+                  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }}
+              >
+                下载配置
+              </Button>
               <Button onClick={() => void copy(uploadUrl, "上传地址")}>
                 复制地址
               </Button>
@@ -787,6 +979,6 @@ export default function ChatAssistant({
           </div>
         )}
       </Modal>
-    </main>
+    </Container>
   );
 }

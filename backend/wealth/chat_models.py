@@ -24,6 +24,7 @@ class ChatDevice(models.Model):
     )
     name = models.CharField(max_length=80)
     token_hash = models.CharField(max_length=64, unique=True)
+    token_ciphertext = models.TextField(default="", db_default="", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(null=True)
     revoked_at = models.DateTimeField(null=True)

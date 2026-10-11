@@ -60,10 +60,11 @@ test('bad packages do not overwrite a binding; malformed persisted configuration
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
-async function harness(uploadDrafts?: Parameters<typeof createApplication>[0]['uploadDrafts']) {
+const checkReceipt = {ok: true as const, device: {id: '501f6be4-9fde-4d86-a4a1-7bf8c521c236', name: '合成 Mac'}, checkedAt: '2026-10-11T04:00:00.000Z'};
+async function harness(uploadDrafts?: Parameters<typeof createApplication>[0]['uploadDrafts'], check?: Parameters<typeof createApplication>[0]['checkDraftConnection']) {
   const dir = mkdtempSync(join(tmpdir(), 'xiangzhi-binding-api-'));
   const instance = createApplication({databasePath: join(dir, 'state.sqlite'), seed: false, profileManifestPath: null,
-    draftSync: env, uploadDrafts,
+    draftSync: env, uploadDrafts, checkDraftConnection: check ?? (async () => checkReceipt),
     bridge: {inboundToken: '', outboundToken: '', outboundUrl: ''},
     inspectCodex: async () => ({available: false, version: null, message: '合成测试'}),
     inspectWechat: () => ({available: false, message: '合成测试'}),
@@ -94,7 +95,7 @@ async function createDraft(h: Awaited<ReturnType<typeof harness>>) {
   return id;
 }
 
-test('connection APIs require browser session and CSRF; save is offline and preserves generation, reading and drafts', async () => {
+test('connection APIs require browser session and CSRF; save performs only device verification and preserves generation, reading and drafts', async () => {
   let calls = 0;
   const h = await harness(async (_config, batch) => {calls++;return {id: batch.id, duplicate: false};});
   try {
@@ -157,5 +158,100 @@ test('changing binding aborts old upload and late acknowledgement cannot modify 
     assert.equal((await h.request(`/conversations/${cid}/sync-drafts`, 'POST')).status, 200);
     assert.equal(calls, 2);
     assert.equal(h.store.read().drafts.length, 1);
+  } finally {release();await pending;await h.close();}
+});
+
+test('save verifies once without uploading; failed checks retain the configuration and explicit retry succeeds', async () => {
+  let checks = 0, uploads = 0;
+  const h = await harness(async (_config, batch) => {uploads++;return {id: batch.id, duplicate: false};}, async config => {
+    checks++;assert.equal(config.token, saved.token);
+    if (checks === 1) throw new Error(`untrusted provider echo ${saved.token}`);
+    return checkReceipt;
+  });
+  try {
+    assert.equal(checks, 0, 'startup does not verify');
+    const response = await h.request('/draft-sync/connection', 'PUT', saved);
+    assert.equal(response.status, 200);
+    const status = await response.json();
+    assert.equal(status.configured, true); assert.equal(status.source, 'saved');
+    assert.equal(status.verification.status, 'failed');assert.equal(checks, 1);
+    assert.ok(!JSON.stringify(status).includes(saved.token));
+    assert.equal(h.store.read().settings.syncDraftsEnabled, false);assert.equal(uploads, 0);
+    assert.equal((await h.request('/draft-sync/connection/check', 'POST', {}, {'X-CSRF-Token': ''})).status, 403);
+    assert.equal((await h.request('/draft-sync/connection/check', 'POST', {}, {Cookie: ''})).status, 401);
+    assert.equal((await h.request('/draft-sync/connection/check', 'POST', {token: 'unexpected'})).status, 400);
+    assert.equal(checks, 1);
+    const checked = await (await h.request('/draft-sync/connection/check', 'POST', {})).json();
+    assert.equal(checked.verification.status, 'verified');assert.deepEqual(checked.verification.device, checkReceipt.device);
+    assert.equal(checked.verification.checkedAt, checkReceipt.checkedAt);assert.equal(checks, 2);assert.equal(uploads, 0);
+    assert.equal(h.store.read().settings.syncDraftsEnabled, false);
+    await h.request('/draft-sync/connection', 'DELETE');
+    assert.equal(h.publicState().runtime.draftSyncConnection!.verification.status, 'not_checked');
+    assert.equal(h.publicState().runtime.draftSyncConnection!.verification.device, null);
+  } finally {await h.close();}
+});
+
+test('generic upload endpoints never receive an invented verification request', async () => {
+  let checks = 0;
+  const h = await harness(undefined, async () => {checks++;return checkReceipt;});
+  try {
+    const status = await (await h.request('/draft-sync/connection', 'PUT', {...saved, uploadUrl: 'https://other.example.test/inbox'})).json();
+    assert.equal(status.configured, true);assert.equal(status.verification.supported, false);
+    assert.equal((await h.request('/draft-sync/connection/check', 'POST', {})).status, 400);
+    assert.equal(checks, 0);
+  } finally {await h.close();}
+});
+
+test('restarting with a saved Wealth connection does not contact its server or turn on automatic work', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xiangzhi-binding-restart-'));
+  const databasePath = join(dir, 'restart.sqlite');
+  new DraftSyncConnection(databasePath, env).save(saved);
+  let checks = 0;
+  const instance = createApplication({databasePath, seed:false, profileManifestPath:null, draftSync:env,
+    inspectCodex:async()=>({available:false,version:null,message:'合成测试'}), inspectWechat:()=>({available:false,message:'合成测试'}),
+    checkDraftConnection:async()=>{checks++;return checkReceipt;}});
+  try {
+    instance.engine.start();instance.collector.start();await instance.engine.tick();
+    assert.equal(checks,0);
+    assert.equal(instance.publicState().runtime.draftSyncConnection!.verification.status,'not_checked');
+    assert.equal(instance.store.read().settings.autoReplyEnabled,false);
+    assert.equal(instance.store.read().settings.syncDraftsEnabled,false);
+  } finally {instance.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a superseded failed check cannot overwrite a newer successful check', async () => {
+  let entered!: () => void; const started = new Promise<void>(resolve => {entered = resolve;});
+  let release!: () => void; const holding = new Promise<void>(resolve => {release = resolve;});
+  let calls = 0; let oldSignal: AbortSignal | undefined;
+  const h = await harness(undefined, async (_config, signal) => {
+    if (++calls === 2) {oldSignal = signal;entered();await holding;throw new Error('old failure');}
+    return checkReceipt;
+  });
+  let pending: Promise<Response> | undefined;
+  try {
+    await h.request('/draft-sync/connection', 'PUT', saved);
+    pending = h.request('/draft-sync/connection/check', 'POST', {}); await started;
+    assert.equal((await h.request('/draft-sync/connection/check', 'POST', {})).status, 200);
+    assert.equal(oldSignal!.aborted, true);
+    release();assert.equal((await pending).status, 409);
+    assert.equal(h.publicState().runtime.draftSyncConnection!.verification.status, 'verified');
+    assert.equal(h.publicState().runtime.draftSyncConnection!.verification.error, null);
+  } finally {release();await pending;await h.close();}
+});
+
+test('changing a connection cancels a pending verification and ignores the old success', async () => {
+  let entered!: () => void;const started = new Promise<void>(resolve => {entered = resolve;});
+  let release!: () => void;const holding = new Promise<void>(resolve => {release = resolve;});
+  let oldSignal: AbortSignal | undefined;
+  const h = await harness(undefined, async (_config, signal) => {oldSignal=signal;entered();await holding;return checkReceipt;});
+  let pending: Promise<Response> | undefined;
+  try {
+    pending = h.request('/draft-sync/connection', 'PUT', saved);await started;
+    const changed = await h.request('/draft-sync/connection', 'PUT', {...saved, uploadUrl: 'https://other.example.test/inbox'});
+    assert.equal(changed.status, 200);assert.equal(oldSignal!.aborted, true);
+    release();assert.equal((await pending).status, 409);
+    const current = h.publicState().runtime.draftSyncConnection!;
+    assert.equal(current.uploadUrl, 'https://other.example.test/inbox');
+    assert.equal(current.verification.status, 'not_checked');assert.equal(current.verification.device, null);
   } finally {release();await pending;await h.close();}
 });

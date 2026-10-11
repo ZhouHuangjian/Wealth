@@ -5,7 +5,7 @@ import {
   Leaf, LoaderCircle, MessageCircle, MoreHorizontal, Pause, Plus, Search, Send,
   Settings2, ShieldCheck, Sparkles, Trash2, UserRound, Users, X, Zap,
 } from 'lucide-react';
-import type { Conversation, Draft, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, Settings } from '../shared/types';
+import type { Conversation, Draft, DraftSyncConnectionStatus, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, Settings } from '../shared/types';
 import { api } from './api';
 
 type Page = 'conversations' | 'profile' | 'knowledge' | 'settings' | 'activity' | 'drafts';
@@ -531,17 +531,27 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
   }
   async function updateConnection(action: 'save' | 'disable' | 'environment') {
     setSaving('connection'); setConnectionError('');
+    let result: DraftSyncConnectionStatus;
     try {
       if (action === 'save') {
         let parsed: unknown;
         try { parsed = JSON.parse(connectionPackage); } catch { throw new Error('配置包不是有效 JSON，请从 Wealth 重新复制完整配置包。'); }
-        await api('/draft-sync/connection', 'PUT', parsed);
-      } else if (action === 'disable') await api('/draft-sync/connection', 'DELETE');
-      else await api('/draft-sync/connection/environment', 'POST');
+        result = await api<DraftSyncConnectionStatus>('/draft-sync/connection', 'PUT', parsed);
+      } else if (action === 'disable') result = await api<DraftSyncConnectionStatus>('/draft-sync/connection', 'DELETE');
+      else result = await api<DraftSyncConnectionStatus>('/draft-sync/connection/environment', 'POST');
       setConnectionPackage(''); setForm(previous => ({...previous, syncDraftsEnabled: false}));
       await refresh();
-      notify(action === 'disable' ? '已清除并停用同步连接，不会恢复旧环境凭据' : '连接已保存，自动同步已暂停；保存未联网或上传草稿');
+      notify(action === 'disable' ? '已清除并停用同步连接，不会恢复旧环境凭据' : action === 'environment' ? '已恢复环境配置，自动同步已暂停；可手动验证连接' : result.verification.status === 'verified' ? '配置保存成功，服务器连接验证成功；自动同步仍暂停' : result.verification.status === 'failed' ? '配置保存成功，但服务器验证失败；配置已保留，可重试验证' : '配置保存成功；此地址需通过手动同步草稿确认连接', result.verification.status === 'failed');
     } catch (error) { setConnectionError(error instanceof Error ? error.message : '连接未保存，请重新复制配置包。'); }
+    finally { setSaving(''); }
+  }
+  async function verifyConnection() {
+    setSaving('verify-connection'); setConnectionError('');
+    try {
+      const result = await api<DraftSyncConnectionStatus>('/draft-sync/connection/check', 'POST', {});
+      await refresh();
+      notify(result.verification.status === 'verified' ? '服务器已确认设备连接，没有上传聊天或草稿' : '连接验证失败，已保存的配置仍保留', result.verification.status !== 'verified');
+    } catch (error) { setConnectionError(error instanceof Error ? error.message : '本次验证未完成，可稍后重试。'); await refresh(); }
     finally { setSaving(''); }
   }
   async function checkCodex() {
@@ -570,11 +580,12 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
         {form.provider === 'codex' && <p className="model-test-hint">{!form.allowRemoteModel ? '先勾选上方授权，再测试生成。' : '测试会发起一次真实模型调用，可能消耗额度。'}仅保存设置不会调用模型。</p>}
       </section>
       <section className="settings-card"><div className="settings-section-title"><span><Cloud size={19} /></span><div><h2>草稿同步 · Wealth</h2><p>Mac 负责生成，Wealth 使用原账号登录查看候选回复。</p></div></div>
-        <div className="sync-connection-status" role="status"><strong>{connection?.source === 'disabled' ? '同步连接已停用' : state.runtime.draftSyncConfigured ? '同步连接已配置 · 令牌已隐藏' : '尚未配置可用连接'}</strong><small>{connection?.source === 'saved' ? '使用此工作空间保存的配置，优先于环境配置。' : connection?.source === 'environment' ? '当前使用本机服务环境配置。' : connection?.source === 'disabled' ? '已清除设备令牌，不会自动恢复环境配置。' : ''}</small>{connection?.uploadUrl && <code>{connection.uploadUrl}</code>}{connection?.error && <p className="inline-error">{connection.error}</p>}</div>
+        <div className="sync-connection-status" role="status"><strong>{connection?.source === 'disabled' ? '同步连接已停用' : state.runtime.draftSyncConfigured ? '同步连接已配置 · 令牌已隐藏' : '尚未配置可用连接'}</strong><small>{connection?.source === 'saved' ? '配置已保存到本机，优先于环境配置。远端验证结果见下方。' : connection?.source === 'environment' ? '当前使用本机服务环境配置。' : connection?.source === 'disabled' ? '已清除设备令牌，不会自动恢复环境配置。' : ''}</small>{connection?.uploadUrl && <code>{connection.uploadUrl}</code>}{connection?.error && <p className="inline-error">{connection.error}</p>}</div>
         <label className="field-label">Wealth 设备配置包<input type="password" autoComplete="off" spellCheck={false} maxLength={10000} value={connectionPackage} onChange={event => {setConnectionPackage(event.target.value);setConnectionError('');}} placeholder='粘贴 {"uploadUrl":"…","token":"…"}' /><small>在 Wealth 的“聊天助手 → 设备绑定”创建设备并复制配置包。内容只保存到此 Mac 的私有文件，保存后输入框清空。</small></label>
-        <div className="sync-connection-actions"><Button kind="secondary" disabled={!!saving || !connectionPackage.trim()} onClick={() => void updateConnection('save')}>{saving === 'connection' ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存连接</Button><Button kind="ghost" disabled={!!saving || connection?.source === 'disabled'} onClick={() => void updateConnection('disable')}>清除并停用</Button>{connection && connection.source !== 'environment' && <Button kind="ghost" disabled={!!saving} onClick={() => void updateConnection('environment')}>恢复环境配置</Button>}</div>
+        <div className="sync-connection-actions"><Button kind="secondary" disabled={!!saving || !connectionPackage.trim()} onClick={() => void updateConnection('save')}>{saving === 'connection' ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{saving === 'connection' ? '正在保存并验证…' : '保存连接'}</Button><Button kind="secondary" disabled={!!saving || !connection?.verification?.supported || connection?.verification?.status === 'checking'} onClick={() => void verifyConnection()}>{saving === 'verify-connection' || connection?.verification?.status === 'checking' ? <LoaderCircle size={14} className="spin" /> : <Zap size={14} />}验证连接</Button><Button kind="ghost" disabled={!!saving || connection?.source === 'disabled'} onClick={() => void updateConnection('disable')}>清除并停用</Button>{connection && connection.source !== 'environment' && <Button kind="ghost" disabled={!!saving} onClick={() => void updateConnection('environment')}>恢复环境配置</Button>}</div>
+        {connection?.verification && <div className={`sync-verification ${connection.verification.status}`} role="status"><strong>{connection.verification.status === 'verified' ? '服务器连接验证成功' : connection.verification.status === 'checking' ? '正在向服务器验证设备…' : connection.verification.status === 'failed' ? '配置已保存 · 服务器验证失败' : connection.configured && !connection.verification.supported ? '此地址不支持设备验证' : '服务器连接尚未验证'}</strong>{connection.verification.device && <p>设备：{connection.verification.device.name}</p>}{connection.verification.checkedAt && <small>最近验证：{dateLabel(connection.verification.checkedAt)} {checkedTimeLabel(connection.verification.checkedAt)}</small>}{connection.verification.error && <p>{connection.verification.error}</p>}{connection.configured && !connection.verification.supported && <p>仅 Wealth 草稿接收地址支持设备验证。当前通用地址请通过手动同步草稿确认。</p>}</div>}
         {connectionError && <p className="inline-error" role="alert">{connectionError}</p>}
-        <p className="sync-connection-note">保存、清除或恢复连接会暂停自动同步。已有草稿保留；保存连接不会联网或上传数据。</p>
+        <p className="sync-connection-note">保存 Wealth 配置后会自动验证一次，只核对设备凭据，不上传聊天或草稿。保存、清除或恢复连接均暂停自动同步；启动工作台不会自动验证。</p>
         <label className="checkbox-label"><input type="checkbox" checked={!!form.syncDraftsEnabled} disabled={!!saving || (!state.runtime.draftSyncConfigured && !form.syncDraftsEnabled)} onChange={event => change('syncDraftsEnabled', event.target.checked)} /><span><strong>生成后同步草稿至服务器</strong><small>勾选后点击“保存设置”，只同步此后生成的候选回复、联系人显示名与档案版本。旧草稿可在对话中手动同步。</small></span></label>
         <div className="info-box"><ShieldCheck size={17} /><span>完整聊天记录和习惯档案保留在 Mac。此开关不会发送微信消息。{state.runtime.draftInboxConfigured && ' 此工作空间也已配置草稿接收，可从“云端草稿箱”查看收到的回复。'}</span></div>
       </section>

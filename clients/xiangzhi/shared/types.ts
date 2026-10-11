@@ -66,6 +66,10 @@ export interface DraftUpload {
 export interface DraftSyncConnectionStatus {
   configured: boolean; uploadUrl: string; bindingId: string | null;
   source: 'saved' | 'disabled' | 'environment' | 'error'; error: string | null;
+  verification: {
+    supported: boolean; status: 'not_checked' | 'checking' | 'verified' | 'failed';
+    checkedAt: string | null; device: {id: string; name: string} | null; error: string | null;
+  };
 }
 export interface AutoJob {
   id: string; conversationId: string; messageId: string;
