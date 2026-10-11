@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { validateEndpoint } from './bridge.js';
 import { isDraftSyncConfigured, type DraftSyncConfig } from './draft-sync.js';
+import { draftConnectionCheckUrl, type DraftConnectionReceipt } from './draft-sync-check.js';
 import type { DraftSyncConnectionStatus } from '../shared/types.js';
 
 const credentials = z.object({uploadUrl: z.string().trim().min(1).max(2048), token: z.string().min(32).max(4096).regex(/^[\x21-\x7e]+$/)}).strict();
@@ -19,6 +20,7 @@ export class DraftSyncConnection {
   private saved: SavedConnection | null = null;
   private error = false;
   private environmentId = randomUUID();
+  private verification: Omit<DraftSyncConnectionStatus['verification'], 'supported'> = {status: 'not_checked', checkedAt: null, device: null, error: null};
   readonly directory: string | null;
   readonly path: string | null;
 
@@ -64,6 +66,7 @@ export class DraftSyncConnection {
     }
     this.saved = next;
     this.error = false;
+    this.verification = {status: 'not_checked', checkedAt: null, device: null, error: null};
   }
 
   save(input: unknown) {
@@ -74,6 +77,9 @@ export class DraftSyncConnection {
   }
   disable() { this.persist({version: 1, mode: 'disabled'}); }
   restoreEnvironment() { this.persist({version: 1, mode: 'environment'}); this.environmentId = randomUUID(); }
+  checking() { this.verification = {status: 'checking', checkedAt: null, device: null, error: null}; }
+  checked(receipt: DraftConnectionReceipt) { this.verification = {status: 'verified', checkedAt: receipt.checkedAt, device: receipt.device, error: null}; }
+  checkFailed(message: string) { this.verification = {status: 'failed', checkedAt: new Date().toISOString(), device: null, error: message}; }
 
   config(): DraftSyncConfig {
     const inboxToken = this.environment.inboxToken;
@@ -89,6 +95,7 @@ export class DraftSyncConnection {
     return {configured: isDraftSyncConfigured(config), uploadUrl,
       source: this.error ? 'error' : this.saved?.mode ?? 'environment',
       bindingId: this.error || this.saved?.mode === 'disabled' ? null : this.saved?.mode === 'saved' ? this.saved.bindingId : this.environmentId,
-      error: this.error ? '本机保存的连接无法读取，同步已停用。请重新粘贴配置，或明确恢复环境配置。' : null};
+      error: this.error ? '本机保存的连接无法读取，同步已停用。请重新粘贴配置，或明确恢复环境配置。' : null,
+      verification: {...this.verification, supported: draftConnectionCheckUrl(config) !== null}};
   }
 }

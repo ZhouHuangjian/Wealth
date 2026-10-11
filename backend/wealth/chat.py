@@ -5,6 +5,7 @@ import json
 import re
 import secrets
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 
 from django.contrib.auth import get_user_model
@@ -15,6 +16,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .chat_models import ChatAccess, ChatDevice, ChatDraftBatch
+from .chat_credentials import encrypt_device_token, read_device_token
 from .common import DomainError, digest
 from .platform_admin import is_platform_admin, log_admin, require_admin
 
@@ -130,24 +132,49 @@ def device_record(device):
         "created_at": device.created_at,
         "last_seen_at": device.last_seen_at,
         "revoked_at": device.revoked_at,
+        "config_available": read_device_token(device) is not None,
+        "draft_count": device.batches.count(),
+        "connection_state": "revoked"
+        if device.revoked_at
+        else "connected"
+        if device.last_seen_at
+        else "awaiting_connection",
     }
 
 
+def device_binding(device, token):
+    return {
+        "device": device_record(device),
+        "token": token,
+        "upload_path": "/api/v1/chat/ingest",
+    }
+
+
+def restorable_payload(batch):
+    try:
+        body = validate_batch(batch.payload)
+        return body["id"] == batch.batch_id and digest(body) == batch.payload_digest
+    except DomainError:
+        return False
+
+
 def batch_record(batch):
-    body = batch.payload
+    body = batch.payload if restorable_payload(batch) else {}
     return {
         "id": batch.id,
         "device_id": batch.device_id,
         "device_name": batch.device.name,
         "batch_id": batch.batch_id,
-        "conversation_key": body["conversationKey"],
-        "conversation_name": body["conversationName"],
-        "based_on_message_id": body["basedOnMessageId"],
-        "created_at": body["createdAt"],
+        "conversation_key": body.get("conversationKey", ""),
+        "conversation_name": body.get("conversationName", "内容已清除的旧草稿"),
+        "based_on_message_id": body.get("basedOnMessageId", ""),
+        "created_at": body.get("createdAt"),
         "received_at": batch.received_at,
-        "provider": body["provider"],
-        "profile_version": body["profileVersion"],
-        "drafts": body["drafts"],
+        "provider": body.get("provider", ""),
+        "profile_version": body.get("profileVersion"),
+        "drafts": body.get("drafts", []),
+        "deleted_at": batch.deleted_at,
+        "can_restore": batch.deleted_at is not None and bool(body),
     }
 
 
@@ -175,33 +202,77 @@ def dispatch_chat(request, path, body):
                     "最多绑定十个有效设备，请先撤销旧设备", "device_limit", 409
                 )
             token = "wchat_" + secrets.token_urlsafe(32)
-            device = ChatDevice.objects.create(
+            device = ChatDevice(
                 owner=owner,
                 name=name,
                 token_hash=hashlib.sha256(token.encode()).hexdigest(),
             )
+            device.token_ciphertext = encrypt_device_token(device, token)
+            device.save()
             log_admin(owner, "chat.device.created", device.pk)
-        return {
-            "device": device_record(device),
-            "token": token,
-            "upload_path": "/api/v1/chat/ingest",
-        }
-    if path.startswith("chat/devices/") and request.method == "DELETE":
-        ident = uuid_value(path.removeprefix("chat/devices/"))
+        return device_binding(device, token)
+    if path.startswith("chat/devices/") and request.method == "POST":
+        parts = path.split("/")
+        if len(parts) != 4 or parts[3] not in {"config", "rotate"}:
+            raise DomainError("接口不存在", "not_found", 404)
+        ident = uuid_value(parts[2])
+        exact_fields(body, set())
         with transaction.atomic():
             owner = User.objects.select_for_update().get(pk=user.pk)
             require_enabled(owner)
             device = ChatDevice.objects.filter(owner=owner, pk=ident).first()
             if not device:
                 raise DomainError("设备不存在", "not_found", 404)
-            if device.revoked_at is None:
+            if device.revoked_at:
+                raise DomainError("设备已撤销，请添加新设备", "device_revoked", 409)
+            if parts[3] == "config":
+                token = read_device_token(device)
+                if token is None:
+                    raise DomainError(
+                        "此设备配置无法再次查看，请重新生成配置",
+                        "device_config_unavailable",
+                        409,
+                    )
+                log_admin(owner, "chat.device.config.viewed", device.pk)
+            else:
+                token = "wchat_" + secrets.token_urlsafe(32)
+                device.token_hash = hashlib.sha256(token.encode()).hexdigest()
+                device.token_ciphertext = encrypt_device_token(device, token)
+                device.last_seen_at = None
+                device.save(
+                    update_fields=["token_hash", "token_ciphertext", "last_seen_at"]
+                )
+                log_admin(owner, "chat.device.rotated", device.pk)
+        return device_binding(device, token)
+    if path.startswith("chat/devices/") and request.method == "DELETE":
+        parts = path.split("/")
+        if len(parts) not in {3, 4} or (len(parts) == 4 and parts[3] != "permanent"):
+            raise DomainError("接口不存在", "not_found", 404)
+        ident = uuid_value(parts[2])
+        permanent = len(parts) == 4
+        with transaction.atomic():
+            owner = User.objects.select_for_update().get(pk=user.pk)
+            require_enabled(owner)
+            device = ChatDevice.objects.filter(owner=owner, pk=ident).first()
+            if not device:
+                raise DomainError("设备不存在", "not_found", 404)
+            if permanent:
+                device.delete()
+                log_admin(owner, "chat.device.permanently_deleted", ident)
+            elif device.revoked_at is None:
                 device.revoked_at = timezone.now()
-                device.save(update_fields=["revoked_at"])
+                device.token_ciphertext = ""
+                device.save(update_fields=["revoked_at", "token_ciphertext"])
                 log_admin(owner, "chat.device.revoked", device.pk)
         return {"ok": True}
     if path == "chat/drafts" and request.method == "GET":
         limit = bounded_limit(request)
-        query = ChatDraftBatch.objects.filter(owner=user, deleted_at__isnull=True)
+        deleted = request.GET.get("deleted", "false")
+        if deleted not in {"true", "false"}:
+            raise DomainError("deleted 须为 true 或 false", "invalid", 400)
+        query = ChatDraftBatch.objects.filter(
+            owner=user, deleted_at__isnull=deleted != "true"
+        )
         before = request.GET.get("before")
         if before:
             anchor = ChatDraftBatch.objects.filter(
@@ -220,19 +291,39 @@ def dispatch_chat(request, path, body):
             "items": [batch_record(batch) for batch in batches[:limit]],
             "next_cursor": batches[limit - 1].id if len(batches) > limit else None,
         }
-    if path.startswith("chat/drafts/") and request.method == "DELETE":
-        ident = uuid_value(path.removeprefix("chat/drafts/"))
+    if path.startswith("chat/drafts/") and request.method in {"DELETE", "POST"}:
+        parts = path.split("/")
+        action = parts[3] if len(parts) == 4 else "trash" if len(parts) == 3 else ""
+        if not (
+            (request.method == "DELETE" and action in {"trash", "permanent"})
+            or (request.method == "POST" and action == "restore")
+        ):
+            raise DomainError("接口不存在", "not_found", 404)
+        ident = uuid_value(parts[2])
+        exact_fields(body, set())
         with transaction.atomic():
             owner = User.objects.select_for_update().get(pk=user.pk)
             require_enabled(owner)
             batch = ChatDraftBatch.objects.filter(owner=owner, pk=ident).first()
             if not batch:
                 raise DomainError("草稿不存在", "not_found", 404)
-            if batch.deleted_at is None:
+            if action == "permanent":
+                batch.delete()
+                log_admin(owner, "chat.draft.permanently_deleted", ident)
+            elif action == "restore":
+                if batch.deleted_at is None:
+                    raise DomainError("草稿不在回收站", "draft_not_deleted", 409)
+                if not restorable_payload(batch):
+                    raise DomainError(
+                        "旧草稿内容已清除，无法恢复", "draft_unrecoverable", 409
+                    )
+                batch.deleted_at = None
+                batch.save(update_fields=["deleted_at"])
+                log_admin(owner, "chat.draft.restored", ident)
+            elif batch.deleted_at is None:
                 batch.deleted_at = timezone.now()
-                batch.payload = {}
-                batch.save(update_fields=["payload", "deleted_at"])
-                log_admin(owner, "chat.draft.deleted", batch.pk)
+                batch.save(update_fields=["deleted_at"])
+                log_admin(owner, "chat.draft.deleted", ident)
         return {"ok": True}
     if path in {"chat/me", "chat/devices", "chat/drafts"}:
         raise DomainError("不支持此方法", "method_not_allowed", 405)
@@ -323,56 +414,90 @@ def error_response(error):
     )
 
 
+def bearer_candidate(request):
+    auth = request.headers.get("Authorization", "")
+    token = auth.removeprefix("Bearer ") if auth.startswith("Bearer ") else ""
+    if not TOKEN_PATTERN.fullmatch(token):
+        raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    candidate = (
+        ChatDevice.objects.filter(token_hash=token_hash, revoked_at__isnull=True)
+        .values("id", "owner_id")
+        .first()
+    )
+    if not candidate:
+        raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
+    return candidate, token_hash
+
+
+@contextmanager
+def locked_device(candidate, token_hash):
+    with transaction.atomic():
+        owner = (
+            User.objects.select_for_update().filter(pk=candidate["owner_id"]).first()
+        )
+        if not owner:
+            raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
+        require_enabled(owner)
+        device = ChatDevice.objects.filter(
+            pk=candidate["id"],
+            owner=owner,
+            token_hash=token_hash,
+            revoked_at__isnull=True,
+        ).first()
+        if not device:
+            raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
+        yield device
+
+
+def read_device_json(request, maximum):
+    raw = request.read(maximum + 1)
+    if len(raw) > maximum:
+        raise DomainError("请求内容超过大小限制", "payload_too_large", 413)
+    if request.content_type != "application/json":
+        raise DomainError("请求须使用 application/json", "invalid_json", 400)
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        raise DomainError("请求必须为有效 JSON 对象", "invalid_json", 400)
+
+
 @csrf_exempt
-def ingest(request):
-    """Only this endpoint accepts a bearer token; session cookies grant no access."""
+def device_check(request):
+    """Device authentication probe; never accepts a session as authentication."""
     try:
         if request.method != "POST":
             raise DomainError("不支持此方法", "method_not_allowed", 405)
-        auth = request.headers.get("Authorization", "")
-        token = auth.removeprefix("Bearer ") if auth.startswith("Bearer ") else ""
-        if not TOKEN_PATTERN.fullmatch(token):
-            raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
-        token_hash = hashlib.sha256(token.encode()).hexdigest()
-        candidate = (
-            ChatDevice.objects.filter(token_hash=token_hash, revoked_at__isnull=True)
-            .values("id", "owner_id")
-            .first()
-        )
-        if not candidate:
-            raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
-        # Bound memory consumption independently of the global upload allowance.
-        raw = request.read(MAX_BATCH_BYTES + 1)
-        if len(raw) > MAX_BATCH_BYTES:
-            raise DomainError("草稿批次不能超过 32 KiB", "payload_too_large", 413)
-        if request.content_type != "application/json":
-            raise DomainError("请求须使用 application/json", "invalid_json", 400)
-        try:
-            body = json.loads(raw)
-        except (ValueError, UnicodeDecodeError, RecursionError):
-            raise DomainError("请求必须为有效 JSON 对象", "invalid_json", 400)
-        body = validate_batch(body)
+        candidate, token_hash = bearer_candidate(request)
+        exact_fields(read_device_json(request, 1024), set())
+        with locked_device(candidate, token_hash) as device:
+            device.last_seen_at = timezone.now()
+            device.save(update_fields=["last_seen_at"])
+            result = {
+                "ok": True,
+                "device": {"id": str(device.pk), "name": device.name},
+                "checkedAt": device.last_seen_at.isoformat(),
+            }
+        response = JsonResponse(result)
+        response["Cache-Control"] = "no-store"
+        return response
+    except DomainError as error:
+        return error_response(error)
+
+
+@csrf_exempt
+def ingest(request):
+    """Upload by device credential; session cookies grant no access."""
+    try:
+        if request.method != "POST":
+            raise DomainError("不支持此方法", "method_not_allowed", 405)
+        candidate, token_hash = bearer_candidate(request)
+        body = validate_batch(read_device_json(request, MAX_BATCH_BYTES))
         if request.headers.get("Idempotency-Key") != body["id"]:
             raise DomainError(
                 "Idempotency-Key 须与草稿批次 id 一致", "idempotency_required", 400
             )
-        with transaction.atomic():
-            owner = (
-                User.objects.select_for_update()
-                .filter(pk=candidate["owner_id"])
-                .first()
-            )
-            if not owner:
-                raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
-            require_enabled(owner)
-            device = ChatDevice.objects.filter(
-                pk=candidate["id"],
-                owner=owner,
-                token_hash=token_hash,
-                revoked_at__isnull=True,
-            ).first()
-            if not device:
-                raise DomainError("设备凭据无效或已撤销", "invalid_device_token", 401)
+        with locked_device(candidate, token_hash) as device:
             signature = digest(body)
             previous = ChatDraftBatch.objects.filter(
                 device=device, batch_id=body["id"]
@@ -383,7 +508,7 @@ def ingest(request):
                 )
             if not previous:
                 ChatDraftBatch.objects.create(
-                    owner=owner,
+                    owner_id=device.owner_id,
                     device=device,
                     batch_id=body["id"],
                     payload=body,

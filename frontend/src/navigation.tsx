@@ -119,6 +119,7 @@ export function NavigationEditor({
   const rows = orderedNavigation(
     catalog.items.map(([key, name]) => ({ key, name })),
     groups[selected],
+    catalog.pinned,
   );
   function change(key: string, direction: number) {
     const order = rows.map((r) => r.key),
@@ -193,13 +194,18 @@ export function NavigationEditor({
                 <Button
                   aria-label={`上移${r.name}`}
                   icon={<ArrowUp size={15} />}
-                  disabled={i === 0}
+                  disabled={
+                    catalog.pinned?.includes(r.key) ||
+                    i <= (catalog.pinned?.length || 0)
+                  }
                   onClick={() => change(r.key, -1)}
                 />
                 <Button
                   aria-label={`下移${r.name}`}
                   icon={<ArrowDown size={15} />}
-                  disabled={i === rows.length - 1}
+                  disabled={
+                    catalog.pinned?.includes(r.key) || i === rows.length - 1
+                  }
                   onClick={() => change(r.key, 1)}
                 />
               </Space>
@@ -252,7 +258,11 @@ export function NavigationTabs({
     (params.has(routeParam) ||
       (routeParam === "section" &&
         items.some((i) => i.key === params.get("tab"))));
-  const ordered = orderedNavigation(items, preferences.groups[group]);
+  const ordered = orderedNavigation(
+    items,
+    preferences.groups[group],
+    navigationCatalog[group]?.pinned,
+  );
   const visible = ordered.filter(
     (i) => !navigationHidden(group, i.key, preferences.groups[group]),
   );

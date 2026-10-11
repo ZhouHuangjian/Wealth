@@ -5,7 +5,12 @@ export type NavigationPreferences = {
 };
 export const navigationCatalog: Record<
   string,
-  { title: string; items: [string, string][]; locked?: string[] }
+  {
+    title: string;
+    items: [string, string][];
+    locked?: string[];
+    pinned?: string[];
+  }
 > = {
   main: {
     title: "一级导航",
@@ -150,7 +155,10 @@ export const navigationCatalog: Record<
   },
   admin: {
     title: "管理工作台",
+    locked: ["my-chat"],
+    pinned: ["my-chat"],
     items: [
+      ["my-chat", "我的聊天"],
       ["users", "用户管理"],
       ["chat", "聊天管理"],
       ["spaces", "空间管理"],
@@ -166,8 +174,9 @@ export const navigationCatalog: Record<
 export function orderedNavigation<T extends { key: string }>(
   items: T[],
   preference?: NavigationGroup,
+  pinned: string[] = [],
 ): T[] {
-  const order = [...new Set(preference?.order || [])];
+  const order = [...new Set([...pinned, ...(preference?.order || [])])];
   return [...items].sort((a, b) => {
     const rank = (key: string) => {
       const i = order.indexOf(key);
@@ -202,9 +211,11 @@ export function selectNavigationKey(
     chosen?: string;
   },
 ): string | undefined {
-  const visible = orderedNavigation(items, preference).filter(
-    (i) => !navigationHidden(group, i.key, preference),
-  );
+  const visible = orderedNavigation(
+    items,
+    preference,
+    navigationCatalog[group]?.pinned,
+  ).filter((i) => !navigationHidden(group, i.key, preference));
   const requested = options.explicit
     ? items.some((i) => i.key === options.directKey)
       ? options.directKey

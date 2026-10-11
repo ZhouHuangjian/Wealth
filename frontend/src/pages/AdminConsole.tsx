@@ -30,6 +30,7 @@ import { WorkspaceTrash } from "./ManagementExtras";
 import { PasswordForm } from "./Settings";
 import ProviderCredential from "./ProviderCredential";
 import AdminChatUsers from "./AdminChatUsers";
+import ChatAssistant from "./ChatAssistant";
 function useAdminResource(path: string) {
   const [data, setData] = useState<any>(null),
     [loading, setLoading] = useState(true),
@@ -75,7 +76,12 @@ export default function AdminConsole({
         title="管理工作台"
         actions={
           <Space wrap>
-            <Button onClick={() => navigate("/chat")}>我的聊天</Button>
+            <Button
+              type="primary"
+              onClick={() => navigate("/admin?tab=my-chat")}
+            >
+              我的聊天
+            </Button>
             <Button
               icon={<LogOut size={16} />}
               onClick={() =>
@@ -100,12 +106,25 @@ export default function AdminConsole({
         type="info"
         showIcon
         message={`当前管理员：${user.username}`}
-        description="管理员没有个人账簿。仅在空间所有者允许代管后，才可进入账簿、修改配置或导出数据；平台用户与空间生命周期管理仍在此处理。管理操作保留审计记录。"
+        description="“我的聊天”管理你自己的设备和回复草稿，无需财务空间；“聊天管理”为账号开通聊天功能。财务空间仅在所有者允许代管后才能进入，管理操作保留审计记录。"
       />
       <NavigationTabs
         group="admin"
         routeParam="tab"
         items={[
+          {
+            key: "my-chat",
+            label: "我的聊天",
+            destroyOnHidden: true,
+            children: (
+              <ChatAssistant
+                embedded
+                user={{ ...user, is_platform_admin: true }}
+                returnPath="/admin"
+                onAuthChange={onAuthChange}
+              />
+            ),
+          },
           {
             key: "users",
             label: "用户管理",

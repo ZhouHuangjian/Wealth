@@ -16,6 +16,7 @@ import { WechatCollector } from './wechat-collector.js';
 import { assertReplyContextReady } from './message-context.js';
 import { draftSyncConfig, isDraftSyncConfigured, isDraftInboxConfigured, buildDraftBatch, uploadDraftBatch, cloudDraftBatchSchema, type DraftSyncConfig } from './draft-sync.js';
 import { DraftSyncConnection } from './draft-sync-connection.js';
+import { checkDraftConnection, draftConnectionCheckUrl, DraftConnectionCheckError } from './draft-sync-check.js';
 import { bridgeConfig, createSender, isBridgeConfigured, isBridgeReceiveConfigured, secureEqual, validateEndpoint, type BridgeConfig } from './bridge.js';
 import type { AppState, Conversation, Message, PublicState, Settings } from '../shared/types.js';
 
@@ -65,6 +66,7 @@ export function createApplication(options: {
   searchWechatContacts?: WechatContactSearch;
   draftSync?: DraftSyncConfig;
   uploadDrafts?: typeof uploadDraftBatch;
+  checkDraftConnection?: typeof checkDraftConnection;
   generate?: typeof generateDrafts; send?: ReturnType<typeof createSender>;
 }) {
   const app = express();
@@ -82,6 +84,8 @@ export function createApplication(options: {
   const config = options.bridge ?? bridgeConfig();
   const syncConnection = new DraftSyncConnection(options.databasePath, options.draftSync ?? draftSyncConfig());
   let syncRevision = 0;
+  let checkSequence = 0;
+  let activeConnectionCheck: AbortController | null = null;
   let closed = false;
   let codexStatus = {available:false,version:null as string|null,message:'正在检查本机 Codex CLI。'};
   const checkCodex = async () => {
@@ -196,9 +200,29 @@ export function createApplication(options: {
   };
   app.get('/api/state', (_req,res)=>res.json(publicState()));
   app.get('/api/draft-sync/connection', (_req,res)=>res.json(syncConnection.status()));
+  const verifySyncConnection = async () => {
+    const configuration = syncConnection.config();
+    if (!draftConnectionCheckUrl(configuration)) throw new Error('此同步地址不支持 Wealth 设备验证，请通过手动同步草稿确认。');
+    const revision = syncRevision;
+    const sequence = ++checkSequence;
+    activeConnectionCheck?.abort();
+    const controller = new AbortController();
+    activeConnectionCheck = controller;
+    syncConnection.checking();
+    const current = () => !closed && revision === syncRevision && sequence === checkSequence;
+    try {
+      const receipt = await (options.checkDraftConnection ?? checkDraftConnection)(configuration, controller.signal);
+      if (current()) syncConnection.checked(receipt);
+    } catch (error) {
+      if (current()) syncConnection.checkFailed(error instanceof DraftConnectionCheckError ? error.message : '连接验证失败，配置仍保留，请稍后重试。');
+    } finally { if (activeConnectionCheck === controller) activeConnectionCheck = null; }
+    if (!current()) throw Object.assign(new Error('同步连接或验证请求已更新，本次旧验证结果已忽略。'), {status: 409});
+    return syncConnection.status();
+  };
   const changeSyncConnection = (change: () => void) => {
     // Persist before changing runtime state. An I/O or validation failure preserves the active binding.
     change(); syncRevision++;
+    checkSequence++; activeConnectionCheck?.abort(); activeConnectionCheck = null;
     for (const upload of uploads.values()) upload.controller.abort();
     uploads.clear();
     store.update(s=>{
@@ -207,10 +231,15 @@ export function createApplication(options: {
         upload.status='failed'; upload.finishedAt=new Date().toISOString();
         upload.detail='同步连接已更改，原服务器是否收到该批草稿尚未确认，请在原服务器核对。';
       }
-      addActivity(s,'info','草稿同步连接已更新','自动同步已暂停。采集、生成与本地草稿保留；保存连接不会上传数据。');
+      addActivity(s,'info','草稿同步连接已更新','自动同步已暂停。采集、生成与本地草稿保留；连接验证不上传聊天或草稿。');
     });
   };
-  app.put('/api/draft-sync/connection', (req,res)=>{changeSyncConnection(()=>syncConnection.save(req.body));res.json(syncConnection.status());});
+  app.put('/api/draft-sync/connection', async (req,res)=>{
+    changeSyncConnection(()=>syncConnection.save(req.body));
+    if (draftConnectionCheckUrl(syncConnection.config())) await verifySyncConnection();
+    res.json(syncConnection.status());
+  });
+  app.post('/api/draft-sync/connection/check', async (req,res)=>{z.object({}).strict().parse(req.body ?? {});res.json(await verifySyncConnection());});
   app.delete('/api/draft-sync/connection', (_req,res)=>{changeSyncConnection(()=>syncConnection.disable());res.json(syncConnection.status());});
   app.post('/api/draft-sync/connection/environment', (_req,res)=>{changeSyncConnection(()=>syncConnection.restoreEnvironment());res.json(syncConnection.status());});
   app.get('/api/wechat/contacts',async(req,res)=>{
@@ -492,5 +521,5 @@ export function createApplication(options: {
     const safe=typeof e.message==='string'&&/^[\u4e00-\u9fff]/.test(e.message)&&e.message.length<240;
     res.status(e.status??400).json({error:safe?e.message:'操作未完成，请检查输入或模型设置后重试。'});
   });
-  return {app,store,engine,collector,publicState,close:()=>{closed=true;syncRevision++;for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
+  return {app,store,engine,collector,publicState,close:()=>{closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
 }

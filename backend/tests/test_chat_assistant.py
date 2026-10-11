@@ -113,7 +113,7 @@ def test_default_off_admin_cannot_bypass_and_grants_are_explicit(actors):
     assert Client().get("/api/v1/chat/devices").status_code == 401
 
 
-def test_token_is_one_time_hash_only_and_limited_to_upload(actors):
+def test_token_is_not_listed_and_cannot_authenticate_session_routes(actors):
     info = device(actors, actors.first, actors.f)
     token = info["token"]
     assert info["user_id"] == actors.first.pk
@@ -227,7 +227,7 @@ def test_idempotency_conflict_and_deleted_payload_does_not_return(actors):
     row = ChatDraftBatch.objects.get()
     assert call(actors.f, f"chat/drafts/{row.id}", method="delete").status_code == 200
     row.refresh_from_db()
-    assert row.payload == {} and row.deleted_at is not None
+    assert row.payload == packet() and row.deleted_at is not None
     assert upload(token).json()["duplicate"] is True
     assert upload(token, changed).status_code == 409
     assert actors.f.get("/api/v1/chat/drafts").json()["items"] == []
@@ -447,3 +447,443 @@ def test_identity_header_prevents_cross_tab_account_switch_writes(actors):
     assert response.status_code == 403
     assert ChatAccess.objects.get(user=p.first).enabled is True
     assert upload(info["token"]).status_code == 200
+
+
+def check_device(token, body=None, client=None):
+    return call(
+        client or Client(enforce_csrf_checks=True),
+        "chat/device/check",
+        {} if body is None else body,
+        HTTP_AUTHORIZATION="Bearer " + token,
+    )
+
+
+def test_device_configuration_is_encrypted_recoverable_and_not_listed(actors):
+    info = device(actors, actors.first, actors.f)
+    ident, token = info["device"]["id"], info["token"]
+    row = ChatDevice.objects.get(pk=ident)
+    assert row.token_ciphertext and token not in row.token_ciphertext
+    assert info["device"]["config_available"] is True
+    assert info["device"]["connection_state"] == "awaiting_connection"
+    for _ in range(2):
+        response = call(actors.f, f"chat/devices/{ident}/config")
+        assert response.status_code == 200 and response.json()["token"] == token
+        assert response["Cache-Control"] == "no-store"
+        assert response.json()["user_id"] == actors.first.pk
+    listing = actors.f.get("/api/v1/chat/devices").content.decode()
+    assert (
+        token not in listing
+        and row.token_ciphertext not in listing
+        and "token_hash" not in listing
+    )
+    audit = json.dumps(list(PlatformAudit.objects.values("action", "detail")))
+    assert token not in audit and row.token_ciphertext not in audit
+
+
+def test_config_and_rotate_are_owner_only_including_admin(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    enable(p, p.second)
+    enable(p, p.admin)
+    for action in ("config", "rotate"):
+        path = f"chat/devices/{info['device']['id']}/{action}"
+        for client in (p.s, p.a):
+            assert call(client, path).status_code == 404
+        assert call(Client(), path).status_code == 401
+        assert p.f.get("/api/v1/" + path).status_code == 404
+        assert call(p.f, path, {"owner_id": p.second.pk}).status_code == 422
+    assert check_device(info["token"]).status_code == 200
+
+
+def test_check_connects_device_without_creating_drafts(actors):
+    info = device(actors, actors.first, actors.f)
+    response = check_device(info["token"])
+    assert response.status_code == 200 and response["Cache-Control"] == "no-store"
+    assert response.json()["device"] == {"id": info["device"]["id"], "name": "测试 Mac"}
+    assert response.json()["ok"] is True
+    from django.utils.dateparse import parse_datetime
+
+    assert parse_datetime(response.json()["checkedAt"]) is not None
+    assert not ChatDraftBatch.objects.exists()
+    row = actors.f.get("/api/v1/chat/devices").json()["items"][0]
+    assert row["last_seen_at"] and row["connection_state"] == "connected"
+
+
+def test_rotation_invalidates_old_token_but_preserves_device_and_drafts(actors):
+    info = device(actors, actors.first, actors.f)
+    assert upload(info["token"]).status_code == 200
+    draft_id = ChatDraftBatch.objects.get().pk
+    response = call(actors.f, f"chat/devices/{info['device']['id']}/rotate")
+    assert response.status_code == 200 and response["Cache-Control"] == "no-store"
+    newer = response.json()
+    assert newer["token"] != info["token"]
+    assert newer["device"]["id"] == info["device"]["id"]
+    assert newer["device"]["last_seen_at"] is None
+    assert newer["device"]["connection_state"] == "awaiting_connection"
+    assert ChatDraftBatch.objects.get().pk == draft_id
+    assert upload(info["token"]).status_code == 401
+    assert check_device(info["token"]).status_code == 401
+    assert check_device(newer["token"]).status_code == 200
+    assert upload(newer["token"]).json()["duplicate"] is True
+    assert (
+        call(actors.f, f"chat/devices/{info['device']['id']}/config").json()["token"]
+        == newer["token"]
+    )
+
+
+def test_legacy_hash_only_device_remains_usable_and_can_rotate(actors):
+    info = device(actors, actors.first, actors.f)
+    ident = info["device"]["id"]
+    ChatDevice.objects.filter(pk=ident).update(token_ciphertext="")
+    listing = actors.f.get("/api/v1/chat/devices").json()["items"][0]
+    assert listing["config_available"] is False
+    response = call(actors.f, f"chat/devices/{ident}/config")
+    assert (
+        response.status_code == 409
+        and response.json()["code"] == "device_config_unavailable"
+    )
+    assert check_device(info["token"]).status_code == 200
+    assert upload(info["token"]).status_code == 200
+    rotated = call(actors.f, f"chat/devices/{ident}/rotate")
+    assert (
+        rotated.status_code == 200
+        and rotated.json()["device"]["config_available"] is True
+    )
+    assert check_device(info["token"]).status_code == 401
+
+
+def test_configuration_encryption_is_device_bound_and_supports_explicit_key_fallback(
+    actors, settings
+):
+    from wealth.chat_credentials import read_device_token
+
+    info = device(actors, actors.first, actors.f)
+    other = device(actors, actors.first, actors.f, "另一合成设备")
+    row = ChatDevice.objects.get(pk=info["device"]["id"])
+    copied = ChatDevice.objects.get(pk=other["device"]["id"])
+    copied.token_ciphertext = row.token_ciphertext
+    copied.save(update_fields=["token_ciphertext"])
+    assert read_device_token(copied) is None
+    assert (
+        call(actors.f, f"chat/devices/{copied.pk}/config").json()["code"]
+        == "device_config_unavailable"
+    )
+    original = settings.SECRET_KEY
+    settings.SECRET_KEY = "synthetic-rotated-key-only-for-chat-test"
+    assert read_device_token(row) is None
+    settings.SECRET_KEY_FALLBACKS = [original]
+    assert read_device_token(row) == info["token"]
+    row.token_hash = "0" * 64
+    assert read_device_token(row) is None
+
+
+def test_disabled_revoked_and_inactive_devices_cannot_get_config_rotate_or_check(
+    actors,
+):
+    p = actors
+    info = device(p, p.first, p.f)
+    ident = info["device"]["id"]
+    call(p.a, f"admin/chat/users/{p.first.pk}", {"enabled": False}, "patch")
+    for action in ("config", "rotate"):
+        assert call(p.f, f"chat/devices/{ident}/{action}").status_code == 403
+    assert check_device(info["token"]).status_code == 403
+    enable(p, p.first)
+    assert call(p.f, f"chat/devices/{ident}", method="delete").status_code == 200
+    for action in ("config", "rotate"):
+        response = call(p.f, f"chat/devices/{ident}/{action}")
+        assert (
+            response.status_code == 409 and response.json()["code"] == "device_revoked"
+        )
+    assert check_device(info["token"]).status_code == 401
+    listing = p.f.get("/api/v1/chat/devices").json()["items"][0]
+    assert (
+        listing["connection_state"] == "revoked"
+        and listing["config_available"] is False
+    )
+    assert ChatDevice.objects.get(pk=ident).token_ciphertext == ""
+    fresh = device(p, p.first, p.f)
+    p.first.is_active = False
+    p.first.save(update_fields=["is_active"])
+    assert check_device(fresh["token"]).status_code == 403
+
+
+def test_config_routes_keep_csrf_and_expected_identity_checks(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    strict = Client(enforce_csrf_checks=True)
+    strict.force_login(p.first)
+    csrf = strict.get("/api/v1/auth/me").json()["csrf_token"]
+    for action in ("config", "rotate"):
+        path = f"chat/devices/{info['device']['id']}/{action}"
+        assert call(strict, path).status_code == 403
+        assert (
+            call(
+                strict,
+                path,
+                HTTP_X_CSRFTOKEN=csrf,
+                HTTP_X_CHAT_USER_ID=str(p.second.pk),
+            ).status_code
+            == 403
+        )
+    assert (
+        call(
+            strict, f"chat/devices/{info['device']['id']}/config", HTTP_X_CSRFTOKEN=csrf
+        ).json()["token"]
+        == info["token"]
+    )
+    # Cookies and X-Chat-User-Id cannot authenticate the CSRF-exempt device probe.
+    assert call(strict, "chat/device/check").status_code == 401
+    assert check_device(info["token"]).status_code == 200
+
+
+def test_device_check_accepts_only_small_empty_json_and_valid_bearer(actors):
+    info = device(actors, actors.first, actors.f)
+    token = info["token"]
+    assert check_device("wchat_" + "z" * 43).status_code == 401
+    assert check_device(token, {"drafts": []}).status_code == 422
+    assert Client().get("/api/v1/chat/device/check").status_code == 405
+    response = Client().post(
+        "/api/v1/chat/device/check",
+        data=b"x" * 1025,
+        content_type="application/json",
+        HTTP_AUTHORIZATION="Bearer " + token,
+    )
+    assert response.status_code == 413
+    assert ChatDevice.objects.get(pk=info["device"]["id"]).last_seen_at is None
+
+
+def test_old_application_can_insert_device_without_new_ciphertext_column(actors):
+    import uuid
+    from django.db import connection
+    from django.utils import timezone
+
+    enable(actors, actors.first)
+    ident = uuid.uuid4()
+    token = "wchat_" + "L" * 43
+    # 2.13 creates the older column set. A persistent DB default keeps rollback safe.
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO wealth_chatdevice (id,owner_id,name,token_hash,created_at,last_seen_at,revoked_at) VALUES (%s,%s,%s,%s,%s,NULL,NULL)",
+            [
+                ident,
+                actors.first.pk,
+                "旧版本合成设备",
+                hashlib.sha256(token.encode()).hexdigest(),
+                timezone.now(),
+            ],
+        )
+    row = ChatDevice.objects.get(pk=ident)
+    assert row.token_ciphertext == ""
+    assert check_device(token).status_code == 200
+    assert (
+        call(actors.f, f"chat/devices/{ident}/config").json()["code"]
+        == "device_config_unavailable"
+    )
+    assert call(actors.f, f"chat/devices/{ident}/rotate").status_code == 200
+
+
+def test_trash_keeps_payload_restores_same_batch_and_ignores_upload_retries(actors):
+    info = device(actors, actors.first, actors.f)
+    assert upload(info["token"]).status_code == 200
+    row = ChatDraftBatch.objects.get()
+    ident = row.pk
+    assert call(actors.f, f"chat/drafts/{ident}", method="delete").status_code == 200
+    assert actors.f.get("/api/v1/chat/drafts").json()["items"] == []
+    trash = actors.f.get("/api/v1/chat/drafts?deleted=true").json()["items"]
+    assert len(trash) == 1 and trash[0]["id"] == str(ident)
+    assert trash[0]["can_restore"] is True and trash[0]["deleted_at"]
+    assert trash[0]["drafts"] == packet()["drafts"]
+    assert upload(info["token"]).json()["duplicate"] is True
+    row.refresh_from_db()
+    assert row.deleted_at is not None and row.payload == packet()
+    assert call(actors.f, f"chat/drafts/{ident}/restore").status_code == 200
+    row.refresh_from_db()
+    assert row.pk == ident and row.deleted_at is None and row.payload == packet()
+    assert actors.f.get("/api/v1/chat/drafts?deleted=true").json()["items"] == []
+    assert (
+        actors.f.get("/api/v1/chat/drafts").json()["items"][0]["can_restore"] is False
+    )
+    assert upload(info["token"]).json()["duplicate"] is True
+    assert call(actors.f, f"chat/drafts/{ident}/restore").status_code == 409
+
+
+def test_legacy_cleared_trash_cannot_restore_but_can_be_permanently_deleted(actors):
+    from django.utils import timezone
+
+    info = device(actors, actors.first, actors.f)
+    upload(info["token"])
+    row = ChatDraftBatch.objects.get()
+    row.payload = {}
+    row.deleted_at = timezone.now()
+    row.save(update_fields=["payload", "deleted_at"])
+    trash = actors.f.get("/api/v1/chat/drafts?deleted=true").json()["items"][0]
+    assert (
+        trash["can_restore"] is False
+        and trash["drafts"] == []
+        and trash["created_at"] is None
+    )
+    result = call(actors.f, f"chat/drafts/{row.pk}/restore")
+    assert result.status_code == 409 and result.json()["code"] == "draft_unrecoverable"
+    assert upload(info["token"]).json()["duplicate"] is True
+    row.refresh_from_db()
+    assert row.payload == {} and row.deleted_at is not None
+    assert (
+        call(actors.f, f"chat/drafts/{row.pk}/permanent", method="delete").status_code
+        == 200
+    )
+    assert not ChatDraftBatch.objects.exists()
+
+
+def test_trash_pagination_owner_isolation_and_admin_cannot_restore_or_erase(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    enable(p, p.second)
+    enable(p, p.admin)
+    for number in range(3):
+        upload(info["token"], packet(f"trash_{number}"))
+    for ident in ChatDraftBatch.objects.values_list("pk", flat=True):
+        assert call(p.f, f"chat/drafts/{ident}", method="delete").status_code == 200
+    page = p.f.get("/api/v1/chat/drafts?deleted=true&limit=2").json()
+    assert len(page["items"]) == 2 and page["next_cursor"]
+    more = p.f.get(
+        "/api/v1/chat/drafts?deleted=true&limit=2&before=" + page["next_cursor"]
+    ).json()
+    assert len(more["items"]) == 1 and more["next_cursor"] is None
+    ident = page["items"][0]["id"]
+    for client in (p.s, p.a):
+        assert client.get("/api/v1/chat/drafts?deleted=true").json()["items"] == []
+        assert call(client, f"chat/drafts/{ident}/restore").status_code == 404
+        assert (
+            call(client, f"chat/drafts/{ident}/permanent", method="delete").status_code
+            == 404
+        )
+        assert (
+            call(
+                client,
+                f"chat/devices/{info['device']['id']}/permanent",
+                method="delete",
+            ).status_code
+            == 404
+        )
+    assert p.f.get("/api/v1/chat/drafts?deleted=invalid").status_code == 400
+    assert ChatDraftBatch.objects.count() == 3
+
+
+@pytest.mark.parametrize("trashed", [False, True])
+def test_permanent_draft_delete_removes_receipt_and_explicit_resync_creates_new_batch(
+    actors, trashed
+):
+    info = device(actors, actors.first, actors.f)
+    upload(info["token"])
+    row = ChatDraftBatch.objects.get()
+    ident = row.pk
+    if trashed:
+        call(actors.f, f"chat/drafts/{ident}", method="delete")
+    assert (
+        call(actors.f, f"chat/drafts/{ident}/permanent", method="delete").status_code
+        == 200
+    )
+    assert not ChatDraftBatch.objects.filter(pk=ident).exists()
+    result = upload(info["token"])
+    assert result.status_code == 200 and result.json()["duplicate"] is False
+    new_row = ChatDraftBatch.objects.get()
+    assert new_row.pk != ident and new_row.deleted_at is None
+    assert new_row.payload == packet()
+
+
+def test_permanent_device_delete_removes_all_its_drafts_and_credentials_only(actors):
+    from wealth.chat import bearer_candidate, locked_device
+    from wealth.common import DomainError
+    from django.test import RequestFactory
+
+    p = actors
+    doomed = device(p, p.first, p.f, "待永久删除设备")
+    retained = device(p, p.first, p.f, "保留设备")
+    foreign = device(p, p.second, p.s, "另一用户的设备")
+    for info in (doomed, retained, foreign):
+        assert upload(info["token"]).status_code == 200
+    assert upload(doomed["token"], packet("to_trash")).status_code == 200
+    trashed = ChatDraftBatch.objects.get(
+        device_id=doomed["device"]["id"], batch_id="to_trash"
+    )
+    call(p.f, f"chat/drafts/{trashed.pk}", method="delete")
+    listing = p.f.get("/api/v1/chat/devices").json()["items"]
+    assert (
+        next(item for item in listing if item["id"] == doomed["device"]["id"])[
+            "draft_count"
+        ]
+        == 2
+    )
+    # Simulate a request that resolved the token before deletion and acquires the lock later.
+    candidate, token_hash = bearer_candidate(
+        RequestFactory().post("/", HTTP_AUTHORIZATION="Bearer " + doomed["token"])
+    )
+    assert (
+        call(
+            p.f, f"chat/devices/{doomed['device']['id']}/permanent", method="delete"
+        ).status_code
+        == 200
+    )
+    assert not ChatDevice.objects.filter(pk=doomed["device"]["id"]).exists()
+    assert not ChatDraftBatch.objects.filter(device_id=doomed["device"]["id"]).exists()
+    assert (
+        ChatDraftBatch.objects.filter(device_id=retained["device"]["id"]).count() == 1
+    )
+    assert ChatDraftBatch.objects.filter(device_id=foreign["device"]["id"]).count() == 1
+    assert upload(doomed["token"]).status_code == 401
+    assert check_device(doomed["token"]).status_code == 401
+    with pytest.raises(DomainError) as error:
+        with locked_device(candidate, token_hash):
+            pytest.fail("Deleted device must not pass the locked authorization recheck")
+    assert error.value.code == "invalid_device_token"
+    audit = PlatformAudit.objects.get(
+        action="chat.device.permanently_deleted", target=doomed["device"]["id"]
+    )
+    assert audit.detail == {}
+    assert doomed["token"] not in json.dumps(
+        list(PlatformAudit.objects.values("action", "detail"))
+    )
+
+
+def test_restore_and_permanent_delete_keep_disabled_csrf_and_identity_guards(actors):
+    p = actors
+    info = device(p, p.first, p.f)
+    upload(info["token"])
+    row = ChatDraftBatch.objects.get()
+    call(p.f, f"chat/drafts/{row.pk}", method="delete")
+    operations = [
+        (f"chat/drafts/{row.pk}/restore", "post"),
+        (f"chat/drafts/{row.pk}/permanent", "delete"),
+        (f"chat/devices/{info['device']['id']}/permanent", "delete"),
+    ]
+    strict = Client(enforce_csrf_checks=True)
+    strict.force_login(p.first)
+    csrf = strict.get("/api/v1/auth/me").json()["csrf_token"]
+    for path, method in operations:
+        assert call(strict, path, method=method).status_code == 403
+        assert (
+            call(
+                strict,
+                path,
+                method=method,
+                HTTP_X_CSRFTOKEN=csrf,
+                HTTP_X_CHAT_USER_ID=str(p.second.pk),
+            ).status_code
+            == 403
+        )
+    call(p.a, f"admin/chat/users/{p.first.pk}", {"enabled": False}, "patch")
+    for path, method in operations:
+        assert call(p.f, path, method=method).status_code == 403
+    assert ChatDevice.objects.filter(pk=info["device"]["id"]).exists()
+    row.refresh_from_db()
+    assert row.deleted_at is not None and row.payload == packet()
+
+
+def test_revoked_device_can_be_permanently_removed_without_restoring_its_token(actors):
+    info = device(actors, actors.first, actors.f)
+    assert upload(info["token"]).status_code == 200
+    path = f"chat/devices/{info['device']['id']}"
+    assert call(actors.f, path, method="delete").status_code == 200
+    assert call(actors.f, path + "/permanent", method="delete").status_code == 200
+    assert ChatDevice.objects.count() == 0 and ChatDraftBatch.objects.count() == 0
+    assert check_device(info["token"]).status_code == 401

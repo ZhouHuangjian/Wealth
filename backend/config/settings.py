@@ -132,7 +132,7 @@ REST_FRAMEWORK = {
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "Wealth API",
-    "VERSION": "2.13.0",
+    "VERSION": "2.13.1",
     "SERVE_INCLUDE_SCHEMA": False,
 }
 CELERY_BROKER_URL = os.getenv(

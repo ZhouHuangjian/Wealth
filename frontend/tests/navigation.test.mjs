@@ -69,3 +69,33 @@ test("navigation recovery settings cannot be hidden and legacy route mappings st
     "records",
   );
 });
+
+test("personal admin chat remains first and visible under pre-existing or hidden navigation preferences", () => {
+  const adminItems = [
+    { key: "my-chat" },
+    { key: "users" },
+    { key: "chat" },
+    { key: "spaces" },
+  ];
+  const saved = {
+    order: ["spaces", "chat", "users"],
+    hidden: ["my-chat", "chat"],
+  };
+  assert.equal(navigationHidden("admin", "my-chat", saved), false);
+  assert.equal(navigationHidden("admin", "chat", saved), true);
+  assert.equal(
+    orderedNavigation(adminItems, saved, ["my-chat"])[0].key,
+    "my-chat",
+  );
+  assert.equal(
+    selectNavigationKey(adminItems, "admin", saved, { explicit: false }),
+    "my-chat",
+  );
+  assert.equal(
+    selectNavigationKey(adminItems, "admin", saved, {
+      explicit: true,
+      directKey: "chat",
+    }),
+    "chat",
+  );
+});

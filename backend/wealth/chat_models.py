@@ -24,6 +24,7 @@ class ChatDevice(models.Model):
     )
     name = models.CharField(max_length=80)
     token_hash = models.CharField(max_length=64, unique=True)
+    token_ciphertext = models.TextField(default="", db_default="", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(null=True)
     revoked_at = models.DateTimeField(null=True)
@@ -41,7 +42,7 @@ class ChatDraftBatch(models.Model):
     payload = models.JSONField(default=dict)
     payload_digest = models.CharField(max_length=64)
     received_at = models.DateTimeField(auto_now_add=True)
-    # Keep only an opaque receipt after deletion, so delayed retries cannot restore it.
+    # Soft deletion retains the payload; retries never restore a trashed batch.
     deleted_at = models.DateTimeField(null=True)
 
     class Meta:

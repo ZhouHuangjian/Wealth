@@ -181,6 +181,12 @@
   .chat-batch {
     padding: 16px;
   }
+  .chat-batch-heading {
+    flex-direction: column;
+  }
+  .chat-batch-actions {
+    width: 100%;
+  }
   .chat-draft {
     padding: 13px;
   }
@@ -204,4 +210,56 @@
 }
 body:has(.chat-topbar) .theme-floating {
   display: none;
+}
+.chat-workspace.chat-workspace-embedded {
+  max-width: none;
+  padding: 12px 0 32px;
+}
+.chat-embedded-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.chat-embedded-heading h2 {
+  margin-bottom: 8px;
+  font-size: 22px;
+}
+.chat-embedded-heading p {
+  margin-bottom: 0;
+  color: var(--theme-text-secondary);
+  line-height: 1.8;
+}
+.chat-upload-address {
+  margin: 0 0 22px;
+}
+.chat-upload-address > label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 9px;
+  color: var(--theme-text-secondary);
+}
+.chat-device > .chat-device-info {
+  flex: 1;
+  min-width: 160px;
+}
+.chat-device-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.chat-device > .chat-device-actions {
+  flex: 0 1 auto;
+}
+@media (max-width: 800px) {
+  .chat-device {
+    flex-wrap: wrap;
+  }
+  .chat-device > .chat-device-actions {
+    flex-basis: 100%;
+    margin-left: 38px;
+    min-width: 0;
+  }
 }
