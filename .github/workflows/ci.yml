@@ -12,6 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  mac-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: clients/xiangzhi/package-lock.json
+      - run: npm ci
+        working-directory: clients/xiangzhi
+      - run: npm test
+        working-directory: clients/xiangzhi
+      - run: npm run build
+        working-directory: clients/xiangzhi
+
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 20

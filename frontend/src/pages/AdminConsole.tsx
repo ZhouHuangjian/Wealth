@@ -29,6 +29,7 @@ import AdminGlossary from "./AdminGlossary";
 import { WorkspaceTrash } from "./ManagementExtras";
 import { PasswordForm } from "./Settings";
 import ProviderCredential from "./ProviderCredential";
+import AdminChatUsers from "./AdminChatUsers";
 function useAdminResource(path: string) {
   const [data, setData] = useState<any>(null),
     [loading, setLoading] = useState(true),
@@ -66,28 +67,32 @@ export default function AdminConsole({
   onAuthChange: () => Promise<void>;
 }) {
   const { modal } = App.useApp();
+  const navigate = useNavigate();
   return (
     <main className="admin-console">
       <PageTitle
         eyebrow=""
         title="管理工作台"
         actions={
-          <Button
-            icon={<LogOut size={16} />}
-            onClick={() =>
-              modal.confirm({
-                title: "退出管理员账户？",
-                okText: "退出登录",
-                cancelText: "取消",
-                onOk: async () => {
-                  await send("/auth/logout");
-                  await onAuthChange();
-                },
-              })
-            }
-          >
-            退出登录
-          </Button>
+          <Space wrap>
+            <Button onClick={() => navigate("/chat")}>我的聊天</Button>
+            <Button
+              icon={<LogOut size={16} />}
+              onClick={() =>
+                modal.confirm({
+                  title: "退出管理员账户？",
+                  okText: "退出登录",
+                  cancelText: "取消",
+                  onOk: async () => {
+                    await send("/auth/logout");
+                    await onAuthChange();
+                  },
+                })
+              }
+            >
+              退出登录
+            </Button>
+          </Space>
         }
       />
       <Alert
@@ -105,6 +110,13 @@ export default function AdminConsole({
             key: "users",
             label: "用户管理",
             children: <Users currentId={user.id} onChanged={onAuthChange} />,
+          },
+          {
+            key: "chat",
+            label: "聊天管理",
+            children: (
+              <AdminChatUsers currentId={user.id} onAuthChange={onAuthChange} />
+            ),
           },
           {
             key: "spaces",

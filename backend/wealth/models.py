@@ -373,3 +373,4 @@ from .platform_models import (  # noqa: F401
     PlatformCommand,
     ConfigurationTemplate,
 )
+from .chat_models import ChatAccess, ChatDevice, ChatDraftBatch  # noqa: F401

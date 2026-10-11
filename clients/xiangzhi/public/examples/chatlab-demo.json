@@ -1,0 +1,11 @@
+{
+  "chatlab": {"version": "0.0.2", "exportedAt": 1790902800},
+  "meta": {"name": "导入演练 · 小禾", "platform": "wechat", "type": "private"},
+  "members": [{"platformId": "demo-me", "accountName": "我"}, {"platformId": "demo-peer", "accountName": "小禾（虚构）"}],
+  "messages": [
+    {"sender": "demo-me", "timestamp": 1790902800, "type": 0, "content": "我喜欢周末去散步。", "platformMessageId": "demo-import-1"},
+    {"sender": "demo-peer", "timestamp": 1790902860, "type": 0, "content": "我也是，天气好的时候走走很舒服。", "platformMessageId": "demo-import-2"},
+    {"sender": "demo-me", "timestamp": 1790902920, "type": 0, "content": "比起热闹的地方，我更喜欢安静的小公园。", "platformMessageId": "demo-import-3"},
+    {"sender": "demo-peer", "timestamp": 1790902980, "type": 0, "content": "最近发现了什么适合散步的地方吗？", "platformMessageId": "demo-import-4"}
+  ]
+}

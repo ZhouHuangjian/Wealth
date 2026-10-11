@@ -293,6 +293,26 @@ def api(request, route):
             )
         if not request.user.is_authenticated:
             raise DomainError("请先登录", "unauthenticated", 401)
+        if route.startswith("chat/") or route.startswith("admin/chat/"):
+            from .chat import dispatch_admin_chat, dispatch_chat
+
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get(
+                "X-Chat-User-Id"
+            ) != str(request.user.pk):
+                raise DomainError(
+                    "登录账号已变更，请刷新后重试", "chat_identity_mismatch", 403
+                )
+            handler = (
+                dispatch_admin_chat
+                if route.startswith("admin/chat/")
+                else dispatch_chat
+            )
+            result = handler(request, route, body)
+            # Let clients discard stale private state when another tab switches accounts.
+            result["user_id"] = request.user.pk
+            response = JsonResponse(serial(result))
+            response["Cache-Control"] = "no-store"
+            return response
         if route == "glossary" and request.method == "GET":
             from .glossary import read_glossary
 
