@@ -1,0 +1,137 @@
+{
+  "status": "passed",
+  "source_commit": "f2b0b87ac72a95cce5cb46f6a8a41670b128d7b9",
+  "node_version": "v22.22.1",
+  "command": "/opt/homebrew/opt/node@22/bin/node --experimental-strip-types .runtime/estimate-diagnosis-20261012/diagnose-display.mjs",
+  "checked_function": "frontend/src/daily-return.ts::dailyReturnDisplay",
+  "checked_function_file_sha256": "c581aff92ad31a06d028b4c1f6585c2dbdf8e430dbac4417c4dcb29dfb49b22e",
+  "amounts_are_synthetic": true,
+  "production_responses_or_values_loaded": false,
+  "production_browser_login_performed": false,
+  "business_or_default_test_files_changed": false,
+  "scenarios": [
+    {
+      "name": "partial_one_of_eight_known_zero",
+      "status": "passed",
+      "input": {
+        "status": "partial",
+        "amount": null,
+        "known_amount": "0",
+        "known_count": 1,
+        "total_count": 8,
+        "return_rate": "0.01"
+      },
+      "output": {
+        "status": "partial",
+        "label": "部分更新",
+        "amount": "0",
+        "rate": null,
+        "partial": true,
+        "coverage": "1 / 8 项有当日收益数据"
+      }
+    },
+    {
+      "name": "partial_two_of_eight_known_synthetic_1_23",
+      "status": "passed",
+      "input": {
+        "status": "partial",
+        "amount": null,
+        "known_amount": "1.23",
+        "known_count": 2,
+        "total_count": 8,
+        "return_rate": "0.01"
+      },
+      "output": {
+        "status": "partial",
+        "label": "部分更新",
+        "amount": "1.23",
+        "rate": null,
+        "partial": true,
+        "coverage": "2 / 8 项有当日收益数据"
+      }
+    },
+    {
+      "name": "all_unavailable_keeps_amount_missing",
+      "status": "passed",
+      "input": {
+        "status": "unavailable",
+        "amount": null,
+        "known_amount": null,
+        "known_count": 0,
+        "total_count": 8,
+        "return_rate": null
+      },
+      "output": {
+        "status": "unavailable",
+        "label": "待更新",
+        "amount": null,
+        "rate": null,
+        "partial": false,
+        "coverage": "0 / 8 项有当日收益数据"
+      }
+    },
+    {
+      "name": "complete_estimated_uses_full_synthetic_amount",
+      "status": "passed",
+      "input": {
+        "status": "estimated",
+        "amount": "1.23",
+        "known_amount": "1.23",
+        "known_count": 8,
+        "total_count": 8,
+        "return_rate": "0.01"
+      },
+      "output": {
+        "status": "estimated",
+        "label": "估算",
+        "amount": "1.23",
+        "rate": "+1.00%",
+        "partial": false,
+        "coverage": "8 / 8 项有当日收益数据"
+      }
+    },
+    {
+      "name": "complete_confirmed_uses_full_synthetic_amount",
+      "status": "passed",
+      "input": {
+        "status": "confirmed",
+        "amount": "1.23",
+        "known_amount": "1.23",
+        "known_count": 8,
+        "total_count": 8,
+        "return_rate": "0.01"
+      },
+      "output": {
+        "status": "confirmed",
+        "label": "已确认",
+        "amount": "1.23",
+        "rate": "+1.00%",
+        "partial": false,
+        "coverage": "8 / 8 项有当日收益数据"
+      }
+    }
+  ],
+  "static_checks": [
+    {
+      "name": "money_privacy_mask_precedes_amount_formatting",
+      "status": "passed",
+      "scope": "static_source_only"
+    },
+    {
+      "name": "missing_money_input_displays_pending_not_zero",
+      "status": "passed",
+      "scope": "static_source_only"
+    },
+    {
+      "name": "detail_drawer_uses_shared_hidden_state",
+      "status": "passed",
+      "scope": "static_source_only"
+    }
+  ],
+  "unverified": [
+    "Actual React rendering and Money masking in a mounted component",
+    "User browser wealth:hidden value, retained response and client asset freshness",
+    "Current production financial values and actual logged-in page",
+    "Live data-provider availability and missing-data recovery"
+  ]
+}

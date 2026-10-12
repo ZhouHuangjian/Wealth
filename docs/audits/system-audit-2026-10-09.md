@@ -279,3 +279,49 @@ Ubuntu24.04/Python3.13.16服务器独立候选库：关键459、完整1498及12�
 生产验证没有登录/造交易/改权限/恢复/重算或重开禁用计划、来源，启动后的正常任务合法更新继续运行。当前空间已授权代管，未授权管理员拒绝分支生产实际0次，不虚构样本；候选隔离权限回归保留。来源目录验收没有联网拉行情，不证明真实来源全部可用。备份认证不等于本次生产恢复演练，快照实际私有文件0；完整核对替代恢复、规模/RPO/RTO、故障注入、跨时区/真实机构/完整估算基准及实际减少动画偏好仍待验证，原R/OD未完成项没有因上线而关闭。
 
 初次服务器关键套件误引用不存在的v212文件，失败发生在停生产前；修为实际v211套件并增加启动前路径验证。旧d959844候选完整1495虽通过，发现UX-005后重新冻结c99并重建/全量1498；初始工具失败、被替代证据及10月9日SSH失败均保留。没有删除业务断言或跳过用例。
+
+
+## 11. 2026-10-12 首页今日估算收益专项排查
+
+本次针对用户指出的首页估值收益不生效/不显示。main为 `f2b0b87ac72a95cce5cb46f6a8a41670b128d7b9`，线上实际2.14.0，镜像 `sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf`；daily_returns/market_sync/market_data/fund_sources/market_quality/portfolio共6财务文件与main逐字节相同。2.13–2.14为聊天增量；当前net-worth-comparison实时计算，不套用2.12旧overview Projection问题。未改业务代码、默认回归、生产配置或触发手工刷新/登录/会话、交易、迁移、重算、部署。
+
+### 11.1 实际只读观察
+
+12:23:41、12:26:15、12:29:16（北京时间）读取现有所有者授权空间；事务强制READ ONLY，最后一次以普通owner身份调用真实GET net-worth-comparison，并使用REPEATABLE READ保证一次API响应快照一致。前两次为read-committed诊断，正常后台可在不同查询之间更新。web/worker/beat同一现版镜像且healthy；行情与盘中来源启用，没有给私账新增代管授权。
+
+- 首次8项只有1项可算，为无已记录持仓账户的零收益推算；7只基金无有效今日收益。5只本次来源返回没有GSZ/GZTIME及reference Price，保留较早正式NAV：这是观测到的覆盖缺口，不断言永久不支持或5项代码缺陷。只提供正式NAV的官方/SDK源不能制造盘中值。
+- 产品A有今日估值，但12:15刷新ready仍引用12:05的获取时刻，12:23超过10分钟门槛而失效。产品B虽较新获取，报价停在11:30，触发20分钟报价时效。未发现对应净值冲突。
+- 无手工刷新，12:25自然更新后A恢复estimated；12:29真实首页API200，known_count=2/total_count=8、known_amount有非零值，完整amount仍null。部分汇总保护正确，其余缺口没有按零凑总额。
+- 首页helper对partial显示known_amount，收益卡没有专门隐藏开关；金额遮挡会显示圆点，comparison每60秒重读。缺口原因在“收益明细”。没有登录用户实际浏览器，不能声称排除了其遮挡、旧响应、日期/币种选择或资源错误。
+
+原始诊断不输出余额/份额/收益数额、账号/空间身份或凭证；含私人持仓映射的观测只保存在主工作区ignored `.runtime/estimate-diagnosis-20261012/`，不入公共Git。可共享摘要与合成复现见[本批证据](evidence/2026-10-12/estimate-diagnosis-results.json)。
+
+### 11.2 EST-001 / P1：正常刷新与缓存叠加造成间歇性失效
+
+症状/预期：有持续更新的盘中来源，ready之后当日收益仍消失，后续轮次才恢复；预期健康周期处理衔接有效数据，真正旧/未知/未来报价依旧拒绝，真实获取/报价时刻不可改写。
+
+位置与根因：`config/settings.py:165`为300秒beat；`wealth/market_sync.py:27,538` INTERVAL/refresh_due按上次worker开始判300秒到期；`wealth/fund_sources.py:47,75`缓存600秒；`market_sync.py:497`保存原quote.fetched_at；`daily_returns.py:379`获取超过600秒拒绝。任务启动偏差、相同扫描粒度和缓存寿命形成间隙，不是外部扣款/确认失败。
+
+固定时钟复现真实refresh_due→refresh_one→provider缓存→Price→daily_return：t0 worker晚0.2秒；beat t300距last_attempt只有299.8秒而跳过；beat t599.8 worker在t600取得年龄599.8秒的缓存，ready但fetched_at仍t0.2；t620收益null；beat t899.8再跳过，t1199.8重新取数后恢复合成2元。Event/JournalLine/PositionMovement全文前后相同。
+
+最小任务：协调盘中缓存TTL、扫描频率/到期锚点与读取有效期，留出worker/网络耗时裕度，可按盘中/正式操作区分缓存寿命。不能只把fetched_at改成现在，不能删除时效、未来时间、币种或冲突保护，也不重新启用用户关闭的来源。实现细节须独立修复及验收后确定。
+
+影响/验收/回滚：无历史账务修复或迁移，保持接口；若新增命中/真实获取时刻仅为兼容可观察字段。旧Price保留。诊断6项修复后全通过并转默认回归，增加恒价新tick、重复/并发、失联恢复、disabled及正式替代；回退只退行情实现/适用配置，不删价格或恢复旧流水。当前已复现、未修复/部署。
+
+### 11.3 EST-002 / P2：提示与原因入口不足
+
+`investments._calendar_item`在当天既无reference又无正式价时泛称“缺少正式价格”，即使较早正式NAV存在；DailyReturnCard仅在抽屉逐项显示message。用户难分暂无盘中估值、过期、基准缺口。最小任务为准确缺口类型与行情详情入口、partial明确已知部分及覆盖，保持null、不将累计持有收益/过去NAV收益/本金填今日。需要实际普通用户交互验收；本轮未改页面。
+
+午间/收盘停更与“最新带时间估算”展示属于EST-003及既有OD-05待决；须产品/来源/交易时段依据，不能推定所有基金同规则或简单放大20分钟门槛。正式收益继续归原净值日，不用另一条最新NAV乘未知基准涨幅补数。规则唯一维护在领域模型§14。
+
+### 11.4 实跑、失败与范围
+
+隔离分支 `codex/estimate-return-diagnosis-20261012`，macOS arm64/Python3.12.3/PostgreSQL18.6（55443、wealth_test迁移0015，行情禁用）/Node22.22.1；主工作区/既有手册不改。持久化链用非owner合成库，无真实网络。
+
+- [固定时钟诊断](../../backend/audit_scenarios/test_estimate_refresh_cadence_20261012.py)：6项中2业务预期失败、4性质/控制通过，0.45秒，无xfail/skip。通过项为599.8秒保留真时间、600秒精确过期、零worker偏差及新获取35分钟前报价仍拒绝；默认testpaths不收集诊断，不冒充默认绿色。原日志[保留](evidence/2026-10-12/cadence-20261012.log)。
+- 命令：`/Volumes/mi/Wealth/.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 test audit_scenarios/test_estimate_refresh_cadence_20261012.py -o addopts='' -vv -s`。
+- 同一隔离入口运行既有 `test_today_estimate_requires_observation_time_even_after_fresh_fetch` 与 `test_public_cache_ttl_does_not_cache_user_labels_or_rewrite_fetch_time`：5 passed，1.47秒，0 skip，原保护保留。
+- `node --experimental-strip-types --test frontend/tests/daily-return.test.mjs`：现有5项通过。另调用真实dailyReturnDisplay的5个合成场景通过（1/8零、2/8合成非零、全缺数、完整估算、正式），3项遮挡/原因位置仅静态检查；未mount React或操作生产浏览器。
+- 初次诊断脚本容器路径错误在读业务数据前失败，修正后继续；不是应用业务失败。未跑本轮完整1598回归、真实外部适配器网络验证、全页面、历史重算或部署。
+
+后续批次及验收见[开发状态](../development-status.md#2026-10-12-首页估算收益排查有诊断未修复)，影响范围按[项目地图](../project-map.md#修改影响表)及现行规则定位；提出方案不代表已修复。
