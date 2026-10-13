@@ -90,9 +90,111 @@ def _holding_update(evidence, key, reference, when, holding_items):
         "message": "参考数据不完整",
         "missing_reason_code": None,
     }
+    formal = evidence.formal[iid]
+    latest = formal[-1] if formal else None
+    recent = (holding_items.get(key) or {}).get("latest_confirmed_return") or {}
+
+    def formal_item(message):
+        previous = next(
+            (
+                q
+                for q in reversed(formal)
+                if str(q.economic_date) == str(recent.get("interval_start"))
+                and q.economic_date < latest.economic_date
+            ),
+            None,
+        )
+        result = {
+            **item,
+            "source": latest.source,
+            "nav_date": latest.economic_date,
+            "return_date": latest.economic_date,
+            "date": latest.economic_date,
+            "quote_price": latest.value,
+            "quoted_at": latest.published_at,
+            "formal_updated_at": latest.created_at,
+            "old_reference_base_nav": reference.get("base_nav"),
+            "old_reference_base_nav_date": reference.get("base_nav_date"),
+            "base_nav": previous.value if previous else None,
+            "base_nav_date": previous.economic_date if previous else None,
+            "window_label": f"正式净值收益 · 归属 {latest.economic_date}",
+            "message": message,
+        }
+        if recent.get("amount") is not None and str(recent.get("nav_date")) == str(
+            latest.economic_date
+        ):
+            return {
+                **result,
+                "status": "formal",
+                # Internal Decimal results may legitimately retain 36 places.
+                "amount": recent["amount"],
+                "basis": recent.get("basis"),
+                "return_rate": recent.get("return_rate"),
+                "quantity_source": recent.get("quantity_source"),
+                "contains_automatic_estimates": recent.get(
+                    "contains_automatic_estimates", False
+                ),
+                "interval_start": recent.get("interval_start"),
+            }
+        return {
+            **result,
+            "message": message
+            + " "
+            + (recent.get("message") or "尚缺可计算的正式收益基准。"),
+            "missing_reason_code": "formal_return_unavailable",
+        }
 
     def unavailable(message, reason):
-        return {**item, "message": message, "missing_reason_code": reason}
+        result = {**item, "message": message, "missing_reason_code": reason}
+        if (
+            reason
+            not in {
+                "reference_baseline",
+                "reference_time",
+                "reference_date",
+                "reference_refresh",
+            }
+            or not latest
+        ):
+            return result
+        # A failed reference is not evidence against an independently computed
+        # formal return. It must never conceal unresolved accounting evidence.
+        if any(
+            str(recent.get("interval_start") or latest.economic_date)
+            <= value
+            <= str(when)
+            for value in evidence.nav_quarantines.get(iid, {})
+        ):
+            return {
+                **item,
+                "message": "正式净值来源存在差异，待核对后重新计算",
+                "missing_reason_code": "nav_conflict",
+            }
+        if any(m.get("date_error") for m in movements if m["date"] <= when):
+            return {
+                **item,
+                "message": "持仓交易日期未核实，暂不计算收益",
+                "missing_reason_code": "trade_date_unverified",
+            }
+        quantity = sum((m["quantity"] for m in movements if m["date"] <= when), ZERO)
+        check = evidence.read_check(evidence.space, account, instrument, quantity, when)
+        if check and check.get("status") == "unresolved":
+            return {
+                **item,
+                "message": "原持仓范围待核对，暂不计算收益",
+                "missing_reason_code": "holding_reconciliation",
+            }
+        if recent.get("amount") is None or str(recent.get("nav_date")) != str(
+            latest.economic_date
+        ):
+            return result
+        return {
+            **formal_item(
+                f"{message}；显示最近正式收益（净值归属 {latest.economic_date}），不与参考相加，二者覆盖区间不一定相同。"
+            ),
+            "reference_unavailable_reason_code": reason,
+            "reference_unavailable_message": message,
+        }
 
     if (
         reference.get("code") != instrument.code
@@ -110,8 +212,6 @@ def _holding_update(evidence, key, reference, when, holding_items):
         return unavailable("参考基准净值或日期缺失", "reference_baseline")
     if base <= ZERO or price <= ZERO or base_day > when:
         return unavailable("参考基准净值或日期无效", "reference_baseline")
-    formal = evidence.formal[iid]
-    latest = formal[-1] if formal else None
     if any(
         str(base_day) <= value <= str(when)
         for value in evidence.nav_quarantines.get(iid, {})
@@ -122,53 +222,8 @@ def _holding_update(evidence, key, reference, when, holding_items):
         or latest.economic_date == base_day
         and latest.value != base
     ):
-        recent = (holding_items.get(key) or {}).get("latest_confirmed_return") or {}
-        previous = next(
-            (
-                q
-                for q in reversed(formal)
-                if str(q.economic_date) == str(recent.get("interval_start"))
-                and q.economic_date < latest.economic_date
-            ),
-            None,
-        )
-        item.update(
-            source=latest.source,
-            nav_date=latest.economic_date,
-            return_date=latest.economic_date,
-            date=latest.economic_date,
-            quote_price=latest.value,
-            quoted_at=latest.published_at,
-            formal_updated_at=latest.created_at,
-            old_reference_base_nav=base,
-            old_reference_base_nav_date=base_day,
-            base_nav=previous.value if previous else None,
-            base_nav_date=previous.economic_date if previous else None,
-            window_label=f"正式净值收益 · 归属 {latest.economic_date}",
-            message="新正式净值已到，旧参考基准失效；正式收益按净值归属日展示，不与旧参考相加。",
-        )
-        if recent.get("amount") is not None and str(recent.get("nav_date")) == str(
-            latest.economic_date
-        ):
-            return {
-                **item,
-                "status": "formal",
-                # These are trusted read-side Decimal calculations, not an
-                # external amount input; multiplication may retain 36 places.
-                "amount": recent["amount"],
-                "basis": recent.get("basis"),
-                "return_rate": recent.get("return_rate"),
-                "quantity_source": recent.get("quantity_source"),
-                "contains_automatic_estimates": recent.get(
-                    "contains_automatic_estimates", False
-                ),
-                "interval_start": recent.get("interval_start"),
-            }
-        return unavailable(
-            item["message"]
-            + " "
-            + (recent.get("message") or "尚缺可计算的正式收益基准。"),
-            "formal_return_unavailable",
+        return formal_item(
+            "新正式净值已到，旧参考基准失效；正式收益按净值归属日展示，不与旧参考相加。"
         )
     if not latest or latest.economic_date != base_day or latest.value != base:
         return unavailable(

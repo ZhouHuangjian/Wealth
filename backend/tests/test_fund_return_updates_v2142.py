@@ -10,7 +10,8 @@ from django.test import Client
 from test_daily_returns_v263 import book as shared_book
 from test_daily_returns_v263 import price, trade
 from test_overview_projection_version import reject_writes, saved_state
-from wealth.daily_returns import daily_return_overview
+from wealth.daily_returns import ReturnEvidence, daily_return_overview
+from wealth.fund_return_updates import _holding_update
 from wealth.holding_checks import save_holding_check
 from wealth.investments import record_holding
 from wealth.ledger import post_event
@@ -194,12 +195,14 @@ def test_original_currency_survives_missing_conversion(observed):
     assert group["known_count"] == 0 and group["known_amount"] is None
 
 
-def test_source_refresh_failure_does_not_create_estimates(observed):
+def test_source_refresh_failure_retains_independent_formal_result(observed):
     _, state, _ = observed
     state.data["refresh_status"] = "failed"
     state.save()
     row = read(observed)["latest_fund_updates"]["items"][0]
-    assert row["amount"] is None and row["missing_reason_code"] == "reference_refresh"
+    assert row["status"] == "formal" and D(row["amount"]) == D("1.51")
+    assert row["return_date"] == str(BASE)
+    assert row["reference_unavailable_reason_code"] == "reference_refresh"
 
 
 def test_announced_unrecorded_action_keeps_interval_unknown(observed):
@@ -284,3 +287,148 @@ def test_viewer_homepage_returns_reference_without_writing_ledger_quotes_or_cach
     assert D(group["items"][0]["amount"]) == D("-0.48")
     assert saved_state(book.space) == before
     assert list(Price.objects.filter(tenant=book.space).values()) == quote_rows
+
+
+@pytest.fixture
+def advanced_baseline(observed):
+    """Public source transition: only worth/worth_date advance, not the old tick."""
+    book, _, _ = observed
+    price(book, when=date(2026, 10, 12), value="1.7237")
+    update(
+        observed,
+        base_nav="1.7237",
+        base_nav_date="2026-10-12",
+        base_ratio_consistent=False,
+    )
+    return observed
+
+
+@pytest.mark.parametrize(
+    ("changed", "reason"),
+    [
+        ({}, "reference_baseline"),
+        ({"base_nav_date": None}, "reference_baseline"),
+        ({"base_nav_date": "2026-10-13"}, "reference_baseline"),
+        ({"published_at": None}, "reference_time"),
+        ({"published_at": "2026-10-12T05:04:00+08:00"}, "reference_date"),
+        (
+            {"fetched_at": (NOW - timedelta(seconds=601)).isoformat()},
+            "reference_refresh",
+        ),
+    ],
+)
+def test_invalid_reference_cannot_hide_latest_formal_return(
+    advanced_baseline, changed, reason
+):
+    book, _, _ = advanced_baseline
+    update(advanced_baseline, **changed)
+    before = saved_state(book.space)
+    prices_before = list(Price.objects.filter(tenant=book.space).values())
+    with connection.execute_wrapper(reject_writes):
+        summary = read(advanced_baseline)
+    row = summary["latest_fund_updates"]["items"][0]
+    assert summary["amount"] is None
+    assert row["status"] == "formal"
+    assert D(row["amount"]) == D("-0.14")
+    assert D(row["basis"]) == D("172.51")
+    assert row["date"] == row["return_date"] == row["nav_date"] == "2026-10-12"
+    assert row["base_nav_date"] == "2026-10-09"
+    assert D(row["base_nav"]) == D("1.7251")
+    assert D(row["quote_price"]) == D("1.7237")
+    assert row["quoted_at"] is None and row["formal_updated_at"]
+    assert row["reference_unavailable_reason_code"] == reason
+    assert row["reference_unavailable_message"] in row["message"]
+    assert "覆盖区间不一定相同" in row["message"]
+    assert row["missing_reason_code"] is None
+    assert saved_state(book.space) == before
+    assert list(Price.objects.filter(tenant=book.space).values()) == prices_before
+
+
+def test_valid_new_reference_stays_preferred_to_formal_baseline(advanced_baseline):
+    update(advanced_baseline, base_ratio_consistent=True)
+    row = read(advanced_baseline)["latest_fund_updates"]["items"][0]
+    assert row["status"] == "estimated"
+    assert D(row["amount"]) == D("-0.34")
+    assert row["nav_date"] is row["return_date"] is None
+    assert "reference_unavailable_reason_code" not in row
+
+
+def test_formal_fallback_keeps_native_amount_when_fx_missing(advanced_baseline):
+    group = read(advanced_baseline, "USD")["latest_fund_updates"]
+    row = group["items"][0]
+    assert row["status"] == "unavailable" and row["native_status"] == "formal"
+    assert D(row["amount"]) == D("-0.14")
+    assert row["base_amount"] is None and row["missing_reason_code"] == "fx_missing"
+    assert row["reference_unavailable_reason_code"] == "reference_baseline"
+    assert group["known_count"] == 0 and group["known_amount"] is None
+
+
+@pytest.mark.parametrize(
+    "blocker",
+    [
+        "missing",
+        "wrong_date",
+        "other_account",
+        "other_product",
+        "date_error",
+        "holding_reconciliation",
+        "nav_conflict",
+    ],
+)
+def test_formal_fallback_cannot_borrow_scope_or_bypass_unknown_evidence(
+    advanced_baseline, blocker
+):
+    book, state, _ = advanced_baseline
+    evidence = ReturnEvidence(book.space, DAY)
+    key = (str(book.account.pk), str(book.fund.pk))
+    recent = evidence.convert(evidence.spot(key, date(2026, 10, 12)), "CNY")
+    assert D(recent["amount"]) == D("-0.14")
+    mapped_key = key
+    if blocker == "missing":
+        recent["amount"] = None
+    elif blocker == "wrong_date":
+        recent["nav_date"] = BASE
+    elif blocker == "other_account":
+        mapped_key = ("other_account", key[1])
+    elif blocker == "other_product":
+        mapped_key = (key[0], "other_product")
+    elif blocker == "date_error":
+        evidence.movements[key][0]["date_error"] = "unverified trade date"
+    elif blocker == "holding_reconciliation":
+        evidence.read_check = lambda *args: {"status": "unresolved"}
+    elif blocker == "nav_conflict":
+        evidence.nav_quarantines[key[1]] = {"2026-10-12": {"status": "conflict"}}
+    row = _holding_update(
+        evidence,
+        key,
+        state.data["reference_estimate"],
+        DAY,
+        {mapped_key: {"latest_confirmed_return": recent}},
+    )
+    assert row["status"] == "unavailable" and row["amount"] is None
+    if blocker in {"date_error", "holding_reconciliation", "nav_conflict"}:
+        assert row["missing_reason_code"] == (
+            "trade_date_unverified" if blocker == "date_error" else blocker
+        )
+
+
+def test_zero_formal_fallback_preserves_automatic_share_provenance(advanced_baseline):
+    book, state, _ = advanced_baseline
+    evidence = ReturnEvidence(book.space, DAY)
+    key = (str(book.account.pk), str(book.fund.pk))
+    recent = evidence.convert(evidence.spot(key, date(2026, 10, 12)), "CNY")
+    recent.update(
+        amount=D("0.000000000000000000000000000000000000"),
+        quantity_source="automatic_estimate",
+        contains_automatic_estimates=True,
+    )
+    row = _holding_update(
+        evidence,
+        key,
+        state.data["reference_estimate"],
+        DAY,
+        {key: {"latest_confirmed_return": recent}},
+    )
+    assert row["status"] == "formal" and row["amount"] == 0
+    assert row["contains_automatic_estimates"] is True
+    assert row["quantity_source"] == "automatic_estimate"

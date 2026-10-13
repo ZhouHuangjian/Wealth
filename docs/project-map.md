@@ -1,6 +1,6 @@
 # Wealth 项目地图与维护入口
 
-维护日期：2026-10-13。2.14.2指定定投补足来源与备用估值调查进行中，状态见[新发布记录](release-2.14.2.md)。初始审查基线`e379dfe67a715d9913af246eba021c7b26ce45d1`保留；2.14.1已于2026-10-13 13:13:04（北京时间）部署，应用`2abad9f8d26fb14607e51bcde42c016512c30770`、schema`0015_chat_remote_controls`。实际镜像和限定验证见[发布记录](release-2.14.1.md)，后续状态见[开发状态](development-status.md)。
+维护日期：2026-10-13。2.14.2已于2026-10-13 19:34:36（北京时间）部署，应用`71f322456e8f64651bfc6b8d1da6e3599eece586`、schema`0015_chat_remote_controls`。指定定投补足、受限海外参考、实际镜像与验证范围见[最新发布记录](release-2.14.2.md)。初始审查基线`e379dfe67a715d9913af246eba021c7b26ce45d1`及2.14.1历史记录保留；后续状态见[开发状态](development-status.md)。
 本文负责“去哪里查、改哪里、测什么”；业务定义只维护在下面列出的唯一位置。覆盖和运行结果见[本次审查](audits/system-audit-2026-10-09.md)，不能从文件存在或测试数量推断已部署。
 
 2.12.0 的展示定位、日期倒序、表单默认值和独立娱乐角已于 2026-10-10 保数据发布，08:13:25（北京时间）最终验收通过；对应镜像、回归及运行范围见[发布说明](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)。只读接口维护在[api-contract§25](api-contract.md#25-2120只读展示与处理定位)，操作和验收维护在[RUNBOOK§8.6](RUNBOOK.md#86-2120-定位与保数据发布)。这批不新增账务事实、资产类型或迁移，未执行历史重算或数据修复。
@@ -137,3 +137,8 @@ flowchart LR
 ## 维护约定
 
 新增/修改规则时：更新它的唯一文档位置 → 记录 AUD/OD 编号与影响 → 先手算受控样本 → 回归页面/API/服务/数据库/任务 → 记录环境、失败、未覆盖 → 审查数据迁移和回滚 → 发布后另核对运行版本。实现、验证、部署是三种不同状态。
+
+
+2.14.2新增定位：`backend/wealth/sina_fund_estimate.py`只负责来源报价/基准/时间解析；`fund_return_updates.py`负责严格区间计算与正式结果展示，接入`daily_returns.daily_return_overview`，通过`net-worth-comparison`返回，非overview缓存。`frontend/src/pages/LatestFundUpdates.tsx`及`fund-updates.ts`负责逐项原币/缺数/隐藏展示。回归分别为`test_sina_fund_estimate.py`、`test_fund_return_updates_v2142.py`、`fund-updates.test.mjs`、`reference-estimate.test.mjs`。修改需同时检查API§21.1、领域§14.3、RUNBOOK§8.9；历史Price/Event不在本功能重算范围。
+
+2.14.3后续定位：EST-012“参考失效时最近正式收益被遮住”只涉及`fund_return_updates.py`读侧选择及其固定回归；不迁移数据库、不变更今日聚合。规则仍维护于领域模型/API；发布与转场证据见[2.14.3](release-2.14.3.md)。

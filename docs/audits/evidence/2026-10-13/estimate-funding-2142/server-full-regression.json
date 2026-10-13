@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "version": "2.14.2",
+  "image_id": "sha256:8e7a7ad87dcc87ac8478a7bb847234e432e71bb07d97e81b63a15e163f098057",
+  "image_tag": "wealth:release-2.14.2-20261013-funding",
+  "database": "wealth_funding_v2142_test",
+  "production_database_used": false,
+  "checked_at": "2026-10-13T11:31:36.810960+00:00",
+  "source_manifest_sha256": "21d85ecfcd53a34616bf25e8092878d31fe5a713bf806a0ffb76aec0048246d9",
+  "source_commit": "71f322456e8f64651bfc6b8d1da6e3599eece586",
+  "migration": "0015_chat_remote_controls",
+  "baseline_migrations_preserved": true,
+  "migrations_unchanged": true,
+  "data_reset_performed": false,
+  "candidate_health_version_verified": "2.14.2",
+  "tests_passed": 1791,
+  "tests_skipped": 0,
+  "subtests_passed": 12,
+  "synthetic_credential_encryption_tests_included": true,
+  "scope": "full_regression",
+  "test_files": []
+}

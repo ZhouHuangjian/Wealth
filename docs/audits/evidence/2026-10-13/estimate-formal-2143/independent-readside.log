@@ -1,0 +1,16 @@
+PASS: changed source baseline falls back to native Decimal formal return at NAV date
+PASS: invalid date cannot 500 or create estimate
+PASS: reference identity is never bypassed
+PASS: other account result is never borrowed
+PASS: other product result is never borrowed
+PASS: older formal result never relabelled to newer NAV
+PASS: missing formal amount remains missing
+PASS: zero with 36 Decimal places and inferred-share provenance is retained
+PASS: valid new reference retains priority over formal baseline
+PASS: conflict inside formal interval before reference base is not bypassed
+PASS: same-day known conflict is not bypassed
+PASS: unverified movement date blocks formal fallback
+PASS: unresolved current holding scope blocks formal fallback
+PASS: missing FX preserves native formal amount and reference rejection reason
+PASS: formal fallback FX uses NAV day, not fetch/view day
+RESULT: 15 pure checks passed; no DB or network calls

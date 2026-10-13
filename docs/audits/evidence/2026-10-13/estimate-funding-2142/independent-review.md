@@ -22,7 +22,7 @@
 1. **RV-2142-01 / P1，旧配置省略优先级时可能重开基金来源，已修正。** 复现输入为 schema 3、关闭旧版所有基金来源、省略 `priority`，但新浪为其原有期货能力仍启用。改动前默认基金链已含新浪，造成有效基金链变成 `['sina']`；同样配置显式写旧链时却保持空链。修正后先按旧版基金默认链解释省略字段，仅在旧链至少一个来源仍启用、链非空且新浪开关启用时增加新能力。未写平台设置、未改变其它产品新浪开关。回归覆盖缺省版本及 1/2/3、显式/省略链、规范化幂等、输入不变、新版默认和拒绝版本 0：`test_sina_fund_estimate.py::test_legacy_all_disabled_fund_sources_do_not_enable_sina_capability` 及相邻用例。
 2. **RV-2142-02 / P1，正式替换分支误用输入精度校验，已由收益代理修正。** 合成正式收益 `Decimal('0.4900000000000000000000000000')` 在旧实现被 `dec(..., places=12)` 拒绝，虽数值只有两位有效小数仍会抛业务异常。现在保留可信内部 Decimal 运算结果，不转换为浮点；新正式 NAV 对应的收益日期必须精确匹配，旧日期结果不可冒充新日期。本人无数据库检查已验证 10/12 正式收益 0.49、原日期以及高精度结果。数据库用例为 `test_fund_return_updates_v2142.py::test_new_formal_nav_invalidates_old_reference_without_moving_its_return_day` 和同日正式更正用例。
 3. **RV-2142-03 / P2，缺展示汇率时误隐藏原币收益，已由前端代理修正。** 后端合法响应为 `status=unavailable/native_status=estimated/amount=-0.48/base_amount=null/fx_missing`。现在显示依据采用 `native_status || status`，保留原币金额，同时展示转换缺口；不把原币数直接作为展示币种总计。`fund-updates.test.mjs` 保留这一真实接口形态。
-4. **RV-2142-04 / 测试隔离，新增能力触发旧单源试件失败，已修正。** 首次冻结全量日志为 1 失败、1777 通过、12 子测试，失败为 `test_estimate_refresh_cadence.py::test_fresh_fetch_does_not_relabel_old_provider_quote`。其 schema 3 会升级新浪，而受控回调明确只接受东财，导致任务失败；这不是旧报价可以续期的理由。仅将试件配置固定为 schema 4，并说明它验证单源链；未删断言、未改报价时点、未延长有效期。本人随后纯子集 32 通过，3 个数据库用例明确排除；数据库重跑由主代理完成。
+4. **RV-2142-04 / 测试隔离，新增能力触发旧单源试件失败，已修正。** 首次新模块全量日志为 1 失败（当时尚未冻结候选）、1777 通过、12 子测试，失败为 `test_estimate_refresh_cadence.py::test_fresh_fetch_does_not_relabel_old_provider_quote`。其 schema 3 会升级新浪，而受控回调明确只接受东财，导致任务失败；这不是旧报价可以续期的理由。仅将试件配置固定为 schema 4，并说明它验证单源链；未删断言、未改报价时点、未延长有效期。本人随后纯子集 32 通过，3 个数据库用例明确排除；数据库重跑由主代理完成。
 
 ## 关键边界的证据
 

@@ -1,14 +1,14 @@
 # Wealth API 契约（当前实现）
 
-维护核对：2026-10-13，2.14.1已发布应用提交`2abad9f8d26fb14607e51bcde42c016512c30770`。本文维护当前接口；业务定义唯一维护在[领域模型](domain-model.md#12-现行业务基线2026-10-09)，调用链见[项目地图](project-map.md)。当前运行镜像、验证和边界见[2.14.1发布记录](release-2.14.1.md)。初始审查及[2.11](release-2.11.0.md)、[2.12](release-2.12.0.md)和其[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)保留历史真实性，不能当作本次发布结果。
+维护核对：2026-10-13，2.14.2已于19:34:36（北京时间）发布，应用提交`71f322456e8f64651bfc6b8d1da6e3599eece586`。本文维护当前接口；业务定义唯一维护在[领域模型](domain-model.md#12-现行业务基线2026-10-09)，调用链见[项目地图](project-map.md)。当前运行镜像、验证和边界见[2.14.2发布记录](release-2.14.2.md)。[2.14.1](release-2.14.1.md)、初始审查及[2.11](release-2.11.0.md)、[2.12](release-2.12.0.md)和其[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)保留历史真实性，不能当作本次发布结果。
 
-§22.1标注的2.14.2补足配置为候选新增契约；最终验证和部署尚待本批记录，不包含在上述2.14.1发布声明内。
+§22.1补足配置及§21.1最近基金更新已随2.14.2部署；§21.1另标注的2.14.3回退字段为候选增补，最终验证和部署待[本批记录](release-2.14.3.md)。
 
 **当前采用 Django 同源会话接口。虽然依赖中包含 DRF / drf-spectacular，但尚未暴露或核验覆盖这些函数视图的自动 OpenAPI schema；本文不是自动生成接口的声明。**
 
-## 行情来源与数据质量（当前候选实现，schema_version=4）
+## 行情来源与数据质量（当前实现，schema_version=4）
 
-- `GET /admin/data-sources` 保留 `akshare` 公共渠道，增加现有 `sina` 的境内人民币基金只读参考报价能力。2.14.2候选 `config.schema_version=4` 兼容1、2、3；3及更早版本仅在基金链非空、链中尚有启用来源且新浪已启用时补入新能力。显式关闭、空链和4版自定义省略保持不变；读取归一化不改写已存配置。2.14.1已发布版本仍为3。
+- `GET /admin/data-sources` 保留 `akshare` 公共渠道，增加现有 `sina` 的境内人民币基金只读参考报价能力。2.14.2 `config.schema_version=4` 兼容1、2、3；3及更早版本仅在基金链非空、链中尚有启用来源且新浪已启用时补入新能力。显式关闭、空链和4版自定义省略保持不变；读取归一化不改写已存配置。2.14.1历史版本为3。
 - 行情及来源详情增加 `source_group`、`source_group_name`、`upstream_provider_id`；AKShare 行情含 `interface_name`。查询渠道与原始发布方分别展示。
 - 基金 `data_quality` 增加 `agreeing_source_groups`、`independent_source_count`。AKShare 与 `eastmoney_fund` 归入同一发布方，二者一致为 `single_source`；差异仍为 `conflict`。隔离恢复要求至少两家独立发布方一致。
 - 原有市场刷新、历史行情、价格存储及定投接口保持兼容，不新增个人持仓或交易获取接口。
@@ -404,7 +404,7 @@ Idempotency-Key: 14f0b5cc-7a91-4a9f-a735-bc8719f44986
 | `notes` | title/body/status，可关联事件/账户/产品；发布与修改留版本，文字不会生成交易事实 |
 | `reconciliations` | account_id, as_of, kind（cash/position/liability/equity 等）, institution_value，按口径需要 instrument_id |
 
-`POST /plans/{id}/generate` 与 `/loans/{id}/generate`（另有 generate-schedule 别名）仅生成稳定期次；`GET /occurrences` 与 `/installments` 查看。`GET /plans` 可按 `kind=dca`、`instrument_id` 与 `account_id` 精确过滤，以支持持仓行内管理。后台扫描到期只设 pending，不产生现金分录。
+`POST /plans/{id}/generate` 与 `/loans/{id}/generate`（另有 generate-schedule 别名）仅生成稳定期次；`GET /occurrences` 与 `/installments` 查看。`GET /plans` 可按 `kind=dca`、`instrument_id` 与 `account_id` 精确过滤，以支持持仓行内管理。普通周期收支和贷款到期扫描只设 pending，不产生现金分录；已启用自动记账的定投按§22推进，条件满足时生成补足、扣款及份额阶段事实。
 
 `POST /occurrences/{id}/confirm` 提交真实 `event_id` 与幂等键，验证类型、金额、账户、币种及贷款/产品关联。`PATCH /occurrences/{id}` 配合版本，仅允许改为 skipped 或 pending；已有实账者不能改成跳过。
 
@@ -471,7 +471,7 @@ Outbox 状态为 pending/queued/failed/done/superseded。业务修订与 Outbox 
 - `GET /admin/users`：分页返回 id、username、email、is_active、is_platform_admin、version、space_count、date_joined、last_login，不返回密码。POST 新建用户：username/password/email?/space_name?。`PATCH /admin/users/{id}` 支持 version 与用户名/邮箱/启用/平台管理员字段；`POST /admin/users/{id}/password` 接受 version/password，限重设他人密码。
 - `GET/POST /admin/spaces`：分页列出账簿和成员；新建指定 name、owner_user_id、base_currency。`PATCH /admin/spaces/{id}` 使用 version（账簿 revision），可改 name/timezone。成员编辑沿用空间成员 API；平台管理员可额外 `POST /spaces/{id}/members {user_id,role}` 添加现有用户。
 - `GET /admin/audit`：平台操作审计。上述 admin 接口都要求后端平台管理员，写操作使用 Idempotency-Key。
-- `GET/PUT /admin/data-sources`：`{version,config,providers}`，PUT 仅 version/config。config 为 `{schema_version:1,enabled:{providerId:boolean},priority:{kind:[providerId]}}`；未知提供方、任意 URL、密钥等字段拒绝。providers 列出内置能力及适用市场/操作。
+- `GET/PUT /admin/data-sources`：`{version,config,providers}`，PUT 仅 version/config。当前config 为 `{schema_version:4,enabled:{providerId:boolean},priority:{kind:[providerId]}}`（旧版本兼容以页首现行来源契约为准）；未知提供方、任意 URL、密钥等字段拒绝。providers 列出内置能力及适用市场/操作。
 - `GET /spaces/{id}/market/catalog`：q/kind/market/offset/limit（上限受后端限制），空 q 也可浏览缓存候选，不访问外部接口；返回 items/count/has_more。
 - `GET/POST /spaces/{id}/market/resolve`：code、kind?、market?、currency?、name?、specification?、overrides?，也可用当前空间 instrument_id。返回识别后的产品字段、specification、calendar、settlement_rule、status、sources、warnings。六位数字的跨类型歧义不强猜。
 - `GET/POST /spaces/{id}/market/trade-dates`：产品信息或 instrument_id，application_at（带时间的 ISO）/application_date，允许手工 trade_date/confirmation_date 和规则 overrides。返回 trade_date、expected_confirmation_date、calendar、settlement_rule、status、warnings，固定 `is_forecast:true`、`creates_ledger_event:false`。
@@ -605,7 +605,7 @@ AUD-002/003/004/006已修复并随2.12发布：完整实际证据升级有效份
 
 前端仅从上述语义码和当前空间对象身份构造已有路由，不接受行情返回的任意URL：产品行情进入`analytics?tab=settlement&section=quotes&instrument_id=...`；汇率进入`manage?tab=fx`；产品交易日规则定位产品编辑；交易依据定位原账户投资流水，机构范围定位账户核对。页面读取/导航不会核对、调平或生成账务；对象不存在/无权访问仍由既有页面与API阻止。
 
-### 21.1 最近基金收益更新（2.14.2候选）
+### 21.1 最近基金收益更新（2.14.2）
 
 上述 `daily_return` 增加独立 `latest_fund_updates={currency,known_count,total_count,known_amount,items,message}`，用于查看拥有来源参考观察的当前基金持仓。首页通过 `net-worth-comparison` 实时读取，约60秒复查；它不存入 `/overview` 的账务投影缓存，不改变原 `daily_return.amount/known_amount`、净资产或收益日历。不同基金可能覆盖不同期间，`known_amount` 仅为该列表中可折算项的技术摘要，不应呈现成今日总收益。
 
@@ -616,6 +616,15 @@ AUD-002/003/004/006已修复并随2.12发布：完整实际证据升级有效份
 - `status=unavailable`：显示原因及处理入口。若仅缺折算汇率，`native_status/native_message` 与原币金额保留，`base_amount=null`，不加入已折算摘要。正式分支按NAV归属日选汇率；待公布参考按查看日期选汇率，并保留实际汇率日期，均沿用最多7个自然日的现行折算规则。
 
 基准变化不会用旧增长率乘新NAV，也不会将旧估算与新正式结果叠加。只读展示使用当前账簿知识，不重写原始交易/时间；来源被关闭后不再发请求，历史参考保留原始时间，过期不会通过其他行情刷新续期。规则实现位于 `fund_return_updates.py`，场景回归为 `test_fund_return_updates_v2142.py`；来源字段回归为 `test_sina_fund_estimate.py`。部署状态由本批发布记录确认。
+
+**2.14.3候选增补：** 四类参考错误`reference_baseline/reference_time/reference_date/reference_refresh`允许独立回退至既有正式结果，不要求新正式NAV日期必须晚于已前移的来源基准。只取同账户同产品、原币金额非null且`nav_date`精确匹配最新获准正式NAV的`latest_confirmed_return`；身份不符、净值冲突、日期未核实和原持仓核对仍阻断。有效估算优先，回退不改变原今日汇总或写入数据。新增兼容字段如下，最终验证/部署待记录：
+
+| 字段 | 候选契约 |
+| --- | --- |
+| `reference_unavailable_reason_code` | 仅参考失效且独立正式结果可用的回退行附带上述四种原因之一；不替代正式结果本身的缺口字段 |
+| `reference_unavailable_message` | 保留参考不可用的具体原因；`message`同时说明显示最近正式收益、其NAV归属日及二者区间不一定相同 |
+| 正式金额与日期 | `status=formal`、正式自身`missing_reason_code=null`；`base_nav/base_nav_date`来自正式结果的`interval_start`，不是无效参考基准。`nav_date/return_date/date`仍为真实NAV日，`quoted_at`仅为真实公布时刻，未知为null |
+| 缺折算汇率 | `status=unavailable/native_status=formal/missing_reason_code=fx_missing`，原币金额及参考失效原因均保留；`base_amount=null`，不计已折算摘要 |
 
 ## 22. 定投自动记账（唯一现行契约）
 
@@ -637,11 +646,11 @@ AUD-002/003/004/006已修复并随2.12发布：完整实际证据升级有效份
 
 已有本地金融阶段与历史补录共享稳定的空间+计划+原锚点+阶段标识。不同订单不能因同日同额合并。实际证据链接/更正接口见fund-preview/fund-apply；完整实际确认升级有效份额来源，撤销则恢复推算。以上修复随2.12发布，无数据库列迁移或生产历史事实更新。
 
-### 22.1 指定资金账户补足（2.14.2候选）
+### 22.1 指定资金账户补足（2.14.2）
 
-继续使用计划POST/PATCH及完整`automation`配置、版本和幂等保护，不新增银行扣款接口。规则唯一维护于[domain-model§12.5](domain-model.md#125-指定账户补足定投资金2142候选)，不是账单已核实或机构已扣款的声明。
+继续使用计划POST/PATCH及完整`automation`配置、版本和幂等保护，不新增银行扣款接口。规则唯一维护于[domain-model§12.5](domain-model.md#125-指定账户补足定投资金2142)，不是账单已核实或机构已扣款的声明。
 
-| 字段/约束 | 候选契约 |
+| 字段/约束 | 当前契约 |
 | --- | --- |
 | `automation.top_up_account_id` | 可选账户ID或`null`，默认未启用；启用配置保存后未指定值规范为`null`。仅`funding_source=account`允许，来源同空间同币种、未归档、detailed现金账户且不同于`plan.account_id`；不接受产品份额/快照权益 |
 | `automation.top_up_start_date` | 选择来源时必填YYYY-MM-DD，不早于`automation.start_date`及计划首日；按期次实际`due_date`判断，仅覆盖尚未扣款期次。服务端不替用户猜历史起点；前端首次选来源默认不早于空间当地今天，回显/重试不漂移 |
