@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { codexCompletion, codexImageCompletion, inspectCodex } from '../server/codex-provider.js';
+import { codexCompletion, codexImageCompletion, codexStructuredCompletion, inspectCodex } from '../server/codex-provider.js';
 import type { Settings } from '../shared/types.js';
 
 const settings: Settings = {
@@ -264,5 +264,18 @@ test('Codex image input uses a fixed private attachment and image schema while a
     await assert.rejects(codexImageCompletion(settings, synthetic, {bytes: png, mimeType: 'image/png'}), /未能完成/);
     assert.equal(existsSync((await fake.capture()).cwd), false);
     await assert.rejects(codexImageCompletion(settings, synthetic, {bytes: Buffer.alloc(5 * 1024 * 1024 + 1), mimeType: 'image/png'}), /5 MB/);
+  });
+});
+
+test('Codex feature JSON uses the supplied server schema with the same isolated capability restrictions', async () => {
+  await withFake(async fake => {
+    const schema = {type: 'object', additionalProperties: false, required: ['summary'], properties: {summary: {type: 'string'}}};
+    await codexStructuredCompletion({...settings, modelName: 'analysis-test'}, synthetic, schema);
+    const capture = await fake.capture();
+    assert.deepEqual(capture.schema, schema); assert.deepEqual(capture.files, ['structured.schema.json']);
+    assert.equal(capture.args[capture.args.indexOf('--model') + 1], 'analysis-test');
+    assert.equal(capture.args[capture.args.indexOf('shell_tool') - 1], '--disable');
+    assert.doesNotMatch(capture.input, /APPLICATION-SECRET/);
+    assert.equal(existsSync(capture.cwd), false);
   });
 });

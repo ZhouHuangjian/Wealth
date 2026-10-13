@@ -5,9 +5,10 @@ import {
   Image as ImageIcon, Leaf, LoaderCircle, MessageCircle, Mic, MoreHorizontal, Pause, Plus, Search, Send,
   Settings2, ShieldCheck, Sparkles, Trash2, UserRound, Users, X, Zap,
 } from 'lucide-react';
-import type { AudioRecognition, AudioSettings, Conversation, Draft, DraftSyncConnectionStatus, ImageRecognition, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, ReplyModelChoice, Settings, VisionSettings } from '../shared/types';
+import type { AudioRecognition, AudioSettings, ContactBasisFact, ContactInsights, ContactModelSettings, Conversation, Draft, DraftSyncConnectionStatus, ImageRecognition, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, ReplyModelChoice, Settings, VisionSettings } from '../shared/types';
 import { api } from './api';
 import { effectiveContactSettings } from '../shared/contact-processing';
+import { InsightModelFields } from './insight-model-fields';
 
 type Page = 'conversations' | 'profile' | 'knowledge' | 'settings' | 'activity' | 'drafts';
 type Toast = { message: string; error?: boolean };
@@ -87,6 +88,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [showContactContext, setShowContactContext] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
   const [mobileConversation, setMobileConversation] = useState(false);
   const [textById, setTextById] = useState<Record<string, string>>({});
@@ -281,7 +283,7 @@ export default function App() {
                 <div className="avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</div><div className="chat-person"><h2>{conversation.name}</h2><span>{isDemo ? '本机演练 · 不会发送到微信' : isWechat ? '微信仅读取 · 回复需复制到微信发送' : canSend ? '已连接消息通道 · 发送后会实际送出' : '消息桥仅接收 · 回复需复制到微信发送'}</span></div>
                 <button className="icon-button" onClick={() => setShowDetails(true)} aria-label="对话详情"><MoreHorizontal size={21} /></button>
               </div>
-              <ConversationProcessing key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onRead={() => readWechatOnce(conversation)} />
+              <ConversationProcessing key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onRead={() => readWechatOnce(conversation)} onOpenContext={() => setShowContactContext(true)} />
               <div className="messages" ref={messageList} onScroll={event => {
                 const list = event.currentTarget;
                 messageListNearBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 96;
@@ -289,7 +291,7 @@ export default function App() {
                 <div className="conversation-start"><span />{messages.length ? dateLabel(messages[0].sentAt) : '从这里开始'}<span /></div>
                 {messages.map((message, index) => <div key={message.id} className={`message-row ${message.role}`}>
                   {message.role === 'peer' && <span className="avatar message-avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</span>}
-                  <div className="message-content"><div className={`bubble ${message.mediaStatus === 'pending' ? 'media-pending' : ''}`}>{message.mediaStatus && <span className={`media-label ${message.mediaStatus}`}><FileText size={12} />{messageKindLabels[message.kind ?? 'unknown']} · {message.mediaStatus === 'pending' ? '未解析' : message.mediaStatus === 'recognized' ? '模型已识别' : '已人工查看'}</span>}{messageDisplayText(message)}{message.kind === 'image' && <ImageMessage vision={state.settings.vision} message={message} busy={busy} run={run} visionEnabled={!!state.settings.vision && state.settings.vision.provider !== 'disabled'} />}{message.kind === 'voice' && <VoiceMessage message={message} busy={busy} run={run} audioEnabled={!!state.settings.audio && state.settings.audio.provider !== 'disabled'} />}</div>{message.mediaStatus === 'pending' && <MediaReview message={message} busy={busy} run={run} />}<div className="message-meta">{timeLabel(message.sentAt)}{message.source === 'wechat' && <span>微信读取</span>}{message.source === 'auto' && <span><Sparkles size={10} />自动回复</span>}{message.aiAssisted && message.source !== 'auto' && <span>辅助表达</span>}{message.role === 'self' && index === messages.length - 1 && <CheckCheck size={12} />}</div></div>
+                  <div className="message-content"><div className={`bubble ${message.mediaStatus === 'pending' ? 'media-pending' : ''}`}>{message.mediaStatus && <span className={`media-label ${message.mediaStatus}`}><FileText size={12} />{messageKindLabels[message.kind ?? 'unknown']} · {message.mediaStatus === 'pending' ? '未解析' : message.mediaStatus === 'recognized' ? '模型已识别' : '已人工查看'}</span>}{messageDisplayText(message)}{message.kind === 'image' && <ImageMessage vision={state.settings.vision} message={message} busy={busy} run={run} visionEnabled={!!state.settings.vision && state.settings.vision.provider !== 'disabled'} />}{message.kind === 'voice' && <VoiceMessage message={message} busy={busy} run={run} audioEnabled={!!state.settings.audio && state.settings.audio.provider !== 'disabled'} />}</div>{message.mediaStatus === 'pending' && <MediaReview message={message} busy={busy} run={run} />}<div className="message-meta">{timeLabel(message.sentAt)}{message.source === 'wechat' && <span>微信读取</span>}{message.source === 'auto' && <span><Sparkles size={10} />自动回复</span>}{message.aiAssisted && message.source !== 'auto' && <span>辅助表达</span>}{message.role === 'self' && index === messages.length - 1 && <CheckCheck size={12} />}</div><MessageInsights message={message} conversation={conversation} state={state} busy={busy} run={run} /></div>
                 </div>)}
                 {!messages.length && <div className="empty-chat-start"><Empty title={isWechat ? '等待读取微信消息' : '给这段对话一个开始'}>{isWechat ? '点击下方读取上下文，或在上方“信息处理”开启持续读取。' : isDemo ? '可以发送一句话，或用下方「模拟来信」体验自动回复。' : '消息通道收到来信后，会显示在这里。'}</Empty>{isWechat && <Button kind="secondary" disabled={!!busy || !state.runtime.wechatAvailable || conversation.wechat?.status === 'reading'} onClick={() => readWechatOnce(conversation)}>{busy === `wechat-poll-${conversation.id}` || conversation.wechat?.status === 'reading' ? <LoaderCircle size={14} className="spin" /> : <ArrowDownToLine size={14} />}读取微信上下文</Button>}</div>}
                 {currentJob && <div className="job-indicator"><LoaderCircle size={14} className="spin" /><span>{currentJob.status === 'generating' ? '正在组织回复…' : `${Math.max(0, Math.ceil((new Date(currentJob.dueAt).getTime() - now) / 1000))} 秒后${(currentJob.mode ?? autoMode) === 'draft' ? '生成草稿' : '自动发送'}`}</span><button onClick={pause}>暂停</button></div>}
@@ -307,6 +309,7 @@ export default function App() {
           <aside className="suggestions-panel" aria-label="表达建议"><div className="panel-heading"><h2><Sparkles size={17} />表达建议</h2><span className="label-pill">{replyChoices.length > 1 ? `${replyChoices.length} 个模型` : modelIsDemo ? '规则演示' : currentReplyProvider === 'codex' ? 'Codex' : (replyChoices[0]?.modelPreset || contactSettings?.modelPreset) === 'qwen' ? '千问' : 'AI 辅助'}</span></div>
             <p className="panel-description">多一种表达，仍然是你。</p>
             <div className="context-card"><div className="context-icon"><UserRound size={17} /></div><div><strong>{state.runtime.learnedProfileError ? '习惯档案加载异常' : state.learnedProfile ? `习惯档案 v${state.learnedProfile.version} 已加载` : '个人信息档案'}</strong><p>{approved} 条已确认信息 · <button onClick={() => setPage('profile')}>查看档案 <ChevronRight size={12} /></button></p></div></div>
+            {conversation && <ContactContextCard conversation={conversation} messages={messages} state={state} busy={busy} run={run} onOpen={() => setShowContactContext(true)} />}
             <label className="intent-label" htmlFor="intent">这一次，你想表达什么？</label><textarea id="intent" className="intent-input" rows={2} placeholder="例如：关心一下，顺便聊聊周末安排" value={intent} onChange={event => setIntent(event.target.value)} />
             <div className="intent-chips">{['自然接话', '表达关心', '轻松邀约'].map(chip => <button key={chip} className={intent === chip ? 'selected' : ''} onClick={() => setIntent(chip)}>{chip}</button>)}</div>
             <Button className="generate-button" onClick={() => void generate()} disabled={!!busy || !conversation || messages.at(-1)?.role !== 'peer' || mediaBlocksGeneration}>{busy === 'suggest' ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}{busy === 'suggest' ? '正在整理表达…' : '生成回复建议'}</Button>
@@ -322,7 +325,7 @@ export default function App() {
       </> : <div className="other-page">
         {page === 'profile' && <ProfilePage state={state} selectedId={selectedId} busy={busy} run={run} />}
         {page === 'knowledge' && <KnowledgePage state={state} />}
-        {page === 'settings' && <SettingsPage state={state} notify={notify} refresh={refresh} />}
+        {page === 'settings' && <SettingsPage state={state} notify={notify} refresh={refresh} busy={busy} run={run} />}
         {page === 'drafts' && <CloudDraftsPage state={state} busy={busy} run={run} copyReply={copyReply} />}
         {page === 'activity' && <ActivityPage state={state} now={now} />}
       </div>}
@@ -330,12 +333,176 @@ export default function App() {
     {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <CircleHelp size={17} /> : <Check size={17} />}<span>{toast.message}</span><button onClick={() => setToast(null)} aria-label="关闭提示"><X size={15} /></button></div>}
     {showImport && <ImportDialog onClose={() => setShowImport(false)} notify={notify} onDone={async id => { await refresh(); setSelectedId(id); setShowImport(false); setPage('conversations'); setMobileConversation(true); }} />}
     {showNew && <AddConversationDialog state={state} notify={notify} onClose={() => setShowNew(false)} onAdded={async id => { await refresh(); setSelectedId(id); setSearch(''); setPage('conversations'); setMobileConversation(true); setRole('self'); setIntent(''); setShowNew(false); }} />}
+    {showContactContext && conversation && <ContactContextDialog key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onClose={() => setShowContactContext(false)} />}
     {showDetails && conversation && <ConversationDetails conversation={conversation} onClose={() => setShowDetails(false)} busy={busy} run={run} />}
     {showImageUpload && conversation && <ConversationImageUpload conversation={conversation} busy={busy} run={run} onClose={() => setShowImageUpload(false)} />}
   </div>;
 }
 
 type Run = <T>(key: string, action: () => Promise<T>, success?: string | ((result: T) => string)) => Promise<T | undefined>;
+
+const contactBasisLabels: Record<ContactBasisFact['category'], string> = {
+  current_status: '目前状况', interest: '兴趣爱好', preference: '偏好', fact: '已知事实', boundary: '相处边界', plan: '计划',
+};
+const memoryKindLabels = { fact: '事实线索', event: '关键事件', preference: '偏好线索', openTopic: '未完话题' };
+const insightModelLabel = (value?: ContactModelSettings) => !value || value.provider === 'disabled' ? '尚未配置' : value.modelName || 'Codex 默认模型';
+function contactInsightReady(state: PublicState, conversation: Conversation | undefined, feature: 'analysis' | 'memory'): boolean {
+  const config = state.settings[feature];
+  if (!config) return false;
+  const choice = feature === 'analysis' ? conversation?.processing?.analysisModel : conversation?.processing?.memoryModel;
+  const provider = choice ? choice.provider === 'codex' ? 'codex' : choice.modelPreset === 'qwen' ? 'qwen' : 'compatible' : config.provider;
+  if (provider === 'disabled') return false;
+  if (provider === 'codex') return config.allowRemoteModel;
+  try {
+    const url = new URL(config.modelUrl);
+    const loopback = url.hostname === 'localhost' || url.hostname === '[::1]' || /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
+    return provider === 'compatible' && loopback
+      ? ['http:', 'https:'].includes(url.protocol)
+      : config.allowRemoteModel && url.protocol === 'https:';
+  } catch { return false; }
+}
+function NumericInsights({ insights, conversation }: { insights: ContactInsights; conversation: Conversation }) {
+  const percentages = insights.intents.slice().sort((a, b) => b.percentage - a.percentage).map(item => item.percentage);
+  return <div className="numeric-insights" aria-label="对话分析百分比">
+    {conversation.processing?.intentEnabled && percentages.length > 0 && <span className="intent-percentages"><span>意图倾向</span><strong>{percentages.map(value => `${value}%`).join(' · ')}</strong></span>}
+    {conversation.processing?.affinityEnabled && <span className="affinity-percentage"><span>好感度估计</span><strong>{insights.affinity?.score === null || !insights.affinity ? '待观察' : `${insights.affinity.score}%`}</strong></span>}
+  </div>;
+}
+
+function MessageInsights({ message, conversation, state, busy, run }: { message: Message; conversation: Conversation; state: PublicState; busy: string; run: Run }) {
+  const enabled = conversation.processing?.intentEnabled || conversation.processing?.affinityEnabled;
+  const analyzable = message.role === 'peer' && ((!message.kind || message.kind === 'text') || (message.kind === 'voice' && !!message.audioRecognition));
+  if (!enabled || !analyzable) return null;
+  const ready = contactInsightReady(state, conversation, 'analysis');
+  const key = `analyze-${message.id}`;
+  return <div className="message-insights">
+    {message.insights && <NumericInsights insights={message.insights} conversation={conversation} />}
+    <button type="button" disabled={!!busy || !ready} onClick={() => void run(key, () => api<{insights: ContactInsights; cached: boolean}>(`/conversations/${conversation.id}/analyze`, 'POST', { messageId: message.id }), result => result.cached ? '已使用本地分析结果，未调用模型' : '分析结果已保存在本机')}>
+      {busy === key ? <LoaderCircle size={11} className="spin" /> : <Sparkles size={11} />}{busy === key ? '正在分析…' : message.insights ? '查看/更新分析' : '分析这句话'}
+    </button>
+  </div>;
+}
+
+function ContactContextCard({ conversation, messages, state, busy, run, onOpen }: { conversation: Conversation; messages: Message[]; state: PublicState; busy: string; run: Run; onOpen: () => void }) {
+  const enabled = conversation.processing?.intentEnabled || conversation.processing?.affinityEnabled;
+  const latest = messages.filter(message => message.role === 'peer' && ((!message.kind || message.kind === 'text') || !!message.audioRecognition)).at(-1);
+  const latestInsights = messages.filter(message => !!message.insights).at(-1)?.insights;
+  const ready = contactInsightReady(state, conversation, 'analysis');
+  const key = `analyze-${latest?.id}`;
+  const approved = conversation.memory?.entries.filter(entry => entry.status === 'approved').length || 0;
+  return <section className="contact-context-card" aria-label={`${conversation.name}的背景与分析`}>
+    <button type="button" className="contact-context-heading" onClick={onOpen}><UserRound size={14} /><strong>对方档案与记忆</strong><ChevronRight size={13} /></button>
+    <p>{conversation.basisFacts?.length || 0} 条基础信息 · {approved} 条已确认记忆</p>
+    {enabled && <>
+      {latestInsights ? <NumericInsights insights={latestInsights} conversation={conversation} /> : <p className="contact-insight-placeholder">分析后在此展示百分比。</p>}
+      <small>{latestInsights ? `最近分析 ${timeLabel(latestInsights.analyzedAt)} · ` : ''}根据互动估计，仅作理解参考。</small>
+      <Button kind="ghost" disabled={!!busy || !latest || !ready} onClick={() => latest && void run(key, () => api<{insights: ContactInsights; cached: boolean}>(`/conversations/${conversation.id}/analyze`, 'POST', { messageId: latest.id }), result => result.cached ? '已使用本地分析结果，未调用模型' : '分析结果已保存在本机')}>{busy === key ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}分析最新一句</Button>
+    </>}
+  </section>;
+}
+
+function ContactInsightModel({ conversation, state, busy, run, kind }: { conversation: Conversation; state: PublicState; busy: string; run: Run; kind: 'analysis' | 'memory' }) {
+  const field = kind === 'analysis' ? 'analysisModel' : 'memoryModel';
+  const saved = conversation.processing?.[field];
+  const config = state.settings[kind];
+  const defaultChoice = (): ReplyModelChoice => ({ id: crypto.randomUUID(), provider: config?.provider === 'codex' ? 'codex' : 'compatible', modelPreset: config?.provider === 'qwen' ? 'qwen' : 'custom', modelName: config?.modelName || (config?.provider === 'codex' ? '' : 'qwen3.8-flash') });
+  const signature = JSON.stringify(saved) || 'inherit';
+  const [custom, setCustom] = useState(!!saved);
+  const [choice, setChoice] = useState<ReplyModelChoice>(saved || defaultChoice);
+  useEffect(() => { setCustom(!!saved); setChoice(saved || defaultChoice()); }, [signature]);
+  const dirty = (custom ? JSON.stringify(choice) : 'inherit') !== signature;
+  const name = kind === 'analysis' ? '分析' : '记忆';
+  const key = `contact-${kind}-model-${conversation.id}`;
+  return <details className="processing-models insight-contact-model"><summary><Sparkles size={12} /><strong>{name}模型</strong><span>{saved ? saved.modelName || 'Codex 默认模型' : `使用默认 · ${insightModelLabel(config)}`}</span><ChevronDown size={12} /></summary>
+    <form onSubmit={event => { event.preventDefault(); void run(key, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { [field]: custom ? choice : null } }), `${conversation.name}的${name}模型已保存`); }}>
+      <label className="field-label">{conversation.name}的{name}模型<select disabled={!!busy} value={custom ? 'custom' : 'inherit'} onChange={event => { const next = event.target.value === 'custom'; if (next && !saved && !custom) setChoice(defaultChoice()); setCustom(next); }}><option value="inherit">使用设置中的默认{name}模型</option><option value="custom">为此人单独选择型号</option></select></label>
+      {custom && <div className="form-grid"><label className="field-label">服务<select disabled={!!busy} value={choice.provider === 'codex' ? 'codex' : choice.modelPreset === 'qwen' ? 'qwen' : 'compatible'} onChange={event => { const provider = event.target.value; setChoice(previous => ({ ...previous, provider: provider === 'codex' ? 'codex' : 'compatible', modelPreset: provider === 'qwen' ? 'qwen' : 'custom', modelName: provider === 'codex' ? '' : previous.modelName || 'qwen3.8-flash' })); }}><option value="qwen">阿里千问</option><option value="compatible">兼容 API</option><option value="codex">Codex</option></select></label>{choice.modelPreset === 'qwen' && choice.provider !== 'codex' ? <ModelNamePicker label={`${name}模型名称`} value={choice.modelName} disabled={!!busy} onChange={modelName => setChoice(previous => ({ ...previous, modelName }))} /> : <label className="field-label">具体模型名称<input disabled={!!busy} required={choice.provider !== 'codex'} value={choice.modelName} onChange={event => setChoice(previous => ({ ...previous, modelName: event.target.value }))} placeholder={choice.provider === 'codex' ? '留空使用 Codex 默认模型' : 'Model ID'} /></label>}</div>}
+      <div className="processing-model-save"><small>{name}服务地址、密钥使用设置中的独立配置。</small><Button type="submit" kind="secondary" disabled={!!busy || !dirty}>{busy === key ? <LoaderCircle size={12} className="spin" /> : <Check size={12} />}保存此人{name}模型</Button></div>
+    </form>
+  </details>;
+}
+
+function ContactInsightControls({ conversation, state, busy, run }: { conversation: Conversation; state: PublicState; busy: string; run: Run }) {
+  const processing = conversation.processing || {};
+  const analysisReady = contactInsightReady(state, conversation, 'analysis');
+  const memoryReady = contactInsightReady(state, conversation, 'memory');
+  const toggle = (field: 'intentEnabled' | 'affinityEnabled' | 'memoryEnabled' | 'autoAnalyzeMessages' | 'autoCompressMemory') => void run(`contact-${field}-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { [field]: !processing[field] } }), `${conversation.name}的处理设置已保存`);
+  return <div className="contact-insight-controls">
+    <div className="processing-controls"><div><span>意图分析<small>个人页面仅展示百分比</small></span><Toggle small checked={!!processing.intentEnabled} disabled={!!busy || (!analysisReady && !processing.intentEnabled)} label={`${conversation.name}的意图分析`} onChange={() => toggle('intentEnabled')} /></div><div><span>好感度估计<small>基于当前互动，可单独关闭</small></span><Toggle small checked={!!processing.affinityEnabled} disabled={!!busy || (!analysisReady && !processing.affinityEnabled)} label={`${conversation.name}的好感度估计`} onChange={() => toggle('affinityEnabled')} /></div></div>
+    {(processing.intentEnabled || processing.affinityEnabled) && <label className="checkbox-label processing-checkbox"><input type="checkbox" disabled={!!busy} checked={!!processing.autoAnalyzeMessages} onChange={() => toggle('autoAnalyzeMessages')} /><span><strong>新来信自动分析</strong><small>只处理此人新收到的文字，历史消息可点击分析。</small></span></label>}
+    {!analysisReady && <p className="processing-model-hint">先在设置中配置独立的分析模型。</p>}
+    <ContactInsightModel conversation={conversation} state={state} busy={busy} run={run} kind="analysis" />
+    <div className="processing-controls"><div><span>使用对话记忆<small>已确认的关键记忆用于后续草稿</small></span><Toggle small checked={!!processing.memoryEnabled} disabled={!!busy} label={`${conversation.name}的对话记忆`} onChange={() => toggle('memoryEnabled')} /></div></div>
+    {processing.memoryEnabled && <label className="checkbox-label processing-checkbox"><input type="checkbox" disabled={!!busy || (!memoryReady && !processing.autoCompressMemory)} checked={!!processing.autoCompressMemory} onChange={() => toggle('autoCompressMemory')} /><span><strong>新来信自动整理记忆</strong><small>{memoryReady ? '累计 20 条未整理消息后压缩，线索待你确认。' : '先在设置中配置记忆模型。'}</small></span></label>}
+    <ContactInsightModel conversation={conversation} state={state} busy={busy} run={run} kind="memory" />
+  </div>;
+}
+
+function ContactContextDialog({ conversation, state, busy, run, onClose }: { conversation: Conversation; state: PublicState; busy: string; run: Run; onClose: () => void }) {
+  const [tab, setTab] = useState<'basis' | 'memory'>('basis');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [category, setCategory] = useState<ContactBasisFact['category']>('current_status');
+  const [content, setContent] = useState('');
+  const [sourceNote, setSourceNote] = useState('');
+  const [confirmClear, setConfirmClear] = useState(false);
+  const memory = conversation.memory;
+  const memoryReady = contactInsightReady(state, conversation, 'memory');
+  const facts = conversation.basisFacts || [];
+  const messages = new Map(state.messages.map(message => [message.id, message]));
+  const resetFact = () => { setEditingId(null); setContent(''); setSourceNote(''); };
+  return <Modal title={`${conversation.name} · 档案与记忆`} description="保存真实背景，让每次回复接得上前面的对话。" onClose={onClose} wide>
+    <div className="contact-context-tabs"><button type="button" className={tab === 'basis' ? 'active' : ''} onClick={() => setTab('basis')}><UserRound size={14} />基础库 <span>{facts.length}</span></button><button type="button" className={tab === 'memory' ? 'active' : ''} onClick={() => setTab('memory')}><BookOpen size={14} />对话记忆 <span>{memory?.entries.filter(entry => entry.status !== 'rejected').length || 0}</span></button></div>
+    {tab === 'basis' ? <>
+      <form className="contact-fact-editor" onSubmit={event => { event.preventDefault(); void run(`basis-save-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/basis${editingId ? `/${editingId}` : ''}`, editingId ? 'PATCH' : 'POST', { category, content: content.trim(), sourceNote: sourceNote.trim() }); resetFact(); return result; }, '基础信息已保存在本机'); }}>
+        <div className="form-grid"><label className="field-label">信息类型<select disabled={!!busy} value={category} onChange={event => setCategory(event.target.value as ContactBasisFact['category'])}>{Object.entries(contactBasisLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="field-label">来源备注（可选）<input maxLength={500} disabled={!!busy} value={sourceNote} onChange={event => setSourceNote(event.target.value)} placeholder="例如：本人告诉我的，10 月更新" /></label></div>
+        <label className="field-label">{editingId ? '修改这条信息' : '补充一条基础信息'}<textarea rows={3} maxLength={2000} required disabled={!!busy} value={content} onChange={event => setContent(event.target.value)} placeholder="例如：最近在准备考试；喜欢羽毛球；周末通常有空。" /></label>
+        <div className="contact-fact-editor-actions">{editingId && <Button kind="ghost" disabled={!!busy} onClick={resetFact}>取消修改</Button>}<Button type="submit" disabled={!!busy || !content.trim()}>{busy === `basis-save-${conversation.id}` ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{editingId ? '保存修改' : '加入基础库'}</Button></div>
+      </form>
+      <div className="contact-fact-list">{facts.map(fact => <article key={fact.id}><div className="contact-fact-top"><span>{contactBasisLabels[fact.category]}</span><time>{dateLabel(fact.updatedAt)}</time></div><p>{fact.content}</p>{fact.sourceNote && <small>来源：{fact.sourceNote}</small>}<div className="contact-fact-actions"><button type="button" disabled={!!busy} onClick={() => { setEditingId(fact.id); setCategory(fact.category); setContent(fact.content); setSourceNote(fact.sourceNote); }}>修改</button><button type="button" disabled={!!busy} onClick={() => void run(`basis-delete-${fact.id}`, async () => { const result = await api(`/conversations/${conversation.id}/basis/${fact.id}`, 'DELETE'); if (editingId === fact.id) resetFact(); return result; }, '这条基础信息已删除')}><Trash2 size={12} />删除</button></div></article>)}</div>
+      {!facts.length && <p className="contact-context-empty">从一条你已经知道的真实信息开始。</p>}
+    </> : <>
+      <div className="contact-memory-toolbar"><div><h3>压缩对话关键信息</h3><p>整理摘要、事件与未完话题，保存在本机。</p></div><Button kind="secondary" disabled={!!busy || !memoryReady || !conversation.processing?.memoryEnabled} onClick={() => void run(`memory-compress-${conversation.id}`, () => api<{cached: boolean; remaining: number}>(`/conversations/${conversation.id}/memory/compress`, 'POST', {}), result => result.cached ? '已使用本地记忆，没有重复调用模型' : result.remaining ? '已整理一段关键记忆，还有对话可继续整理' : '关键记忆已保存在本机，请确认线索')}>{busy === `memory-compress-${conversation.id}` ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}整理关键记忆</Button></div>
+      {(!memoryReady || !conversation.processing?.memoryEnabled) && <p className="processing-model-hint">{!memoryReady ? '先在设置中配置独立的记忆模型。' : '先在此人的“信息处理”中开启对话记忆。'}</p>}
+      {memory ? <>
+        <section className="contact-memory-summary"><h3>对话摘要</h3><p>{memory.summary || '尚未形成摘要。'}</p><small>{memory.modelName || 'Codex 默认模型'} · {dateLabel(memory.updatedAt)} {timeLabel(memory.updatedAt)} · 本地保存</small>{memory.openTopics.length > 0 && <div className="memory-open-topics"><strong>未完话题</strong>{memory.openTopics.map((topic, index) => <p key={index}>{topic}</p>)}</div>}</section>
+        <p className="memory-candidate-note">模型整理的线索先待你确认；已确认内容才用于长期背景。</p>
+        <div className="contact-memory-entries">{memory.entries.filter(entry => entry.status !== 'rejected').map(entry => <article key={entry.id} className={entry.status}><div className="contact-fact-top"><span>{memoryKindLabels[entry.kind]}</span><span>{entry.status === 'approved' ? '已确认' : '待确认'}</span></div><p>{entry.text}</p>{entry.sourceMessageIds.length > 0 && <details className="memory-source"><summary>查看来源 <ChevronDown size={11} /></summary>{entry.sourceMessageIds.map(id => <blockquote key={id}>{messages.get(id)?.text || '来源消息已不可用'}</blockquote>)}</details>}<div className="contact-fact-actions">{entry.status !== 'approved' && <button disabled={!!busy} type="button" onClick={() => void run(`memory-approve-${entry.id}`, () => api(`/conversations/${conversation.id}/memory/entries/${entry.id}`, 'PATCH', { status: 'approved' }), '这条记忆已确认')}><Check size={12} />确认记住</button>}<button disabled={!!busy} type="button" onClick={() => void run(`memory-reject-${entry.id}`, () => api(`/conversations/${conversation.id}/memory/entries/${entry.id}`, 'PATCH', { status: 'rejected' }), '这条线索已忽略')}>不采用</button></div></article>)}</div>
+        <div className="contact-memory-clear">{!confirmClear ? <Button kind="ghost" disabled={!!busy} onClick={() => setConfirmClear(true)}><Trash2 size={12} />清除这份记忆</Button> : <div className="delete-confirm"><p>清除本机摘要和全部记忆线索？基础库和原始消息仍保留。</p><Button kind="danger" disabled={!!busy} onClick={() => void run(`memory-clear-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/memory`, 'DELETE', {}); setConfirmClear(false); return result; }, '这份本地记忆已清除')}>确认清除</Button><Button kind="ghost" onClick={() => setConfirmClear(false)}>保留</Button></div>}</div>
+      </> : <p className="contact-context-empty">还没有记忆。整理一次后，重启也能接着使用。</p>}
+    </>}
+  </Modal>;
+}
+
+function InsightSettingsDetails({ state, busy, run }: { state: PublicState; busy: string; run: Run }) {
+  const [contactId, setContactId] = useState(state.conversations[0]?.id || '');
+  const [messageId, setMessageId] = useState('');
+  const [showContext, setShowContext] = useState(false);
+  const conversation = state.conversations.find(item => item.id === contactId) || state.conversations[0];
+  const messages = state.messages.filter(message => message.conversationId === conversation?.id && message.role === 'peer' && ((!message.kind || message.kind === 'text') || !!message.audioRecognition)).slice().reverse();
+  const selected = messages.find(message => message.id === messageId) || messages[0];
+  const insights = selected?.insights;
+  const ready = contactInsightReady(state, conversation, 'analysis');
+  const enabled = conversation?.processing?.intentEnabled || conversation?.processing?.affinityEnabled;
+  const key = `analyze-${selected?.id}`;
+  return <section className="settings-card insight-detail-settings" aria-label="联系人分析详情">
+    <div className="settings-section-title"><span><Users size={19} /></span><div><h2>联系人开关与分析详情</h2><p>在此查看完整意图、依据，或调整单个人的处理设置。</p></div></div>
+    {!conversation ? <p className="contact-context-empty">先添加一位联系人，再开启分析或记忆。</p> : <>
+      <label className="field-label">选择联系人<select value={conversation.id} disabled={!!busy} onChange={event => { setContactId(event.target.value); setMessageId(''); }} aria-label="选择分析详情的联系人">{state.conversations.map(contact => <option value={contact.id} key={contact.id}>{contact.name}</option>)}</select></label>
+      <ContactInsightControls key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} />
+      <div className="insight-detail-message"><label className="field-label">查看哪句话<select value={selected?.id || ''} disabled={!!busy || !messages.length} onChange={event => setMessageId(event.target.value)} aria-label="选择分析详情的消息">{!messages.length && <option value="">尚无可分析的来信</option>}{messages.map(message => <option value={message.id} key={message.id}>{timeLabel(message.sentAt)} · {(message.audioRecognition?.text || message.text).slice(0, 80)}</option>)}</select></label>{selected && <blockquote>{selected.audioRecognition?.text || selected.text}</blockquote>}
+        <Button kind="secondary" disabled={!!busy || !selected || !ready || !enabled} onClick={() => selected && void run(key, () => api<{insights: ContactInsights; cached: boolean}>(`/conversations/${conversation.id}/analyze`, 'POST', { messageId: selected.id }), result => result.cached ? '已使用本地分析结果，未调用模型' : '分析结果已保存在本机')}>{busy === key ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}{insights ? '查看/更新这句分析' : '分析这句话'}</Button>
+      </div>
+      {insights ? <section className="insight-detail-result">
+        {conversation.processing?.intentEnabled && <><h3>可能的意图</h3><div className="intent-distribution">{insights.intents.map((intent, index) => <div key={`${intent.label}-${index}`}><span>{intent.label}</span><span className="intent-distribution-track"><i style={{ width: `${intent.percentage}%` }} /></span><strong>{intent.percentage}%</strong></div>)}</div></>}
+        {conversation.processing?.affinityEnabled && insights.affinity && <div className="affinity-detail"><h3>好感度估计 <strong>{insights.affinity.score === null ? '暂时无法判断' : `${insights.affinity.score}%`}</strong></h3><p>对本次估计的把握：{insights.affinity.confidence}%</p>{insights.affinity.evidence.length > 0 && <ul>{insights.affinity.evidence.map((item, index) => <li key={index}>{item}</li>)}</ul>}</div>}
+        {insights.uncertainty && <p className="insight-uncertainty">{insights.uncertainty}</p>}
+        <small>{insights.modelName || 'Codex 默认模型'} · {dateLabel(insights.analyzedAt)} {timeLabel(insights.analyzedAt)} · 已保存到本机</small>
+      </section> : <p className="processing-model-hint">这句话还没有保存的分析结果。</p>}
+      <div className="processing-context-link"><Button kind="secondary" disabled={!!busy} onClick={() => setShowContext(true)}><UserRound size={13} />打开 {conversation.name} 的档案与记忆</Button></div>
+    </>}
+    {showContext && conversation && <ContactContextDialog key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onClose={() => setShowContext(false)} />}
+  </section>;
+}
 
 function ImageFilePicker({ image, onChange, disabled = false, label = '选择图片' }: {
   image: UploadedImage | null; onChange: (image: UploadedImage | null) => void; disabled?: boolean; label?: string;
@@ -499,8 +666,8 @@ function ConversationReplyModels({ conversation, state, busy, run }: {
   </details>;
 }
 
-function ConversationProcessing({ conversation, state, busy, run, onRead }: {
-  conversation: Conversation; state: PublicState; busy: string; run: Run; onRead: () => void;
+function ConversationProcessing({ conversation, state, busy, run, onRead, onOpenContext }: {
+  conversation: Conversation; state: PublicState; busy: string; run: Run; onRead: () => void; onOpenContext: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const isWechat = conversation.channel === 'wechat';
@@ -525,6 +692,8 @@ function ConversationProcessing({ conversation, state, busy, run, onRead }: {
       {isWechat && <div className="processing-controls processing-media-controls"><div><span><ImageIcon size={12} />自动识图<small>{imageReady ? '自动读取并识别此人的新图片' : '先在设置配置图片识别模型'}</small></span><Toggle small checked={autoImage} disabled={!!busy || (!imageReady && !autoImage)} label={`自动识别${conversation.name}的微信图片`} onChange={() => void run(`contact-image-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { autoRecognizeImages: !autoImage } }), `${conversation.name}：自动识图已${autoImage ? '关闭' : '开启'}`)} /></div><div><span><Mic size={12} />自动转写语音<small>{voiceReady ? '自动读取并转写此人的新语音' : '先在设置配置语音转写模型'}</small></span><Toggle small checked={autoVoice} disabled={!!busy || (!voiceReady && !autoVoice)} label={`自动转写${conversation.name}的微信语音`} onChange={() => void run(`contact-voice-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { autoTranscribeVoice: !autoVoice } }), `${conversation.name}：语音转写已${autoVoice ? '关闭' : '开启'}`)} /></div></div>}
       {isWechat && <p className="processing-media-hint">媒体开关仅作用于 {conversation.name}，默认关闭；持续读取时处理新来信，历史内容可手动识别。</p>}
       <ConversationReplyModels conversation={conversation} state={state} busy={busy} run={run} />
+      <ContactInsightControls conversation={conversation} state={state} busy={busy} run={run} />
+      <div className="processing-context-link"><Button kind="secondary" onClick={onOpenContext}><UserRound size={12} />对方档案与记忆</Button><small>{conversation.basisFacts?.length || 0} 条基础信息 · {conversation.memory?.entries.filter(entry => entry.status === 'approved').length || 0} 条已确认记忆</small></div>
       {isWechat && <div className={`processing-read-status ${readError ? 'error' : ''}`} role="status"><p>{!state.runtime.wechatAvailable ? state.runtime.wechatStatus : conversation.wechat?.detail || '尚未读取。点击“读取一次”载入上下文，或开启持续读取。'}</p><small>{conversation.wechat?.lastCheckedAt ? `上次检查 ${dateLabel(conversation.wechat.lastCheckedAt)} ${checkedTimeLabel(conversation.wechat.lastCheckedAt)}` : '尚未检查消息'}</small></div>}
       {lastJob ? <div className={`processing-result ${processingError ? 'error' : ''}`}><span>最近处理 · {jobLabels[lastJob.status]}<time>{timeLabel(lastJob.finishedAt || lastJob.createdAt)}</time></span>{lastJob.detail && <p>{lastJob.detail}</p>}</div> : <p className="processing-no-result">还没有自动处理记录。{conversation.autoReplyEnabled && !state.settings.autoReplyEnabled ? '开启顶部全局开关后，才会处理新的来信。' : '已有消息只作上下文，开启后处理新来信。'}</p>}
     </div>}
@@ -689,11 +858,13 @@ function AddConversationDialog({ state, notify, onClose, onAdded }: {
   </Modal>;
 }
 
-function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: (message: string, error?: boolean) => void; refresh: () => Promise<void> }) {
-  const [form, setForm] = useState<Settings & { hasApiKey: boolean; vision: VisionSettings & {hasApiKey?: boolean}; audio: AudioSettings & {hasApiKey?: boolean} }>(() => ({
+function SettingsPage({ state, notify, refresh, busy, run }: { state: PublicState; notify: (message: string, error?: boolean) => void; refresh: () => Promise<void>; busy: string; run: Run }) {
+  const [form, setForm] = useState<Settings & { hasApiKey: boolean; vision: VisionSettings & {hasApiKey?: boolean}; audio: AudioSettings & {hasApiKey?: boolean}; analysis: ContactModelSettings & {hasApiKey?: boolean}; memory: ContactModelSettings & {hasApiKey?: boolean} }>(() => ({
     ...state.settings, autoReplyMode: state.settings.autoReplyMode ?? 'draft', apiKey: '',
     vision: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.vision, apiKey: '' },
     audio: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-omni-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.audio, apiKey: '' },
+    analysis: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.analysis, apiKey: '' },
+    memory: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.memory, apiKey: '' },
   }));
   const [saving, setSaving] = useState('');
   const [connectionPackage, setConnectionPackage] = useState('');
@@ -716,7 +887,7 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
     setForm(previous => ({ ...previous, provider, modelPreset,
       modelName: modelNames.current[modelPreset === 'qwen' ? 'qwen' : provider] ?? (modelPreset === 'qwen' ? 'qwen3.8-flash' : provider === 'codex' ? '' : state.settings.modelName),
       modelUrl: provider === 'ollama' ? 'http://127.0.0.1:11434' : previous.provider === 'ollama' || (modelPreset === 'qwen' && previous.provider === 'demo') ? '' : previous.modelUrl,
-      ...(!['compatible', 'ollama'].includes(provider) ? { vision: { ...previous.vision, useReplyApiKey: false }, audio: { ...previous.audio, useReplyApiKey: false } } : {}),
+      ...(!['compatible', 'ollama'].includes(provider) ? { vision: { ...previous.vision, useReplyApiKey: false }, audio: { ...previous.audio, useReplyApiKey: false }, analysis: { ...previous.analysis, useReplyApiKey: false }, memory: { ...previous.memory, useReplyApiKey: false } } : {}),
     }));
     setTestResult(null);
   };
@@ -735,13 +906,15 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
     }
     setSaving(test ? 'test' : 'save'); setTestResult(null);
     try {
-      const { hasApiKey: _hasApiKey, apiKey, autoReplyEnabled: _autoReply, autoRecognizeImages: _legacyAutoImage, autoTranscribeVoice: _legacyAutoVoice, vision, audio, ...values } = form;
+      const { hasApiKey: _hasApiKey, apiKey, autoReplyEnabled: _autoReply, autoRecognizeImages: _legacyAutoImage, autoTranscribeVoice: _legacyAutoVoice, vision, audio, analysis, memory, ...values } = form;
       const { hasApiKey: _visionHasApiKey, apiKey: visionKey, ...visionValues } = vision;
       const { hasApiKey: _audioHasApiKey, apiKey: audioKey, ...audioValues } = audio;
-      await api('/settings', 'PATCH', { ...values, ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), vision: { ...visionValues, ...(visionKey?.trim() ? { apiKey: visionKey.trim() } : {}) }, audio: { ...audioValues, ...(audioKey?.trim() ? { apiKey: audioKey.trim() } : {}) } });
+      const { hasApiKey: _analysisHasApiKey, apiKey: analysisKey, ...analysisValues } = analysis;
+      const { hasApiKey: _memoryHasApiKey, apiKey: memoryKey, ...memoryValues } = memory;
+      await api('/settings', 'PATCH', { ...values, ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), vision: { ...visionValues, ...(visionKey?.trim() ? { apiKey: visionKey.trim() } : {}) }, audio: { ...audioValues, ...(audioKey?.trim() ? { apiKey: audioKey.trim() } : {}) }, analysis: { ...analysisValues, ...(analysisKey?.trim() ? { apiKey: analysisKey.trim() } : {}) }, memory: { ...memoryValues, ...(memoryKey?.trim() ? { apiKey: memoryKey.trim() } : {}) } });
       if (test) { const result = await api<{ ok: boolean; message: string }>('/model/test', 'POST'); setTestResult(result); }
       else notify(form.autoReplyMode !== state.settings.autoReplyMode ? '模式已切换，全局开关已暂停；确认模式后可重新开启' : '设置已保存');
-      setForm(previous => ({ ...previous, apiKey: '', vision: { ...previous.vision, apiKey: '' }, audio: { ...previous.audio, apiKey: '' } }));
+      setForm(previous => ({ ...previous, apiKey: '', vision: { ...previous.vision, apiKey: '' }, audio: { ...previous.audio, apiKey: '' }, analysis: { ...previous.analysis, apiKey: '' }, memory: { ...previous.memory, apiKey: '' } }));
       await refresh();
       return true;
     } catch (error) { notify(error instanceof Error ? error.message : '设置未保存', true); return false; }
@@ -830,6 +1003,14 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
         <div className="test-model"><Button kind="secondary" onClick={() => void save(true)} disabled={!!saving || (form.provider === 'codex' && (!form.allowRemoteModel || !state.runtime.codexAvailable))}>{saving === 'test' ? <LoaderCircle size={14} className="spin" /> : <Zap size={14} />}{form.provider === 'codex' ? '保存并测试默认模型' : '保存并测试默认连接'}</Button>{testResult && <span className={testResult.ok ? 'success-text' : 'error-text'} role="status">{testResult.message}</span>}</div>
         {form.provider === 'codex' && <p className="model-test-hint">{!form.allowRemoteModel ? '先勾选上方授权，再测试生成。' : '测试会发起一次真实模型调用，可能消耗额度。'}仅保存设置不会调用模型。</p>}
       </section>
+      <section className="settings-card insight-settings-card"><div className="settings-section-title"><span><Sparkles size={19} /></span><div><h2>意图与好感度分析模型</h2><p>独立选择模型，按联系人分别开启；不会改变回复模型。</p></div></div>
+        <InsightModelFields kind="analysis" model={form.analysis} onChange={analysis => setForm(previous => ({ ...previous, analysis }))} disabled={!!saving} canReuseReplyKey={['compatible', 'ollama'].includes(form.provider)} hasApiKey={!!state.settings.analysis?.hasApiKey} />
+        <p className="insight-explanation">百分比表示模型对当前互动的解读，用于比较可能的含义。个人对话只显示百分比，具体意图与依据在下方查看。</p>
+      </section>
+      <section className="settings-card insight-settings-card"><div className="settings-section-title"><span><BookOpen size={19} /></span><div><h2>对话记忆模型</h2><p>压缩关键对话、事件与未完话题，长期保存在本机。</p></div></div>
+        <InsightModelFields kind="memory" model={form.memory} onChange={memory => setForm(previous => ({ ...previous, memory }))} disabled={!!saving} canReuseReplyKey={['compatible', 'ollama'].includes(form.provider)} hasApiKey={!!state.settings.memory?.hasApiKey} />
+        <p className="insight-explanation">为联系人开启记忆后，已确认的线索可作为后续回复背景。手动基础库不需要调用模型。</p>
+      </section>
       <section className="settings-card image-settings-card"><div className="settings-section-title"><span><ImageIcon size={19} /></span><div><h2>图片识别模型</h2><p>与回复模型分别选择。识别结果可作为后续回复草稿的参考。</p></div></div>
         <p className="media-contact-note"><Users size={14} />自动识图按联系人设置：打开该人的对话 → 信息处理，仅为需要的人开启。</p>
         <div className="provider-options vision-provider-options">{([{ id: 'disabled', title: '暂不识别', detail: '保留图片供你查看' }, { id: 'qwen', title: '阿里千问', detail: '选择支持图片的千问模型' }, { id: 'codex', title: 'Codex', detail: '通过本机 Codex 识图' }, { id: 'compatible', title: '兼容 API', detail: '连接其他视觉模型' }] as const).map(provider => <label className={`provider-option ${form.vision.provider === provider.id ? 'selected' : ''}`} key={provider.id}><input type="radio" name="vision-provider" checked={form.vision.provider === provider.id} onChange={() => selectVisionProvider(provider.id)} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{form.vision.provider === provider.id && <Check size={15} />}</label>)}</div>
@@ -872,6 +1053,7 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
       <section className="settings-card channel-setting"><div className="settings-section-title"><span><ShieldCheck size={19} /></span><div><h2>消息通道</h2><p>{state.runtime.bridgeSendConfigured ? '外部发送通道已配置；手动发送或自动发送模式会通过该通道送出回复。' : state.runtime.bridgeReceiveConfigured ? '当前仅接收外部来信。可生成草稿和保存反馈，回复需复制到微信手动发送。' : state.conversations.some(item => item.channel === 'wechat') ? '微信会话仅读取消息，读取与自动草稿在各自对话内控制。回复需复制到微信手动发送。' : '当前使用本机演练。接入外部消息桥需要在服务端配置。'}</p></div></div><span className="runtime-badge"><span className="status-dot" />{state.runtime.bridgeSendConfigured ? '消息桥 · 可发送' : state.runtime.bridgeReceiveConfigured ? '消息桥 · 仅接收' : state.conversations.some(item => item.channel === 'wechat') ? '微信 · 仅读取' : '不会发送到微信'}</span></section>
       <div className="settings-save"><span>设置仅保存在此工作空间。</span><Button type="submit" disabled={!!saving}>{saving === 'save' ? <LoaderCircle size={15} className="spin" /> : <Check size={15} />}保存设置</Button></div>
     </form>
+    <InsightSettingsDetails state={state} busy={saving || busy} run={run} />
   </>;
 }
 

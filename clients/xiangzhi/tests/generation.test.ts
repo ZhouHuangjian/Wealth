@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { AppState, DraftFeedback, LearnedProfile, Message, ProfileClaim, Settings } from '../shared/types.js';
+import type { AppState, ContactBasisFact, ContactMemory, ContactMemoryEntry, DraftFeedback, LearnedProfile, Message, ProfileClaim, Settings } from '../shared/types.js';
 import { generateDrafts, testModel } from '../server/generation.js';
+import { messageEvidenceHash } from '../server/contact-evidence.js';
 
 function settings(overrides: Partial<Settings> = {}): Settings {
   return {autoReplyEnabled: false, autoReplyMode: 'draft', provider: 'compatible', modelUrl: 'http://127.0.0.1:1234/v1', modelName: 'test-model',
@@ -34,6 +35,143 @@ function feedback(overrides: Partial<DraftFeedback> = {}): DraftFeedback {
     originalText: '原先的草稿', revisedText: '用户改写的当前会话回复', kind: 'edited', reason: '先确认现状', source: 'review',
     createdAt: '2026-10-10T01:00:00Z', profileVersion: '1.8', ...overrides};
 }
+
+function basisFact(content: string, id = 'basis-a'): ContactBasisFact {
+  return {id, category: 'interest', content, sourceNote: '用户手动补充', createdAt: '', updatedAt: ''};
+}
+function memoryEntry(text: string, sourceMessageIds: string[], status: ContactMemoryEntry['status'] = 'approved', messages = fixture().messages): ContactMemoryEntry {
+  const sourceMessageHashes = Object.fromEntries(messages.filter(message => sourceMessageIds.includes(message.id)).map(message => [message.id, messageEvidenceHash(message)]));
+  return {id: text, kind: 'event', text, sourceMessageIds, sourceMessageHashes, status, createdAt: ''};
+}
+function memory(entries: ContactMemoryEntry[] = []): ContactMemory {
+  return {summary: '模型回顾可能不准确：对方也许想约下次聊天', entries, openTopics: ['下次聊天是否方便'],
+    throughSequence: 2, sourceDigest: 'test-source-digest', provider: 'qwen', modelName: 'summary-test', updatedAt: ''};
+}
+
+test('recipient facts and confirmed memory stay in the current contact context without entering self habits or inferred intent', async t => {
+  const state = fixture(); state.learnedProfile = learnedProfile();
+  state.messages.push(message('peer-b', 'b', 'peer', '他人证据不得泄漏', 4));
+  state.messages.push({...message('system-a', 'a', 'system', '系统事项', 0), kind: 'system'});
+  state.messages.unshift(message('ai-old', 'a', 'self', '曾发过的AI辅助回复', 0, true));
+  Object.assign(state.conversations[0], {basisFacts: [basisFact('对方爱好园艺')], processing: {memoryEnabled: true},
+    memory: memory([
+      memoryEntry('已确认谈过天气', ['peer-a']), memoryEntry('人工审核的已发送回复事件', ['ai-old'], 'approved', state.messages),
+      memoryEntry('尚未确认记忆不可出现', ['peer-a'], 'pending'), memoryEntry('用户拒绝记忆不可出现', ['peer-a'], 'rejected'),
+      memoryEntry('另一联系人证据不可出现', ['peer-b']), memoryEntry('缺失证据不可出现', ['unknown']),
+      memoryEntry('没有证据不可出现', []), memoryEntry('系统证据不可出现', ['system-a']),
+    ])});
+  Object.assign(state.conversations[1], {basisFacts: [basisFact('另一个联系人的爱好不可出现')], processing: {memoryEnabled: true},
+    memory: {...memory([memoryEntry('另一个联系人记忆不可出现', ['peer-b'])]), summary: '另一个联系人摘要不可出现'}});
+  state.messages.find(item => item.id === 'peer-a')!.insights = {conversationId: 'a', messageId: 'peer-a',
+    intents: [{label: '推断质问不可当事实', percentage: 80}, {label: '关心', percentage: 20}], affinity: {score: 70, confidence: 20, evidence: []},
+    uncertainty: '意图无法验证', provider: 'qwen', modelName: 'analysis-test', analyzedAt: ''};
+  let body: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {body = JSON.parse(init.body as string); return response();});
+  const drafts = await generateDrafts(state, 'a');
+  const context = JSON.parse(body.messages[1].content);
+  assert.deepEqual(context.confirmedContactFacts, [{category: 'interest', content: '对方爱好园艺', sourceNote: '用户手动补充'}]);
+  assert.deepEqual(context.reviewedConversationMemory.confirmedEntries.map((entry: any) => entry.text),
+    ['已确认谈过天气', '人工审核的已发送回复事件']);
+  assert.equal(context.reviewedConversationMemory.unconfirmedModelRecap, null, 'a rejected entry also suppresses potentially overlapping summary claims');
+  assert.deepEqual(context.selfStyleSamples, ['本人A表达样本']); assert.deepEqual(context.approvedSelfClaims, []);
+  assert.equal(context.learnedStyleProfile.version, '1.8');
+  for (const excluded of ['尚未确认记忆不可出现', '用户拒绝记忆不可出现', '另一联系人证据不可出现', '缺失证据不可出现', '没有证据不可出现',
+    '系统证据不可出现', '另一个联系人的爱好不可出现', '另一个联系人记忆不可出现', '另一个联系人摘要不可出现', '推断质问不可当事实']) {
+    assert.ok(!JSON.stringify(body).includes(excluded), excluded);
+  }
+  assert.match(body.messages[0].content, /描述对方，不是本人的经历/);
+  assert.match(body.messages[0].content, /不能把它当作已确认的共同经历/);
+  assert.match(body.messages[0].content, /不是本人的表达习惯/);
+  assert.ok(drafts.every(draft => draft.profileVersion === '1.8'));
+  state.conversations[0].memory!.entries = state.conversations[0].memory!.entries.filter(entry => ['已确认谈过天气', '人工审核的已发送回复事件', '尚未确认记忆不可出现'].includes(entry.text));
+  await generateDrafts(state, 'a');
+  assert.match(JSON.parse(body.messages[1].content).reviewedConversationMemory.unconfirmedModelRecap.summary, /也许/);
+});
+
+test('memory must be explicitly enabled per contact, while manually maintained recipient facts remain available', async t => {
+  const state = fixture(); state.conversations[0].basisFacts = [basisFact('对方正在学习摄影')];
+  state.conversations[0].memory = memory([memoryEntry('关闭的旧记忆不发送', ['peer-a'])]);
+  let context: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {context = JSON.parse(JSON.parse(init.body as string).messages[1].content); return response();});
+  for (const enabled of [undefined, false]) {
+    state.conversations[0].processing = {memoryEnabled: enabled};
+    await generateDrafts(state, 'a');
+    assert.equal(context.reviewedConversationMemory, null);
+    assert.equal(context.confirmedContactFacts[0].content, '对方正在学习摄影');
+    assert.ok(!JSON.stringify(context).includes('关闭的旧记忆不发送'));
+  }
+  state.conversations[0].processing!.memoryEnabled = true; await generateDrafts(state, 'a');
+  assert.equal(context.reviewedConversationMemory.confirmedEntries[0].text, '关闭的旧记忆不发送');
+  delete state.conversations[0].memory; await generateDrafts(state, 'a');
+  assert.equal(context.reviewedConversationMemory, null, 'clearing saved memory immediately removes it from future prompts');
+});
+
+test('recipient context is bounded and remote direct identifiers are masked, without exposing stored metadata', async t => {
+  const state = fixture(); state.settings.modelUrl = 'https://models.example/v1'; state.settings.allowRemoteModel = true;
+  const contact = state.conversations[0]; contact.processing = {memoryEnabled: true};
+  contact.basisFacts = Array.from({length: 44}, (_, i) => ({...basisFact(`资料${i} contact@example.com 13812345678 ${'字'.repeat(1800)}`, `basis-${i}`),
+    sourceNote: `来源 original@example.com 13912345678 ${'长'.repeat(500)}`}));
+  contact.memory = {...memory(Array.from({length: 36}, (_, i) => memoryEntry(`回顾${i} memo@example.com 13712345678 ${'字'.repeat(1800)}`, ['peer-a']))),
+    summary: `summary@example.com 13612345678 ${'字'.repeat(3000)}`,
+    openTopics: Array.from({length: 16}, (_, i) => `话题${i} topic@example.com 13512345678 ${'字'.repeat(800)}`),
+    sourceDigest: 'private-source-digest', modelName: 'private-recap-model'};
+  let body: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {body = JSON.parse(init.body as string); return response();});
+  await generateDrafts(state, 'a');
+  const context = JSON.parse(body.messages[1].content);
+  assert.equal(context.confirmedContactFacts.length, 40); assert.match(context.confirmedContactFacts[0].content, /^资料4 /);
+  assert.equal(context.reviewedConversationMemory.confirmedEntries.length, 32);
+  assert.match(context.reviewedConversationMemory.confirmedEntries[0].text, /^回顾4 /);
+  assert.ok(context.confirmedContactFacts.every((fact: any) => fact.content.length <= 1200 && fact.sourceNote.length <= 300));
+  assert.ok(context.reviewedConversationMemory.confirmedEntries.every((entry: any) => entry.text.length <= 1200));
+  assert.ok(context.reviewedConversationMemory.unconfirmedModelRecap.summary.length <= 1500);
+  assert.equal(context.reviewedConversationMemory.unconfirmedModelRecap.openTopics.length, 12);
+  assert.ok(context.reviewedConversationMemory.unconfirmedModelRecap.openTopics.every((topic: string) => topic.length <= 400));
+  for (const secret of ['contact@example.com', '13812345678', 'original@example.com', '13912345678', 'memo@example.com', '13712345678',
+    'summary@example.com', '13612345678', 'topic@example.com', '13512345678', 'private-source-digest', 'private-recap-model']) {
+    assert.ok(!JSON.stringify(body).includes(secret), secret);
+  }
+  state.settings.modelUrl = 'http://127.0.0.1:1234/v1'; await generateDrafts(state, 'a');
+  assert.ok(JSON.stringify(body).includes('contact@example.com'), 'local-only providers retain source values');
+});
+
+test('approved memory requires matching current source evidence, including message edits and revised media recognition', async t => {
+  const state = fixture(); const peer = state.messages.find(message => message.id === 'peer-a')!;
+  Object.assign(peer, {kind: 'image', mediaStatus: 'recognized', text: '[图片]', sourceFingerprint: 'source-before',
+    imageRecognition: {summary: '原图片观察', visibleText: '', facts: [], provider: 'qwen', modelName: 'vision-a', recognizedAt: ''}});
+  state.conversations[0].processing = {memoryEnabled: true};
+  state.conversations[0].memory = memory([
+    memoryEntry('有匹配证据的记忆', ['peer-a'], 'approved', state.messages),
+    {...memoryEntry('没有来源hash的旧记忆', ['peer-a']), sourceMessageHashes: undefined},
+  ]);
+  let context: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {context = JSON.parse(JSON.parse(init.body as string).messages[1].content); return response();});
+  await generateDrafts(state, 'a');
+  assert.deepEqual(context.reviewedConversationMemory.confirmedEntries.map((entry: any) => entry.text), ['有匹配证据的记忆']);
+  assert.equal(context.reviewedConversationMemory.unconfirmedModelRecap, null, 'legacy evidence without hashes cannot preserve a raw recap');
+  state.conversations[0].memory!.entries = state.conversations[0].memory!.entries.slice(0, 1);
+  await generateDrafts(state, 'a');
+  assert.match(context.reviewedConversationMemory.unconfirmedModelRecap.summary, /模型回顾/);
+  peer.imageRecognition!.summary = '用户重新识别得到不同观察'; await generateDrafts(state, 'a');
+  assert.deepEqual(context.reviewedConversationMemory.confirmedEntries, []);
+  assert.equal(context.reviewedConversationMemory.unconfirmedModelRecap, null);
+  peer.imageRecognition!.summary = '原图片观察'; peer.sourceFingerprint = 'source-after'; await generateDrafts(state, 'a');
+  assert.deepEqual(context.reviewedConversationMemory.confirmedEntries, []);
+  peer.sourceFingerprint = 'source-before'; peer.text = '修正后的消息'; await generateDrafts(state, 'a');
+  assert.deepEqual(context.reviewedConversationMemory.confirmedEntries, []);
+});
+
+test('compressed recap is omitted after any compressed source changes, even when no entry cites that source', async t => {
+  const state = fixture(); const source = state.messages.find(message => message.id === 'self-a')!;
+  state.conversations[0].processing = {memoryEnabled: true};
+  state.conversations[0].memory = {...memory(), compressedMessageHashes: {[source.id]: messageEvidenceHash(source)}};
+  let context: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {context = JSON.parse(JSON.parse(init.body as string).messages[1].content); return response();});
+  await generateDrafts(state, 'a'); assert.match(context.reviewedConversationMemory.unconfirmedModelRecap.summary, /模型回顾/);
+  source.text = '原消息已经修正'; await generateDrafts(state, 'a');
+  assert.equal(context.reviewedConversationMemory.unconfirmedModelRecap, null);
+  assert.deepEqual(context.reviewedConversationMemory.confirmedEntries, []);
+});
 
 test('contacts choose independent comparison models, inherit defaults or use just the primary', async t => {
   const state=fixture(),models:string[]=[];

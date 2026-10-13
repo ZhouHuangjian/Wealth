@@ -27,10 +27,14 @@ import { RemoteManagement, remoteSettingsSchema, remoteSettings, remoteConversat
 import type { AppState, Conversation, Message, PublicState, Settings, ImageAttachment } from '../shared/types.js';
 import { contactAutoMediaEnabled, contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
 import { replyModelsSchema } from './contact-processing-schema.js';
+import { ContactInsightService, validateContactFeatures } from './contact-insight-service.js';
+import { analyzeContactMessage } from './contact-insights.js';
+import { compressContactMemory } from './contact-memory.js';
 import { findImageRecognition, imageRecognitionIdentity, imageSha256, saveImageRecognition } from './image-recognition-cache.js';
 
 const text = z.string().trim().min(1).max(10000);
 const id = z.string().min(1).max(300);
+const contactModelSchema=z.object({provider:z.enum(['qwen','compatible','codex','disabled']),modelUrl:z.string().trim().max(2048),modelName:z.string().trim().max(200),apiKey:z.string().max(4096).optional(),useReplyApiKey:z.boolean(),allowRemoteModel:z.boolean(),thinkingEnabled:z.boolean().optional()}).strict();
 const importSchema = z.object({ text: z.string().min(1).max(5 * 1024 * 1024), filename: z.string().max(255).default('粘贴的记录.txt'), selfId: id.optional(), name: z.string().trim().min(1).max(80).optional(), format: z.enum(['auto','chatlab','json','csv','text']).optional() });
 const settingsSchema = z.object({
   autoReplyEnabled: z.boolean().optional(),
@@ -45,6 +49,7 @@ const settingsSchema = z.object({
   replyModels:replyModelsSchema.optional(),
   vision:z.object({provider:z.enum(['qwen','compatible','codex','disabled']),modelUrl:z.string().trim().max(2048),modelName:z.string().trim().max(200),apiKey:z.string().max(4096).optional(),useReplyApiKey:z.boolean(),allowRemoteModel:z.boolean(),thinkingEnabled:z.boolean().optional()}).strict().optional(),
   audio:z.object({provider:z.enum(['qwen','compatible','disabled']),modelUrl:z.string().trim().max(2048),modelName:z.string().trim().max(200),apiKey:z.string().max(4096).optional(),useReplyApiKey:z.boolean(),allowRemoteModel:z.boolean()}).strict().optional(),
+  analysis:contactModelSchema.optional(),memory:contactModelSchema.optional(),
   replyDelaySeconds: z.number().int().min(1).max(300).optional(),
   cooldownSeconds: z.number().int().min(0).max(3600).optional(), dailyLimit: z.number().int().min(1).max(200).optional(),
   quietHoursEnabled: z.boolean().optional(),
@@ -87,6 +92,7 @@ export function createApplication(options: {
   recognizeImage?:typeof recognizeImage;transcribeAudio?:typeof transcribeAudio;
   readWechatImage?:typeof readWechatImage;readWechatVoice?:typeof readWechatVoice;
   generate?: typeof generateDrafts; send?: ReturnType<typeof createSender>;
+  analyzeContactMessage?:typeof analyzeContactMessage;compressContactMemory?:typeof compressContactMemory;
 }) {
   const app = express();
   const newDatabase = options.databasePath === ':memory:' || !existsSync(options.databasePath);
@@ -136,11 +142,13 @@ export function createApplication(options: {
       &&(m.autoMediaEligible||mediaRequests.has(m.id))&&(m.kind==='image'||m.kind==='voice')&&contactAutoMediaEnabled(conversation,m.kind));
   } });
   const session = randomBytes(32).toString('hex');
+  let insights:ContactInsightService;
   const manualSending = new Set<string>();
   const suggestionRequests = new Map<string,string>();
   const uploads = new Map<string,{controller: AbortController; promise: Promise<{ok:true;id:string;duplicate:boolean}>}>();
   const wechatInspection = options.inspectWechat ?? inspectWechat;
-  const collector = new WechatCollector(store,{query:options.queryWechat,onMessages:(cid,latestId,live)=>{
+  const collector = new WechatCollector(store,{query:options.queryWechat,onContextInvalidated:cid=>insights?.changed(cid),onMessages:(cid,latestId,live)=>{
+    insights?.observed(cid,latestId,live);
     engine.conversationChanged(cid); suggestionRequests.delete(cid);
     mediaFiles.prune(store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]));
     if(live && latestId) engine.enqueue(cid,latestId);
@@ -231,13 +239,19 @@ export function createApplication(options: {
     if (!['GET','HEAD'].includes(req.method) && !secureEqual(String(req.headers['x-csrf-token'] ?? ''), session)) return res.status(403).json({error:'请求校验失败，请刷新页面。'});
     next();
   });
+  insights=new ContactInsightService(store,{analyze:options.analyzeContactMessage,compress:options.compressContactMemory,onContextChanged:cid=>{
+    engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});
+  }});
+  insights.register(app);
   const publicState = (): PublicState => {
     const s = store.read();
     const {imageTestRecognitionHistory:_testHistory,messages,...state}=s;
-    const { apiKey, vision, audio, ...settings } = s.settings;
+    const { apiKey, vision, audio, analysis, memory, ...settings } = s.settings;
     const publicVision=vision?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(vision):undefined;
     const publicAudio=audio?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(audio):undefined;
-    return { ...state, messages:messages.map(({imageRecognitionHistory:_history,...message})=>message), settings:{...settings,hasApiKey:!!apiKey,...(publicVision?{vision:publicVision}:{}),...(publicAudio?{audio:publicAudio}:{})}, knowledge:KNOWLEDGE,
+    const publicAnalysis=analysis?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(analysis):undefined;
+    const publicMemory=memory?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(memory):undefined;
+    return { ...state, messages:messages.map(({imageRecognitionHistory:_history,...message})=>message), settings:{...settings,hasApiKey:!!apiKey,...(publicVision?{vision:publicVision}:{}),...(publicAudio?{audio:publicAudio}:{}),...(publicAnalysis?{analysis:publicAnalysis}:{}),...(publicMemory?{memory:publicMemory}:{})}, knowledge:KNOWLEDGE,
       runtime: { channel:isBridgeReceiveConfigured(config)?'webhook':'simulator',bridgeConfigured:isBridgeConfigured(config),bridgeReceiveConfigured:isBridgeReceiveConfigured(config),bridgeSendConfigured:isBridgeConfigured(config),learnedProfileError,
         codexAvailable:codexStatus.available,codexVersion:codexStatus.version,codexStatus:codexStatus.message,
         draftSyncConfigured:isDraftSyncConfigured(syncConnection.config()),draftInboxConfigured:isDraftInboxConfigured(syncConnection.config()),draftSyncConnection:syncConnection.status(),remoteManagement:remote.status(),
@@ -314,6 +328,7 @@ export function createApplication(options: {
   const setWechatEnabled = (cid:string, enabled:boolean) => {
     if(enabled&&!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
     collector.setEnabled(cid,enabled);
+    if(!enabled)insights.changed(cid);
     if(!enabled){for(const message of store.read().messages.filter(m=>m.conversationId===cid))cancelMedia(message.id);store.update(s=>{for(const message of s.messages.filter(m=>m.conversationId===cid))message.autoMediaEligible=false;});}
     engine.conversationChanged(cid);suggestionRequests.delete(cid);
     store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});
@@ -348,7 +363,7 @@ export function createApplication(options: {
     findImageRecognition(state.imageTestRecognitionHistory,identity)??state.messages.reduce<Message['imageRecognition']>((found,message)=>found??findImageRecognition(message.imageRecognitionHistory,identity),undefined);
   const mediaConfiguration=(s:Settings,kind:'image'|'voice')=>JSON.stringify([kind==='image'?s.vision:s.audio,s.apiKey,s.modelUrl]);
   const cancelMedia=(mid?:string,kind?:'image'|'voice')=>{for(const [key,entry] of mediaRequests)if((!mid||mid===key)&&(!kind||entry.kind===kind))entry.controller.abort();};
-  const invalidateMediaContext=(cid:string)=>{engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});};
+  const invalidateMediaContext=(cid:string)=>{insights.changed(cid);engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);for(const m of s.messages.filter(m=>m.conversationId===cid))delete m.insights;});};
   async function readMessageMedia(mid:string,kind:'image'|'voice',signal?:AbortSignal,forceRead=false) {
     const message=messageOf(mid),attachment=kind==='image'?message.imageAttachment:message.audioAttachment;
     if(message.kind!==kind)throw new Error(kind==='image'?'该消息不是图片。':'该消息不是语音。');
@@ -407,7 +422,7 @@ export function createApplication(options: {
   }
   const mediaAutomation=new MediaAutomation(store,{
     recognize:async(...args)=>{await recognizeMessage(...args);},
-    onComplete:cid=>{const latest=store.read().messages.filter(m=>m.conversationId===cid).at(-1);if(latest?.role==='peer')engine.enqueue(cid,latest.id,true);},
+    onComplete:cid=>{const latest=store.read().messages.filter(m=>m.conversationId===cid).at(-1);if(latest?.role==='peer'){engine.enqueue(cid,latest.id,true);if(latest.kind==='voice')insights.observed(cid,latest.id,true);}},
     onFailure:(cid,kind)=>store.update(s=>addActivity(s,'warning',kind==='image'?'图片自动识别未完成':'语音自动转写未完成','可在这条消息中手动重试或上传媒体文件。',cid)),
   });
   app.post('/api/images/test',async(req,res)=>{
@@ -485,14 +500,15 @@ export function createApplication(options: {
     const patch = settingsSchema.parse(input);
     const old = store.read().settings;
     const next = { ...old, ...patch,
-      ...(patch.vision?{vision:{...old.vision,...patch.vision}}:{}),...(patch.audio?{audio:{...old.audio,...patch.audio}}:{}) };
+      ...(patch.vision?{vision:{...old.vision,...patch.vision}}:{}),...(patch.audio?{audio:{...old.audio,...patch.audio}}:{}),
+      ...(patch.analysis?{analysis:{...old.analysis,...patch.analysis}}:{}),...(patch.memory?{memory:{...old.memory,...patch.memory}}:{}) };
     // Existing remote controls choose one primary model; honor that selection.
     if(patch.replyModels===undefined&&((patch.provider!==undefined&&patch.provider!==old.provider)||(patch.modelName!==undefined&&patch.modelName!==old.modelName)))next.replyModels=[];
     if((next.replyModels?.length??0)>1&&next.autoReplyMode==='send'){next.autoReplyMode='draft';next.autoReplyEnabled=false;}
     if (next.autoReplyMode !== old.autoReplyMode) next.autoReplyEnabled = false;
     if(patch.allowRemoteModel===false && old.allowRemoteModel) next.autoReplyEnabled=false;
     if(next.provider!=='demo' && next.provider!=='codex' && next.modelUrl.trim()) validateEndpoint(next.modelUrl);
-    for(const item of [next.vision,next.audio])if(item&&item.provider!=='disabled'&&item.provider!=='codex'&&item.modelUrl.trim())validateEndpoint(item.modelUrl);
+    for(const item of [next.vision,next.audio,next.analysis,next.memory])if(item&&item.provider!=='disabled'&&item.provider!=='codex'&&item.modelUrl.trim())validateEndpoint(item.modelUrl);
     // Legacy global media flags are accepted for old clients, but only contact
     // switches control automation and are validated when a contact enables them.
     if(next.syncDraftsEnabled && !isDraftSyncConfigured(syncConnection.config())) throw new Error('请先在设置中保存草稿同步配置。');
@@ -509,15 +525,19 @@ export function createApplication(options: {
     }
     if(next.autoReplyMode==='send'&&next.autoReplyEnabled&&store.read().conversations.some(c=>c.autoReplyEnabled&&(effectiveContactSettings(next,c).replyModels?.length??0)>1))throw new Error('部分联系人选择了多个回复模型，请使用草稿模式。');
     // Model or scheduling changes cancel pending work; newly arriving messages use the new settings.
-    const needsCancel = Object.entries(patch).some(([key,value])=>key!=='autoReplyEnabled' && key!=='syncDraftsEnabled' && key!=='remoteManagementEnabled' && old[key as keyof Settings]!==value) || patch.autoReplyEnabled===false;
+    const needsCancel = Object.keys(patch).some(key=>!['autoReplyEnabled','syncDraftsEnabled','remoteManagementEnabled','analysis','memory'].includes(key)
+      && JSON.stringify(old[key as keyof Settings])!==JSON.stringify(next[key as keyof Settings])) || old.autoReplyEnabled&&!next.autoReplyEnabled;
     if (needsCancel) {engine.pause(); suggestionRequests.clear();}
     if(mediaConfiguration(next,'image')!==mediaConfiguration(old,'image'))cancelMedia(undefined,'image');
     if(mediaConfiguration(next,'voice')!==mediaConfiguration(old,'voice'))cancelMedia(undefined,'voice');
+    if(patch.analysis)insights.changed(undefined,'analysis');
+    if(patch.memory)insights.changed(undefined,'memory');
     store.update(s=>{
       s.settings = next;
       if(needsCancel) s.drafts=[];
       addActivity(s,'info',next.autoReplyEnabled?'自动回复已开启':'设置已保存',next.autoReplyEnabled?'只对已开启的联系人生效。':'自动回复当前关闭。');
     });
+    if(patch.analysis)insights.invalidateCached();
     mediaAutomation.invalidate();
     if(patch.remoteManagementEnabled!==undefined && old.remoteManagementEnabled!==patch.remoteManagementEnabled)remote.invalidate(!patch.remoteManagementEnabled);
   };
@@ -538,11 +558,19 @@ export function createApplication(options: {
     const state=store.read(),c=conversationOf(state,cid),{processing,...information}=body;
     const next:Conversation={...c,...information};
     if(processing){
-      const {replyModels,...media}=processing;
+      const {replyModels,analysisModel,memoryModel,...media}=processing;
       next.processing={...c.processing,...media};
       if(replyModels===null)delete next.processing.replyModels;
       else if(replyModels!==undefined)next.processing.replyModels=replyModels;
+      if(analysisModel===null)delete next.processing.analysisModel;else if(analysisModel!==undefined)next.processing.analysisModel=analysisModel;
+      if(memoryModel===null)delete next.processing.memoryModel;else if(memoryModel!==undefined)next.processing.memoryModel=memoryModel;
+      if(!next.processing.intentEnabled&&!next.processing.affinityEnabled&&(processing.intentEnabled===false||processing.affinityEnabled===false))next.processing.autoAnalyzeMessages=false;
+      if(processing.memoryEnabled===false)next.processing.autoCompressMemory=false;
     }
+    validateContactFeatures(state.settings,next,{
+      analysis:processing?.intentEnabled===true||processing?.affinityEnabled===true||processing?.autoAnalyzeMessages===true||!!processing?.analysisModel,
+      memory:processing?.autoCompressMemory===true||!!processing?.memoryModel,
+    });
     const effective=effectiveContactSettings(state.settings,next);
     if(processing?.autoRecognizeImages===true&&(!state.settings.vision||state.settings.vision.provider==='disabled'))throw new Error('请先配置图片识别模型，再为此联系人开启自动识图。');
     if(processing?.autoTranscribeVoice===true&&(!state.settings.audio||state.settings.audio.provider==='disabled'))throw new Error('请先配置语音模型，再为此联系人开启自动转写。');
@@ -558,13 +586,17 @@ export function createApplication(options: {
         if(contactUsesDemo(state.settings,next)) throw new Error('外部自动回复需要真实模型；规则演示只能用于本机演练。');
       }
     }
-    engine.conversationChanged(cid); suggestionRequests.delete(cid);
+    const replyChanged=Object.keys(information).length>0||processing?.replyModels!==undefined||processing?.memoryEnabled!==undefined;
+    if(replyChanged){engine.conversationChanged(cid);suggestionRequests.delete(cid);}
+    insights.changed(cid);
     store.update(s=>{
       Object.assign(conversationOf(s,cid),next);
       for(const message of s.messages.filter(m=>m.conversationId===cid&&(m.kind==='image'||m.kind==='voice'))) {
         if(!contactAutoMediaEnabled(next,message.kind as 'image'|'voice'))message.autoMediaEligible=false;
       }
-      s.drafts=s.drafts.filter(d=>d.conversationId!==cid);addActivity(s,'info','对话设置已更新',body.autoReplyEnabled===true?'此联系人已加入自动处理范围。':body.autoReplyEnabled===false?'此联系人已暂停自动处理。':'已保存对话信息。',cid);
+      if(replyChanged)s.drafts=s.drafts.filter(d=>d.conversationId!==cid);
+      if(Object.keys(information).length>0||processing?.intentEnabled!==undefined||processing?.affinityEnabled!==undefined||processing?.analysisModel!==undefined||processing?.memoryEnabled!==undefined)for(const m of s.messages.filter(m=>m.conversationId===cid))delete m.insights;
+      addActivity(s,'info','对话设置已更新',body.autoReplyEnabled===true?'此联系人已加入自动处理范围。':body.autoReplyEnabled===false?'此联系人已暂停自动处理。':'已保存对话信息。',cid);
     });
     mediaAutomation.invalidate(cid);
     return conversationOf(store.read(),cid);
@@ -572,6 +604,7 @@ export function createApplication(options: {
   app.patch('/api/conversations/:id',(req,res)=>res.json(patchConversation(param(req),req.body)));
   app.delete('/api/conversations/:id', (req,res)=>{
     const cid=param(req); conversationOf(store.read(),cid);
+    insights.changed(cid);
     if(manualSending.has(cid)||activeSends.has(cid)) return res.status(409).json({error:'该会话有发送正在确认，请稍后删除。'});
     engine.conversationChanged(cid);
     collector.cancel(cid);
@@ -588,7 +621,7 @@ export function createApplication(options: {
     const m:Message={id:randomUUID(),conversationId:cid,role:body.role,text:body.text,sentAt:new Date().toISOString(),sequence:store.read().messages.filter(m=>m.conversationId===cid).length+1,source:'manual',externalId:null,aiAssisted:false};
     engine.conversationChanged(cid);
     store.update(s=>{s.messages.push(m);conversationOf(s,cid).updatedAt=m.sentAt!;s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});
-    if(body.role==='peer') engine.enqueue(cid,m.id);
+    if(body.role==='peer'){engine.enqueue(cid,m.id);insights.observed(cid,m.id,true);}
     res.status(201).json(m);
   });
 
@@ -604,7 +637,7 @@ export function createApplication(options: {
     const drafts=await generate(before,cid,intent);
     const current=store.read();
     if(!current.conversations.some(c=>c.id===cid)||current.messages.filter(m=>m.conversationId===cid).at(-1)?.id!==latest.id) return res.status(409).json({error:'对话已有新消息，请重新生成建议。'});
-    if(suggestionRequests.get(cid)!==requestId || JSON.stringify(current.settings)!==JSON.stringify(before.settings) || replyContextFingerprint(current,cid)!==replyContextFingerprint(before,cid)) return res.status(409).json({error:'设置、个人档案、反馈或生成请求已更新，请重新生成建议。'});
+    if(suggestionRequests.get(cid)!==requestId || replyContextFingerprint(current,cid)!==replyContextFingerprint(before,cid)) return res.status(409).json({error:'设置、个人档案、反馈或生成请求已更新，请重新生成建议。'});
     if(!drafts.length || drafts.some(d=>d.conversationId!==cid || d.basedOnMessageId!==latest.id || !d.text.trim() || d.text.length>500)) throw new Error('生成结果无效，请重新生成建议。');
     store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);s.drafts.push(...drafts);});
     await syncDrafts(cid,true).catch(()=>{});
@@ -697,7 +730,7 @@ export function createApplication(options: {
     if(preview.needsSelfId) throw new Error('请先选择哪一位是你。');
     engine.pause();const result=commitImport(store,body);store.update(s=>{s.drafts=[];});res.json(result);
   });
-  app.post('/api/demo', (_req,res)=>{const attachments=store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]);cancelMedia();seedDemo(store);for(const attachment of attachments)mediaFiles.delete(attachment);res.json(publicState());});
+  app.post('/api/demo', (_req,res)=>{const attachments=store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]);cancelMedia();insights.changed();seedDemo(store);for(const attachment of attachments)mediaFiles.delete(attachment);res.json(publicState());});
   app.post('/api/bridge/incoming', (req,res)=>{
     if(!isBridgeReceiveConfigured(config)||!secureEqual(req.headers.authorization??'',`Bearer ${config.inboundToken}`)) return res.status(401).json({error:'消息桥接未配置或凭据无效。'});
     const body=z.object({eventId:id,conversationId:id,text,direction:z.enum(['incoming','outgoing']).default('incoming'),timestamp:z.string().datetime({offset:true}).optional(),idempotencyKey:id.optional()}).parse(req.body);
@@ -710,7 +743,7 @@ export function createApplication(options: {
     const ownEcho=role==='self'&&body.idempotencyKey&&activeSends.get(c.id)===body.idempotencyKey;
     if(!ownEcho) engine.conversationChanged(c.id);
     store.update(s=>{s.messages.push(m);conversationOf(s,c.id).updatedAt=new Date().toISOString();s.drafts=s.drafts.filter(d=>d.conversationId!==c.id);});
-    if(role==='peer') engine.enqueue(c.id,m.id);
+    if(role==='peer'){engine.enqueue(c.id,m.id);insights.observed(c.id,m.id,true);}
     res.status(202).json({ok:true,messageId:m.id});
   });
   app.use('/api',(_req,res)=>res.status(404).json({error:'接口不存在。'}));
@@ -759,5 +792,5 @@ export function createApplication(options: {
       return {conversation:remoteConversation(conversationOf(store.read(),cid))};
     },
   });
-  return {app,store,engine,collector,remote,mediaAutomation,publicState,close:()=>{mediaAutomation.stop();cancelMedia();remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
+  return {app,store,engine,collector,remote,mediaAutomation,insights,publicState,close:()=>{insights.stop();mediaAutomation.stop();cancelMedia();remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
 }

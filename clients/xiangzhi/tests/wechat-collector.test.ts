@@ -7,6 +7,7 @@ import type { Conversation } from '../shared/types.js';
 import { AutoReplyEngine } from '../server/auto-reply.js';
 import { Store } from '../server/store.js';
 import { WechatCollector } from '../server/wechat-collector.js';
+import { insightsInputDigest } from '../server/contact-insights.js';
 import type { WechatPage, WechatQuery, WechatRecord } from '../server/wechat-cli.js';
 
 const NOW = Date.parse('2026-10-10T04:00:00Z');
@@ -28,19 +29,97 @@ function page(records: WechatRecord[], hasMore = false, accountFingerprint = acc
 }
 function setup(t: TestContext, query: WechatQuery, binding: Partial<NonNullable<Conversation['wechat']>> = {},
   onMessages?: (cid: string, latest: string | null, live: boolean) => void) {
-  const store = new Store(':memory:'); const events: Event[] = [];
+  const store = new Store(':memory:'); const events: Event[] = [], invalidations: string[] = [];
   store.update(state => {state.conversations.push(conversation(binding));});
-  const collector = new WechatCollector(store, {query, now: () => NOW, onMessages: (cid, latest, live) => {
+  const collector = new WechatCollector(store, {query, now: () => NOW, onContextInvalidated: cid => {invalidations.push(cid);}, onMessages: (cid, latest, live) => {
     events.push({cid, latest, live}); onMessages?.(cid, latest, live);
   }});
   t.after(() => {collector.stop(); store.close();});
-  return {store, collector, events};
+  return {store, collector, events, invalidations};
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(res => {resolve = res;});
   return {promise, resolve};
 }
+
+function saveSyntheticInsights(store: Store, cid: string) {
+  store.update(state => {
+    const conversation = state.conversations.find(item => item.id === cid)!;
+    conversation.processing = {...conversation.processing, intentEnabled: true};
+    state.settings.analysis = {provider: 'compatible', modelUrl: 'http://127.0.0.1:11435/v1', modelName: 'analysis-test',
+      useReplyApiKey: false, allowRemoteModel: false};
+    for (const message of state.messages.filter(item => item.conversationId === cid)) message.insights = {
+      conversationId: cid, messageId: message.id, intents: [{label: '询问', percentage: 100}], affinity: null,
+      uncertainty: '纯合成分析', provider: 'compatible', modelName: 'analysis-test', analyzedAt: '',
+      inputDigest: insightsInputDigest(state, cid, message.id),
+    };
+  });
+}
+
+test('source changes clear their analysis and stale later analysis while preserving earlier and other-contact results', async t => {
+  let rows = [record(100), record(101), record(102)];
+  const {store, collector, invalidations} = setup(t, async () => page(rows), {enabled: true});
+  await collector.poll('wechat-test');
+  store.update(state => {
+    state.conversations.push({...conversation({initialized: true, enabled: false, accountFingerprint: account}), id: 'other-contact', externalId: 'other-peer'});
+    state.messages.push({id: 'other-message', conversationId: 'other-contact', role: 'peer', text: '另一人的合成消息', source: 'manual',
+      sentAt: null, sequence: 1, externalId: null, aiAssisted: false});
+  });
+  saveSyntheticInsights(store, 'wechat-test'); saveSyntheticInsights(store, 'other-contact');
+  const before = store.read(), firstId = before.messages.find(message => message.externalId === 'id-100')!.id;
+  const changedId = before.messages.find(message => message.externalId === 'id-101')!.id;
+  const laterId = before.messages.find(message => message.externalId === 'id-102')!.id;
+  const firstAnalysis = before.messages.find(message => message.id === firstId)!.insights;
+  const otherAnalysis = before.messages.find(message => message.id === 'other-message')!.insights;
+  rows = [record(100), record(101, {text: '修正的合成消息'}), record(102)];
+  await collector.poll('wechat-test'); const after = store.read();
+  assert.deepEqual(after.messages.find(message => message.id === firstId)!.insights, firstAnalysis);
+  assert.equal(after.messages.find(message => message.id === changedId)!.insights, undefined);
+  assert.equal(after.messages.find(message => message.id === laterId)!.insights, undefined);
+  assert.deepEqual(after.messages.find(message => message.id === 'other-message')!.insights, otherAnalysis);
+  assert.deepEqual(invalidations, ['wechat-test']);
+});
+
+test('identical rereads, identifier upgrades and new later messages retain historical analysis with unchanged digests', async t => {
+  const first = record(100, {id: 'seq:100'}); let rows = [first, record(101)];
+  const {store, collector, invalidations} = setup(t, async () => page(rows), {enabled: true});
+  await collector.poll('wechat-test'); saveSyntheticInsights(store, 'wechat-test');
+  const saved = new Map(store.read().messages.map(message => [message.id, message.insights]));
+  await collector.poll('wechat-test');
+  rows = [{...first, id: 'stable-100'}, record(101), record(102)]; await collector.poll('wechat-test');
+  const after = store.read();
+  for (const [id, insight] of saved) {
+    const current = after.messages.find(message => message.id === id)!;
+    assert.deepEqual(current.insights, insight); assert.equal(current.insights!.inputDigest, insightsInputDigest(after, 'wechat-test', id));
+  }
+  assert.equal(after.messages.at(-1)!.insights, undefined); assert.deepEqual(invalidations, []);
+});
+
+test('late earlier records invalidate only cached sentences whose preceding context changes', async t => {
+  let rows = [record(100), record(102)];
+  const {store, collector, invalidations} = setup(t, async () => page(rows), {enabled: true});
+  await collector.poll('wechat-test'); saveSyntheticInsights(store, 'wechat-test');
+  const before = store.read(), first = before.messages.find(message => message.externalId === 'id-100')!;
+  const later = before.messages.find(message => message.externalId === 'id-102')!;
+  rows = [record(100), record(101), record(102)]; await collector.poll('wechat-test'); const after = store.read();
+  assert.deepEqual(after.messages.find(message => message.id === first.id)!.insights, first.insights);
+  assert.equal(after.messages.find(message => message.id === later.id)!.insights, undefined);
+  assert.deepEqual(invalidations, ['wechat-test']);
+});
+
+test('an account switch signals context invalidation before any foreign records can be committed', async t => {
+  let response = page([record(100)]);
+  const {store, collector, events, invalidations} = setup(t, async () => response, {enabled: true});
+  await collector.poll('wechat-test'); saveSyntheticInsights(store, 'wechat-test');
+  const before = store.read(), eventCount = events.length;
+  response = page([record(101, {text: '另一个账号的数据不得提交'})], false, 'foreign-account');
+  await assert.rejects(collector.poll('wechat-test'), /账号已变化/);
+  const after = store.read();
+  assert.deepEqual(after.messages, before.messages); assert.equal(after.conversations[0].wechat!.accountFingerprint, account);
+  assert.equal(after.conversations[0].wechat!.enabled, false); assert.equal(events.length, eventCount);
+  assert.deepEqual(invalidations, ['wechat-test']);
+});
 
 test('first poll reads the newest fifty as a non-live baseline without following older pages', async t => {
   const inputs: Input[] = [];

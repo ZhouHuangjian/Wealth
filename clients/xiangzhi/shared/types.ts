@@ -31,11 +31,42 @@ export interface AudioRecognition {
 export interface ReplyModelChoice {
   id: string; provider: Provider; modelName: string; modelPreset?: 'custom' | 'qwen'; label?: string;
 }
+export interface ContactModelSettings {
+  provider: 'qwen' | 'compatible' | 'codex' | 'disabled';
+  modelUrl: string; modelName: string; apiKey?: string;
+  useReplyApiKey: boolean; allowRemoteModel: boolean; thinkingEnabled?: boolean;
+}
+export interface ContactBasisFact {
+  id: string; category: 'current_status' | 'interest' | 'preference' | 'fact' | 'boundary' | 'plan';
+  content: string; sourceNote: string; createdAt: string; updatedAt: string;
+}
+export interface ContactMemoryEntry {
+  id: string; kind: 'fact' | 'event' | 'preference' | 'openTopic'; text: string;
+  sourceMessageIds: string[]; status: 'pending' | 'approved' | 'rejected'; createdAt: string;
+  sourceMessageHashes?: Record<string,string>;
+}
+export interface ContactMemory {
+  summary: string; entries: ContactMemoryEntry[]; openTopics: string[];
+  throughSequence: number; sourceDigest: string;
+  compressedMessageHashes?: Record<string,string>;
+  provider: 'qwen' | 'compatible' | 'codex'; modelName: string; updatedAt: string;
+}
+export interface ContactInsights {
+  conversationId: string; messageId: string;
+  intents: {label: string; percentage: number}[];
+  affinity: {score: number | null; confidence: number; evidence: string[]} | null;
+  uncertainty: string; provider: 'qwen' | 'compatible' | 'codex'; modelName: string; analyzedAt: string;
+  inputDigest?: string;
+  usage?: {promptTokens: number; completionTokens: number; totalTokens: number};
+}
 export interface ContactProcessing {
   /** Missing inherits global choices; an empty list uses the global primary model. */
   replyModels?: ReplyModelChoice[];
   autoRecognizeImages?: boolean;
   autoTranscribeVoice?: boolean;
+  intentEnabled?: boolean; affinityEnabled?: boolean; memoryEnabled?: boolean;
+  autoAnalyzeMessages?: boolean; autoCompressMemory?: boolean;
+  analysisModel?: ReplyModelChoice; memoryModel?: ReplyModelChoice;
 }
 export interface Settings {
   autoReplyEnabled: boolean;
@@ -50,6 +81,7 @@ export interface Settings {
   modelThinkingEnabled?: boolean;
   vision?: VisionSettings;
   audio?: AudioSettings;
+  analysis?: ContactModelSettings; memory?: ContactModelSettings;
   autoRecognizeImages?: boolean; autoTranscribeVoice?: boolean;
   replyModels?: ReplyModelChoice[];
   allowRemoteModel: boolean;
@@ -65,6 +97,8 @@ export interface Conversation {
   note: string; autoReplyEnabled: boolean; channel: 'simulator' | 'webhook' | 'wechat';
   externalId: string | null; createdAt: string; updatedAt: string;
   processing?: ContactProcessing;
+  basisFacts?: ContactBasisFact[];
+  memory?: ContactMemory;
   wechat?: {
     enabled: boolean; initialized: boolean; cursor: string | null; accountFingerprint: string | null;
     lastCheckedAt: string | null; status: 'paused' | 'reading' | 'ready' | 'error'; detail: string;
@@ -82,6 +116,7 @@ export interface Message {
   audioAttachment?: ImageAttachment;
   audioRecognition?: AudioRecognition;
   autoMediaEligible?: boolean;
+  insights?: ContactInsights;
 }
 export interface ProfileClaim {
   id: string; category: 'preference' | 'style' | 'fact' | 'boundary';
@@ -149,7 +184,7 @@ export interface AppState {
 }
 export interface PublicState extends Omit<AppState, 'settings' | 'messages' | 'imageTestRecognitionHistory'> {
   messages: Omit<Message, 'imageRecognitionHistory'>[];
-  settings: Omit<Settings, 'apiKey' | 'vision' | 'audio'> & { hasApiKey: boolean; vision?: Omit<VisionSettings, 'apiKey'> & {hasApiKey: boolean}; audio?: Omit<AudioSettings, 'apiKey'> & {hasApiKey: boolean} };
+  settings: Omit<Settings, 'apiKey' | 'vision' | 'audio' | 'analysis' | 'memory'> & { hasApiKey: boolean; vision?: Omit<VisionSettings, 'apiKey'> & {hasApiKey: boolean}; audio?: Omit<AudioSettings, 'apiKey'> & {hasApiKey: boolean}; analysis?: Omit<ContactModelSettings, 'apiKey'> & {hasApiKey: boolean}; memory?: Omit<ContactModelSettings, 'apiKey'> & {hasApiKey: boolean} };
   knowledge: Knowledge[];
   runtime: {
     channel: 'simulator' | 'webhook'; bridgeConfigured: boolean; autoRunning: boolean; modelLabel: string;

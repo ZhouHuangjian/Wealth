@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AppState, AutoJob, Conversation, Settings } from '../shared/types.js';
 import { contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
-import { generateDrafts, hasStopContactRequest, latestConversationMessage } from './generation.js';
+import { approvedSelfReplyClaims, contactReplyMemoryContext, generateDrafts, hasStopContactRequest, latestConversationMessage } from './generation.js';
 import { assertReplyContextReady, recentConversationMessages } from './message-context.js';
 
 interface StateStore { read(): AppState; update(fn: (state: AppState) => void): unknown }
@@ -42,11 +42,17 @@ export function replyContextFingerprint(state: AppState, conversationId: string)
   const configuration = conversation ? {
     id: conversation.id, name: conversation.name, note: conversation.note, channel: conversation.channel,
     externalId: conversation.externalId, autoReplyEnabled: conversation.autoReplyEnabled,
-    processing: conversation.processing,
+    processing: {
+      replyModels: conversation.processing?.replyModels,
+      autoRecognizeImages: conversation.processing?.autoRecognizeImages,
+      autoTranscribeVoice: conversation.processing?.autoTranscribeVoice,
+      memoryEnabled: conversation.processing?.memoryEnabled,
+    },
     wechat: conversation.wechat ? {enabled: conversation.wechat.enabled, accountFingerprint: conversation.wechat.accountFingerprint} : null,
   } : null;
   return JSON.stringify([modelFingerprint(effectiveContactSettings(state.settings, conversation)), state.learnedProfile?.digest ?? null,
-    state.claims, state.feedback?.filter(item => item.conversationId === conversationId) ?? [],
+    approvedSelfReplyClaims(state, conversationId), state.feedback?.filter(item => item.conversationId === conversationId) ?? [],
+    contactReplyMemoryContext(state, conversationId),
     configuration,
     recentConversationMessages(state, conversationId).map(message => [message.id, message.sequence, message.role, message.text,
       message.kind ?? 'text', message.mediaStatus ?? null,message.imageRecognition??null,message.audioRecognition??null])]);
