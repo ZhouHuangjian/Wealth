@@ -112,6 +112,7 @@ test('insight schema rejects non-totaling, duplicate, diagnostic labels, missing
     {...valid, intents: [{label: '精神疾病', percentage: 100}]},
     {...valid, intents: [{label: '关心', percentage: -10}, {label: '询问', percentage: 110}]},
     {...valid, intents: [{label: '关心', percentage: 99.5}, {label: '询问', percentage: 0.5}]},
+    {...valid, intents: valid.intents.map(item=>({...item,reason:'额外说明不能混入固定结构'}))},
     {...valid, affinity: {score: 99, confidence: 90, evidence: []}},
     {...valid, affinity: {score: 1000, confidence: 25, evidence: ['有限线索']}},
     {...valid, hidden: 'unrequested'}, {...valid, uncertainty: ''},

@@ -97,6 +97,13 @@ export async function contactModelCompletion(settings: Settings, config: Contact
         modelName: config.modelName, allowRemoteModel: config.allowRemoteModel}, messages, schema, combined);
     } catch { throw abortError() ?? new Error(`Codex ${feature}失败，请检查模型、CLI 登录状态和网络。`); }
   } else {
+    // Compatible APIs do not all implement schema-constrained output. Include
+    // the server-owned schema in the instruction and still validate the result.
+    const instruction=`\n输出必须严格符合以下固定 JSON Schema；不增加说明、reason 或其他未定义字段：\n${JSON.stringify(schema)}`;
+    const requestMessages=messages[0]?.role==='system'
+      ? [{...messages[0],content:messages[0].content+instruction},...messages.slice(1)]
+      : [{role:'system',content:instruction},...messages];
+    if(Buffer.byteLength(JSON.stringify(requestMessages))>128_000)throw new Error(`${feature}上下文过长，请减少输入。`);
     const endpoint = modelEndpoint({...config, provider: config.provider});
     assertModelName(config.modelName);
     const apiKey = key(settings, config, endpoint);
@@ -107,7 +114,7 @@ export async function contactModelCompletion(settings: Settings, config: Contact
     let response: Response;
     try {
       response = await (dependencies.fetch ?? fetch)(endpoint, {method: 'POST', headers, redirect: 'error', signal: combined,
-        body: JSON.stringify({model: config.modelName.trim(), messages, stream: false, temperature: 0.1, max_tokens: 3000,
+        body: JSON.stringify({model: config.modelName.trim(), messages:requestMessages, stream: false, temperature: 0.1, max_tokens: 3000,
           ...(qwen ? {enable_thinking: config.thinkingEnabled ?? false} : {})})});
     } catch { throw abortError() ?? new Error(`无法连接${feature}模型，请检查地址、网络和认证。`); }
     if (!response.ok) {

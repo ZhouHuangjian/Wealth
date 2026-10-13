@@ -27,6 +27,21 @@ test('contact model uses independently selected Qwen model and does not place ke
   assert.equal(result.modelName, 'qwen-analysis-test'); assert.equal(settings.modelName, 'qwen-reply-test');
 });
 
+test('compatible contact models receive the exact server schema without changing the source prompt', async () => {
+  const original=JSON.stringify(messages);
+  await contactModelCompletion(settings,config,messages,schema,'分析',undefined,{fetch:async(_url,init)=>{
+    const body=JSON.parse(String(init!.body));
+    assert.equal(body.messages.length,2);
+    assert.equal(body.messages[0].role,'system');
+    assert.ok(body.messages[0].content.startsWith(messages[0].content));
+    assert.ok(body.messages[0].content.includes(JSON.stringify(schema)));
+    assert.match(body.messages[0].content,/未定义字段/);
+    assert.deepEqual(body.messages[1],messages[1]);
+    return response();
+  }});
+  assert.equal(JSON.stringify(messages),original);
+});
+
 test('contact model permits independent credentials but never reuses keys across origins', async () => {
   let calls = 0;
   const dependencies = {fetch: async () => { calls++; return response(); }};
