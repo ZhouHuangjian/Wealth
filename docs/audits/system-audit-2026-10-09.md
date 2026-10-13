@@ -326,9 +326,9 @@ Ubuntu24.04/Python3.13.16服务器独立候选库：关键459、完整1498及12�
 
 后续批次及验收见[开发状态](../development-status.md#2026-10-12-首页估算收益排查有诊断未修复)，影响范围按[项目地图](../project-map.md#修改影响表)及现行规则定位；提出方案不代表已修复。
 
-## 12. 2026-10-13 估值与收益一致性修复（候选）
+## 12. 2026-10-13 估值与收益一致性修复
 
-用户授权开始修改并检查其他相关问题后，在`codex/estimate-return-diagnosis-20261012`从诊断提交`1459c78`继续实现2.14.1候选。§11保留2026-10-12当时的线上2.14.0观察、原2失败/4通过及未修复状态，不回写为当时已通过。以下为候选实现与阶段验证，**最终冻结、Linux候选完整回归及部署结果待统一补充**；尚无本批生产历史数据修复、迁移或原始账务变更。2026-10-13 12:45:55（北京时间）最后只读核实生产仍为2.14.0、镜像`5e769074…`、schema0015。
+用户授权开始修改并检查其他相关问题后，在`codex/estimate-return-diagnosis-20261012`从诊断提交`1459c78`继续实现2.14.1候选。§11保留2026-10-12当时的线上2.14.0观察、原2失败/4通过及未修复状态，不回写为当时已通过。以下保留候选实现与阶段验证，**最终冻结、Linux完整回归及部署结果见§12.4**；尚无本批生产历史数据修复、迁移或原始账务变更。部署前2026-10-13 12:45:55（北京时间）只读核实生产为2.14.0、镜像`5e769074…`、schema0015。
 
 ### 12.1 发现、复现与最小修复
 
@@ -342,22 +342,31 @@ Ubuntu24.04/Python3.13.16服务器独立候选库：关键459、完整1498及12�
 | EST-005 / P1 | 缺折算FX把有效原币日收益一并隐藏。`daily_returns.ReturnEvidence.convert`、`holdingDailyAmount/holdingLatestReturnAmount` | 原币收益10、显示币种无FX或FX已8日；`native_status/native_message`保留原资格、amount=10而base_amount=null，汇总留缺口；补当日1.2汇率后折算12。最近正式收益同时补齐scope_unconfirmed保护 | `test_estimate_availability_20261013::test_missing_or_old_fx_preserves_native_return_without_filling_total`、holding-display回归；原币可见但不得凑完整总额，范围待核实不能借最近正式值绕过 |
 | EST-006 / P1 | 日历与首页对机构权益的外部资金/缺中间交易日处理不同，资金转入可被误当收益。`investments.profit_calendar`、`daily_returns.ReturnEvidence.snapshot` | 权益1000→1100并收入/转入100应收益0，股息100仍收益100；正式快照跨缺失开放日为空、仅跨休市可算；日历复用同一ReturnEvidence及EXTERNAL_FLOWS，仅采正式结算 | `test_return_calendar_consistency.py`：income/expense/refund/transfer/fx净资本剔除，分红保留；日历与首页同口径；仅盘中权益不进正式日历，不改Snapshot或原流水 |
 | EST-007 / P1 | 无关产品股息改变机构账户日历结果。`investments.profit_calendar`股息循环覆盖函数的account_id/instrument_id筛选参数 | 选机构账户，有另一账户产品分红；循环身份改用独立局部变量，保留请求筛选 | `test_unrelated_product_dividend_does_not_change_snapshot_account_filter`：返回仅所选机构账户，合成5元收益不变，其他产品不混入 |
-| EST-008 / P1 | 日历可沿用过旧FX，首页已经提示缺FX，同日同币种结果矛盾。日历`converted_item`与`ReturnEvidence.convert` | 收益日的FX年龄7日可用、8日不可用，未来FX不能用；候选统一日收益FX边界，保留原币金额。最终实现/回归状态待补 | `test_return_calendar_consistency::test_calendar_and_home_share_dated_fx_coverage`及原币FX回归；同日期币种一致，缺FX时汇总amount/base_amount留空，不改FxRate |
+| EST-008 / P1 | 日历可沿用过旧FX，首页已经提示缺FX，同日同币种结果矛盾。日历`converted_item`与`ReturnEvidence.convert` | 收益日的FX年龄7日可用、8日不可用，未来FX不能用；统一日收益FX边界，保留原币金额；已实现并通过最终镜像回归 | `test_return_calendar_consistency::test_calendar_and_home_share_dated_fx_coverage`及原币FX回归；同日期币种一致，缺FX时汇总amount/base_amount留空，不改FxRate |
 | EST-009 / P1 | 新鲜子估值被较老正式源fetch拖失效，或不同tick借主报价新fetch续期。`daily_returns.ReturnEvidence.spot`报价身份绑定 | 650秒旧正式源+新鲜子估值；仅类型、code/currency/source/economic_date/value/published_at严格匹配选用Price时用子fetched_at。有quote但不匹配返回quote_metadata_mismatch；旧无quote状态保守兼容 | `test_fresh_intraday_uses_own_fetch_time_not_other_nav_source`、`test_unrelated_quote_cannot_lend_its_fresh_fetch_time`：正确新估值可算；任一身份/tick不匹配等待对应证据，不改Price时间、不借主fetch、原600/1200秒保护保留 |
 
 EST-003/OD-05仍是待决政策：午休/收盘后是否另展示“最新带时间估算”须产品、来源和时段依据，不在本批放宽时效。§11中5只基金缺盘中数据为当时来源覆盖观察，不宣称永久不支持、不推定为5个代码缺陷，也不通过打开用户停用来源凑数。
 
 ### 12.2 接口、数据影响与回滚边界
 
-兼容增加`missing_reason_code/native_status/native_message/fetched_at`，保留旧状态枚举、原币amount和折算base_amount语义；已知部分只汇总有效折算项。每日收益、持仓、净资产和日历是读结果，本批不新增迁移、不改Event/JournalLine/PositionMovement/SourceRecord.raw、机构快照或历史Price；正式同日替代不删除旧估值。overview计算版本升级候选v26，只读拒绝旧v24/v25缓存，GET不写Projection或提高账簿修订。
+兼容增加`missing_reason_code/native_status/native_message/fetched_at`，保留旧状态枚举、原币amount和折算base_amount语义；已知部分只汇总有效折算项。每日收益、持仓、净资产和日历是读结果，本批不新增迁移、不改Event/JournalLine/PositionMovement/SourceRecord.raw、机构快照或历史Price；正式同日替代不删除旧估值。overview计算版本升级v26，只读拒绝旧v24/v25缓存，GET不写Projection或提高账簿修订。
 
-回滚按应用/读算法及缓存版本兼容执行，保留已发生的正确行情与账务事实；不得为了撤销展示差异恢复旧库覆盖新数据。候选与前一镜像、认证备份和配置需要冻结后记录，最终生产部署验证另列。若后续需要修历史收益投影，须先逐空间/日期差异预览、核验原事实不变、备份、幂等重建和审计；本批没有执行该操作。权限、身份/币种、重复记账、冲突隔离与用户关闭偏好均保留。
+回滚按应用/读算法及缓存版本兼容执行，保留已发生的正确行情与账务事实；不得为了撤销展示差异恢复旧库覆盖新数据。本次应用与前一镜像、备份和配置已冻结核验，实际发布结果见§12.4；后续回滚仍须保留这些证据。若后续需要修历史收益投影，须先逐空间/日期差异预览、核验原事实不变、备份、幂等重建和审计；本批没有执行该操作。权限、身份/币种、重复记账、冲突隔离与用户关闭偏好均保留。
 
 ### 12.3 验证状态与维护入口
 
-- 已执行阶段：前端196项全部通过，TypeScript、所改文件格式、构建通过（仅已有大包警告）；本地完整后端1676项及12项子测试通过，0跳过、224.05秒。之后追加严格报价元数据匹配与核对导航，最终Linux候选全量仍待跑。此前106项及93项为定向组合，不相加、不冒充最终完整回归。阶段测试输出由本批最终验收汇集；诊断旧失败日志继续保留在`evidence/2026-10-12/`。
+- 已执行阶段：前端196项全部通过，TypeScript、所改文件格式、构建通过（仅已有大包警告）；本地完整后端1676项及12项子测试通过，0跳过、224.05秒。之后追加严格报价元数据匹配与核对导航，最终Linux镜像结果见§12.4，不把此阶段数替换成最终数。此前106项及93项为定向组合，不相加、不冒充最终完整回归。阶段测试输出由本批最终验收汇集；诊断旧失败日志继续保留在`evidence/2026-10-12/`。
 - 已完成合成owner浏览器：CNY部分收益+2、1/3项可算及缺数原因；USD原币+2未填入CNY总额；首页明细到汇率、首页/持仓到正确基金行情；隐藏后明细无金融内容。测试中重建曾导致一次旧chunk 404，重启隔离web并reload后完成，不能声称首次无异常；没有以此代表生产浏览器。
-- 待统一补充：最终冻结SHA、候选完整回归、模型差异、最后核对导航改动的交互、候选镜像、生产备份与只读核验、部署时间。未以服务测试代替页面验收。
+- 最终应用、Linux回归、模型边界、备份和运行核验见§12.4。最后核对导航改动已有前端回归，额外浏览器交互尚未记录；不以其他入口通过替代。未以服务测试代替页面验收。
 - 未扩张范围：真实机构样本、全部QDII跨市场时段、真实上游适配网络、运行规模、生产恢复/历史修复、EST-003产品时效策略。只有当前可复现输入支持的缺陷进入本批。
 
-规则只维护[领域模型§14](../domain-model.md#14-指标字典估算与缺失)；接口见[api-contract§21](../api-contract.md#21-每日收益与持仓展示现行)；改动影响和回归选取见[项目地图](../project-map.md#修改影响表)；排障及安全重试见[RUNBOOK§8.7](../RUNBOOK.md#87-估值不显示与跨页面收益差异2141候选)；状态和最终发布信息见[开发状态](../development-status.md)与[2.14.1记录](../release-2.14.1.md)。
+规则只维护[领域模型§14](../domain-model.md#14-指标字典估算与缺失)；接口见[api-contract§21](../api-contract.md#21-每日收益与持仓展示现行)；改动影响和回归选取见[项目地图](../project-map.md#修改影响表)；排障及安全重试见[RUNBOOK§8.7](../RUNBOOK.md#87-估值不显示与跨页面收益差异2141)；状态和最终发布信息见[开发状态](../development-status.md)与[2.14.1记录](../release-2.14.1.md)。
+
+
+### 12.4 最终冻结与保数据部署
+
+2026-10-13 13:13:04（北京时间）已完成2.14.1部署。应用`2abad9f8d26fb14607e51bcde42c016512c30770`，镜像`sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5`，schema`0015_chat_remote_controls`。冻结镜像Linux完整后端1679项及12项子测试通过，0跳过；前端196项及类型、格式、归档源码重建通过。本地1676+12及106/93仍是前述阶段证据，没有作为最终镜像总数使用。
+
+停写切换前后44张既有表、会话、私有文件、schema和权限指纹一致；服务器备份认证通过，本机副本哈希一致。没有执行生产迁移、数据重置或历史账务修复。web/worker/beat运行同一验收镜像，五项服务健康，备份与证书续期计时器active；可信HTTPS及23个前端资源字节与冻结构建一致。2026-10-13 13:13:16（北京时间）强制只读核验1个既有授权空间的真实首页接口，均返回200；未登录、创建会话、触发手工行情刷新或输出金融数值。
+
+最后核对导航改动已有前端回归，额外浏览器交互尚未记录；不以其他入口通过替代。合成页面范围和测试异常保留于§12.3，截图见[合成首页截图](evidence/2026-10-13/estimate-return-home.png)、[合成明细截图](evidence/2026-10-13/estimate-return-details.png)；不声称生产浏览器或未完成场景已验收。集中结果见[最终证据](evidence/2026-10-13/final-results.json)，原始候选全量输出见[完整后端日志](evidence/2026-10-13/backend-full.log)。EST-003、真实来源覆盖、全部产品规则和恢复演练等剩余范围继续保留。
