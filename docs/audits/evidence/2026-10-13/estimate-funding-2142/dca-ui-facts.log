@@ -1,0 +1,39 @@
+39 objects imported automatically (use -v 2 for details).
+
+{
+  "synthetic_only": true,
+  "plan_version": 3,
+  "top_up_start_date": "2026-10-08",
+  "top_up_events": 4,
+  "debit_events": 4,
+  "bank_cash": "920.000000000000",
+  "fund_cash": "0",
+  "in_transit": "80.000000000000",
+  "share_movements": 0,
+  "periods": [
+    {
+      "due_date": "2026-10-08",
+      "state": "waiting_nav"
+    },
+    {
+      "due_date": "2026-10-09",
+      "state": "waiting_nav"
+    },
+    {
+      "due_date": "2026-10-10",
+      "state": "excluded"
+    },
+    {
+      "due_date": "2026-10-11",
+      "state": "excluded"
+    },
+    {
+      "due_date": "2026-10-12",
+      "state": "waiting_nav"
+    },
+    {
+      "due_date": "2026-10-13",
+      "state": "waiting_confirmation"
+    }
+  ]
+}

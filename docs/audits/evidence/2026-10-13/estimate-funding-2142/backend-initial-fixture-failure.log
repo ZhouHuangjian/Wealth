@@ -1,0 +1,412 @@
+........................................................................ [  4%]
+........................................................................ [  8%]
+.......................................F....F........................... [ 12%]
+........................................................................ [ 16%]
+F........................F.............................................. [ 20%]
+........................................................................ [ 25%]
+........................................................................ [ 29%]
+........................................................................ [ 33%]
+........................................................................ [ 37%]
+...........................................FF........................... [ 41%]
+........................................................................ [ 46%]
+........................................................................ [ 50%]
+........................................................................ [ 54%]
+............FFF...F..................................................... [ 58%]
+................F...F................................................... [ 62%]
+................................F....................................... [ 66%]
+........................................................................ [ 71%]
+........................................................................ [ 75%]
+........................................................................ [ 79%]
+............................................................ [ 82%]
+........................................................................ [ 87%]
+........................................................................ [ 91%]
+........................................................................ [ 95%]
+........................................................................ [ 99%]
+.....                                                                    [100%]
+=================================== FAILURES ===================================
+______ test_setup_creates_independent_administrator_without_personal_book ______
+
+    def test_setup_creates_independent_administrator_without_personal_book():
+        client = Client()
+        response = call(
+            client,
+            "auth/setup",
+            {
+                "username": "first-platform-operator",
+                "password": "Example-safe-only-55731",
+                "space_name": "不得隐式创建",
+            },
+        )
+>       assert response.status_code == 200, response.content
+E       AssertionError: b'{"code": "setup_closed", "message": "\\u7cfb\\u7edf\\u5df2\\u7ecf\\u521d\\u59cb\\u5316\\uff0c\\u8bf7\\u901a\\u8fc7\\u9080\\u8bf7\\u52a0\\u5165", "fields": {}, "request_id": "f1a711a0-5a67-4e7c-8d88-6c0563b3a630"}'
+E       assert 409 == 200
+E        +  where 409 = <JsonResponse status_code=409, "application/json">.status_code
+
+tests/test_administration_v25.py:106: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  django.request:log.py:253 Conflict: /api/v1/auth/setup
+__ test_delete_user_preserves_shared_facts_revokes_sessions_and_is_idempotent __
+
+books = namespace(admin=<User: operator-v25>, owner=<User: owner-v25>, other=<User: other-v25>, space=<Workspace: Workspace ob...f11)>, UUID('2fa42539-b1e0-4c87-bc7c-39bdd4c13400'): <Account: Account object (91555d3e-b2c4-4c87-8769-c7ba29f545df)>})
+
+    def test_delete_user_preserves_shared_facts_revokes_sessions_and_is_idempotent(books):
+        p = books
+        m.Membership.objects.create(workspace=p.space, user=p.other, role="owner")
+        body = {"version": 0, "confirm_username": p.owner.username}
+        path = f"admin/users/{p.owner.pk}"
+        response = call(p.clients["admin"], path, body, "delete", "erase-owner-once")
+        assert response.status_code == 200, response.content
+        assert (
+            call(p.clients["admin"], path, body, "delete", "erase-owner-once").json()
+            == response.json()
+        )
+        assert not User.objects.filter(pk=p.owner.pk).exists()
+        assert p.clients["owner"].get("/api/v1/auth/me").json()["user"] is None
+>       assert m.Workspace.objects.count() == 2
+E       AssertionError: assert 3 == 2
+E        +  where 3 = count()
+E        +    where count = <django.db.models.manager.Manager object at 0x10915e180>.count
+E        +      where <django.db.models.manager.Manager object at 0x10915e180> = <class 'wealth.models.Workspace'>.objects
+E        +        where <class 'wealth.models.Workspace'> = m.Workspace
+
+tests/test_administration_v25.py:231: AssertionError
+________ test_user_isolation_admin_not_allowed_to_view_or_delete_others ________
+
+actors = namespace(admin=<User: chat-admin>, first=<User: chat-first>, second=<User: chat-second>, a=<django.test.client.Client...0x10aeae090>, f=<django.test.client.Client object at 0x10ae6e990>, s=<django.test.client.Client object at 0x10aea61e0>)
+
+    def test_user_isolation_admin_not_allowed_to_view_or_delete_others(actors):
+        p = actors
+        first = device(p, p.first, p.f)
+        second = device(p, p.second, p.s)
+        enable(p, p.admin)
+        assert upload(first["token"]).status_code == 200
+        assert upload(second["token"]).status_code == 200
+        inbox = p.f.get("/api/v1/chat/drafts").json()
+        assert inbox["user_id"] == p.first.pk
+        rows = inbox["items"]
+        assert len(rows) == 1 and rows[0]["device_id"] == first["device"]["id"]
+        foreign_id = rows[0]["id"]
+        for client in (p.s, p.a):
+            assert (
+                call(client, "chat/drafts/" + foreign_id, method="delete").status_code
+                == 404
+            )
+            assert (
+                call(
+                    client, "chat/devices/" + first["device"]["id"], method="delete"
+                ).status_code
+                == 404
+            )
+            assert client.get("/api/v1/chat/drafts?before=" + foreign_id).status_code == 400
+        assert p.a.get("/api/v1/chat/drafts").json()["items"] == []
+        assert p.a.get("/api/v1/chat/devices").json()["items"] == []
+        assert len(p.s.get("/api/v1/chat/drafts").json()["items"]) == 1
+        management = p.a.get("/api/v1/admin/chat/users").json()
+        assert management["user_id"] == p.admin.pk
+>       assert {item["username"] for item in management["items"]} == {
+            "chat-admin",
+            "chat-first",
+            "chat-second",
+        }
+E       AssertionError: assert {'chat-admin'...opup-fixture'} == {'chat-admin'...'chat-second'}
+E
+E         Extra items in the left set:
+E         'interrupted-dca-topup-fixture'
+E         Use -v to get more diff
+
+tests/test_chat_assistant.py:179: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  django.request:log.py:253 Not Found: /api/v1/chat/drafts/94633b77-1ba2-4717-8b76-fd7006b727a0
+WARNING  django.request:log.py:253 Not Found: /api/v1/chat/devices/7a451b55-9a24-4c1a-bd1b-8ff9005feb83
+WARNING  django.request:log.py:253 Bad Request: /api/v1/chat/drafts
+WARNING  django.request:log.py:253 Not Found: /api/v1/chat/drafts/94633b77-1ba2-4717-8b76-fd7006b727a0
+WARNING  django.request:log.py:253 Not Found: /api/v1/chat/devices/7a451b55-9a24-4c1a-bd1b-8ff9005feb83
+WARNING  django.request:log.py:253 Bad Request: /api/v1/chat/drafts
+_______________________ test_device_limit_and_pagination _______________________
+
+actors = namespace(admin=<User: chat-admin>, first=<User: chat-first>, second=<User: chat-second>, a=<django.test.client.Client...0x10a61f140>, f=<django.test.client.Client object at 0x10afd1e80>, s=<django.test.client.Client object at 0x10afd2c60>)
+
+    def test_device_limit_and_pagination(actors):
+        p = actors
+        info = device(p, p.first, p.f)
+        for n in range(9):
+            assert call(p.f, "chat/devices", {"name": f"Mac {n}"}).status_code == 200
+        assert call(p.f, "chat/devices", {"name": "too-many"}).status_code == 409
+        assert (
+            call(p.f, "chat/devices/" + info["device"]["id"], method="delete").status_code
+            == 200
+        )
+        replacement = call(p.f, "chat/devices", {"name": "replacement"}).json()
+        for n in range(3):
+            assert upload(replacement["token"], packet(f"batch_{n}")).status_code == 200
+        first = p.f.get("/api/v1/chat/drafts?limit=2").json()
+        second = p.f.get(
+            "/api/v1/chat/drafts?limit=2&before=" + first["next_cursor"]
+        ).json()
+        assert (
+            len(first["items"]) == 2
+            and len(second["items"]) == 1
+            and second["next_cursor"] is None
+        )
+        assert len({row["id"] for row in first["items"] + second["items"]}) == 3
+        for invalid in ("0", "101", "abc", "-1"):
+            assert p.f.get("/api/v1/chat/drafts?limit=" + invalid).status_code == 400
+        users = p.a.get("/api/v1/admin/chat/users?limit=2").json()
+        more = p.a.get("/api/v1/admin/chat/users?after=" + str(users["next_cursor"])).json()
+>       assert len(users["items"]) == 2 and len(more["items"]) == 1
+E       AssertionError: assert (2 == 2 and 2 == 1)
+E        +  where 2 = len([{'id': 2533, 'username': 'interrupted-dca-topup-fixture', 'is_active': True, 'is_platform_admin': False, ...}, {'id': 3461, 'username': 'chat-admin', 'is_active': True, 'is_platform_admin': True, ...}])
+E        +  and   2 = len([{'id': 3462, 'username': 'chat-first', 'is_active': True, 'is_platform_admin': False, ...}, {'id': 3463, 'username': 'chat-second', 'is_active': True, 'is_platform_admin': False, ...}])
+
+tests/test_chat_assistant.py:388: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  django.request:log.py:253 Conflict: /api/v1/chat/devices
+WARNING  django.request:log.py:253 Bad Request: /api/v1/chat/drafts
+WARNING  django.request:log.py:253 Bad Request: /api/v1/chat/drafts
+WARNING  django.request:log.py:253 Bad Request: /api/v1/chat/drafts
+WARNING  django.request:log.py:253 Bad Request: /api/v1/chat/drafts
+_____________ test_fresh_fetch_does_not_relabel_old_provider_quote _____________
+
+synthetic_book = namespace(clock={'elapsed': 0.4, 'quote_age': 2100, 'calls': 2, 'failed': False}, space=<Workspace: Workspace object (5b94851c-1cde-4c85-bd30-052449ac9c14)>, product=<Instrument: Instrument object (e0487319-8edf-4adc-a7b3-cd70acdb9830)>)
+
+    @pytest.mark.django_db
+    def test_fresh_fetch_does_not_relabel_old_provider_quote(synthetic_book):
+        book = synthetic_book
+        book.clock["quote_age"] = 35 * 60
+>       assert market_sync.refresh_due()["scheduled"] == 1
+E       assert 2 == 1
+
+tests/test_estimate_refresh_cadence.py:463: AssertionError
+______ test_outage_recovers_on_next_due_refresh_and_disable_is_respected _______
+
+synthetic_book = namespace(clock={'elapsed': 0.4, 'quote_age': 0.0, 'calls': 2, 'failed': False}, space=<Workspace: Workspace object (b884ef72-b889-4902-a2ed-545286f4abb0)>, product=<Instrument: Instrument object (101da08b-8a28-4848-9a3c-9fb969b725eb)>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10acb3710>
+
+    @pytest.mark.django_db
+    def test_outage_recovers_on_next_due_refresh_and_disable_is_respected(
+        synthetic_book, monkeypatch
+    ):
+        book = synthetic_book
+>       assert market_sync.refresh_due()["scheduled"] == 1
+E       assert 2 == 1
+
+tests/test_estimate_refresh_cadence.py:479: AssertionError
+___ test_broker_failure_remains_durable_then_retries_without_reposting_money ___
+
+book = namespace(user=<User: jobs-owner>, space=<Workspace: Workspace object (f0929c7f-1ed1-47a8-a9ba-bde7a6029200)>, account=<Account: Account object (f3b7585d-71bf-4aba-8d93-936ac4f448fa)>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b05a930>
+
+    def test_broker_failure_remains_durable_then_retries_without_reposting_money(
+        book, monkeypatch
+    ):
+        with tenant_context(book.space.pk):
+            post(book)
+            job = Outbox.objects.get(tenant=book.space)
+
+        def unavailable(*args, **kwargs):
+            raise ConnectionError("simulated unavailable broker")
+
+        monkeypatch.setattr(tasks.recompute, "delay", unavailable)
+        result = tasks.dispatch_all()
+>       assert result == {"dispatched": 0, "failed": 1}
+E       AssertionError: assert {'dispatched': 0, 'failed': 6} == {'dispatched': 0, 'failed': 1}
+E
+E         Omitting 1 identical items, use -vv to show
+E         Differing items:
+E         {'failed': 6} != {'failed': 1}
+E         Use -v to get more diff
+
+tests/test_jobs.py:103: AssertionError
+________ test_delivery_lease_is_based_on_last_publish_not_creation_time ________
+
+book = namespace(user=<User: jobs-owner>, space=<Workspace: Workspace object (a3b0e36b-0f64-4a87-acc9-1e626dbef574)>, account=<Account: Account object (348a98b4-7cd5-4a37-9a3b-6ae473434a01)>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b0f0710>
+
+    def test_delivery_lease_is_based_on_last_publish_not_creation_time(book, monkeypatch):
+        now = datetime(2026, 9, 25, 10, 0, tzinfo=datetime_timezone.utc)
+        with tenant_context(book.space.pk):
+            post(book)
+            job = Outbox.objects.get(tenant=book.space)
+            Outbox.objects.filter(pk=job.pk).update(
+                status="queued",
+                attempts=1,
+                dispatched_at=now,
+                created_at=now - timedelta(days=10),
+            )
+        published = []
+        monkeypatch.setattr(tasks.recompute, "delay", lambda *args: published.append(args))
+        monkeypatch.setattr(tasks.timezone, "now", lambda: now)
+>       assert tasks.dispatch_all()["dispatched"] == 0
+E       assert 5 == 0
+
+tests/test_jobs.py:143: AssertionError
+___________ test_legacy_queued_job_without_a_lease_is_redeliverable ____________
+
+book = namespace(user=<User: jobs-owner>, space=<Workspace: Workspace object (76064f97-b45a-4734-883e-3c5d4cea4a8e)>, account=<Account: Account object (cef3b759-3b7c-4c85-95fb-68e537b6dbb8)>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b0f2b40>
+
+    def test_legacy_queued_job_without_a_lease_is_redeliverable(book, monkeypatch):
+        with tenant_context(book.space.pk):
+            post(book)
+            Outbox.objects.filter(tenant=book.space).update(
+                status="queued", dispatched_at=None
+            )
+        calls = []
+        monkeypatch.setattr(tasks.recompute, "delay", lambda *args: calls.append(args))
+>       assert tasks.dispatch_all()["dispatched"] == 1
+E       assert 6 == 1
+
+tests/test_jobs.py:165: AssertionError
+_________ test_projection_failure_is_durable_and_inline_retry_recovers _________
+
+book = namespace(user=<User: jobs-owner>, space=<Workspace: Workspace object (76b7e52d-8396-4776-aac9-b4e7eae4a12e)>, account=<Account: Account object (5374c346-17f6-45a7-8b3d-e7cf4dce8a95)>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b0ccec0>
+
+    def test_projection_failure_is_durable_and_inline_retry_recovers(book, monkeypatch):
+        with tenant_context(book.space.pk):
+            post(book)
+            job = Outbox.objects.get(tenant=book.space)
+        original = tasks.overview
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("synthetic calculation failure")
+
+        monkeypatch.setattr(tasks, "overview", fail)
+>       assert tasks.dispatch_all(inline=True) == {"dispatched": 0, "failed": 1}
+E       AssertionError: assert {'dispatched': 4, 'failed': 2} == {'dispatched': 0, 'failed': 1}
+E
+E         Differing items:
+E         {'dispatched': 4} != {'dispatched': 0}
+E         {'failed': 2} != {'failed': 1}
+E         Use -v to get more diff
+
+tests/test_jobs.py:237: AssertionError
+______________ test_refresh_pending_intent_survives_broker_outage ______________
+
+book = namespace(owner=<User: market-owner>, viewer=<User: market-viewer>, space=<Workspace: Workspace object (370d1fd2-8bc9-..., client=<django.test.client.Client object at 0x10afe2d80>, base='/api/v1/spaces/370d1fd2-8bc9-415b-8f5e-9cea0b596520')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10aef4f20>
+settings = <pytest_django.fixtures.Settings object at 0x10aef4140>
+
+    def test_refresh_pending_intent_survives_broker_outage(book, monkeypatch, settings):
+        settings.WEALTH_MARKET_INLINE = False
+        from wealth.tasks import refresh_market_instrument
+
+        def unavailable(*args, **kwargs):
+            raise ConnectionError("isolated test broker outage")
+
+        monkeypatch.setattr(refresh_market_instrument, "apply_async", unavailable)
+        with tenant_context(book.space.pk):
+            response = market_sync.queue_refresh(
+                book.space, book.owner, [str(book.instrument.pk)]
+            )
+            assert response["status"] == "queued"
+        assert (
+            market_sync._publish(str(book.space.pk), str(book.instrument.pk), "ignored")
+            is False
+        )
+        with tenant_context(book.space.pk):
+            state = market_sync._state(book.space, book.instrument)
+            assert state.data["refresh_status"] == "pending"
+>       assert market_sync.refresh_due()["scheduled"] == 1
+E       assert 2 == 1
+
+tests/test_market_integration.py:305: AssertionError
+________ test_periodic_retry_preserves_unexpired_pending_request_token _________
+
+book = namespace(user=<User: market-lifecycle-owner>, space=<Workspace: Workspace object (47bda66a-4982-4f98-a3f1-571375533db...467af-09f8-4704-a2f0-34ab1ef857e2)>, instrument=<Instrument: Instrument object (dca73824-8ff0-4d94-a0db-250613639dea)>)
+clock = {'now': datetime.datetime(2026, 9, 25, 1, 1, tzinfo=datetime.timezone.utc)}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b4c81d0>
+
+    def test_periodic_retry_preserves_unexpired_pending_request_token(
+        book, clock, monkeypatch
+    ):
+        with tenant_context(book.space.pk):
+            market_sync.queue_refresh(book.space, book.user, [str(book.instrument.pk)])
+            token = market_sync._state(book.space, book.instrument).data["request_token"]
+        published = []
+        monkeypatch.setattr(
+            market_sync, "_publish", lambda sid, iid, tok: published.append((sid, iid, tok))
+        )
+        clock["now"] += timedelta(seconds=60)
+        market_sync.refresh_due(inline=False)
+        with tenant_context(book.space.pk):
+            assert (
+                market_sync._state(book.space, book.instrument).data["request_token"]
+                == token
+            )
+        assert published
+>       assert all(call[2] == token for call in published)
+E       assert False
+E        +  where False = all(<generator object test_periodic_retry_preserves_unexpired_pending_request_token.<locals>.<genexpr> at 0x10b4a0ba0>)
+
+tests/test_market_lifecycle.py:205: AssertionError
+___________ test_admin_enters_foreign_space_with_real_actor_and_rls ____________
+
+platform = namespace(admin=<User: platform-owner>, ordinary=<User: ordinary-owner>, reader=<User: ordinary-reader>, own=<Workspac...0x10b0f0290>, u=<django.test.client.Client object at 0x10b0cca10>, r=<django.test.client.Client object at 0x10b0cf1d0>)
+
+    def test_admin_enters_foreign_space_with_real_actor_and_rls(platform):
+        p = platform
+        auth = p.a.get("/api/v1/auth/me").json()
+        assert auth["user"]["is_platform_admin"] is True
+        assert auth["spaces"] == []
+>       assert p.a.get("/api/v1/admin/spaces").json()["count"] == 2
+E       assert 3 == 2
+
+tests/test_platform_v23.py:64: AssertionError
+=============================== warnings summary ===============================
+tests/test_account_balances.py: 1 warning
+tests/test_account_opening_v24.py: 5 warnings
+tests/test_admin_access_consent.py: 34 warnings
+tests/test_admin_data_v260.py: 21 warnings
+tests/test_admin_edit_v261.py: 8 warnings
+tests/test_admin_holding_corrections_v261.py: 8 warnings
+tests/test_admin_purge_v261.py: 20 warnings
+tests/test_administration_v25.py: 12 warnings
+tests/test_api.py: 19 warnings
+tests/test_audit_repairs_20261009.py: 1 warning
+tests/test_catalog_delete_v255.py: 1 warning
+tests/test_catalog_integration_v255.py: 10 warnings
+tests/test_chat_assistant.py: 48 warnings
+tests/test_chat_remote.py: 47 warnings
+tests/test_dca_automation_v264.py: 2 warnings
+tests/test_dca_entry_basis_v254.py: 2 warnings
+tests/test_dca_history_v252.py: 3 warnings
+tests/test_dca_import_v253.py: 2 warnings
+tests/test_display_ordering.py: 13 warnings
+tests/test_dividends_v24.py: 3 warnings
+tests/test_fund_orders_v270.py: 2 warnings
+tests/test_fund_reconciliation_v210.py: 3 warnings
+tests/test_glossary_v25.py: 1 warning
+tests/test_holding_corrections_v251.py: 3 warnings
+tests/test_insights_v22.py: 15 warnings
+tests/test_institution_funding_v25.py: 1 warning
+tests/test_management_v24.py: 20 warnings
+tests/test_market_integration.py: 6 warnings
+tests/test_metadata_api_v23.py: 8 warnings
+tests/test_occurrence_navigation.py: 4 warnings
+tests/test_option_positions_v251.py: 5 warnings
+tests/test_overview_projection_version.py: 7 warnings
+tests/test_pending_purchases_v265.py: 1 warning
+tests/test_platform_v23.py: 15 warnings
+tests/test_provider_credentials_v210.py: 17 warnings
+tests/test_valuation_basis_v25.py: 2 warnings
+tests/test_workspace_usability_v262.py: 2 warnings
+  /Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/core/handlers/base.py:61: UserWarning: No directory at: /Users/zhouhuangjian/.codex/worktrees/estimate-return-diagnosis-20261012/Wealth/backend/staticfiles/
+    mw_instance = middleware(adapted_handler)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_administration_v25.py::test_setup_creates_independent_administrator_without_personal_book
+FAILED tests/test_administration_v25.py::test_delete_user_preserves_shared_facts_revokes_sessions_and_is_idempotent
+FAILED tests/test_chat_assistant.py::test_user_isolation_admin_not_allowed_to_view_or_delete_others
+FAILED tests/test_chat_assistant.py::test_device_limit_and_pagination - Asser...
+FAILED tests/test_estimate_refresh_cadence.py::test_fresh_fetch_does_not_relabel_old_provider_quote
+FAILED tests/test_estimate_refresh_cadence.py::test_outage_recovers_on_next_due_refresh_and_disable_is_respected
+FAILED tests/test_jobs.py::test_broker_failure_remains_durable_then_retries_without_reposting_money
+FAILED tests/test_jobs.py::test_delivery_lease_is_based_on_last_publish_not_creation_time
+FAILED tests/test_jobs.py::test_legacy_queued_job_without_a_lease_is_redeliverable
+FAILED tests/test_jobs.py::test_projection_failure_is_durable_and_inline_retry_recovers
+FAILED tests/test_market_integration.py::test_refresh_pending_intent_survives_broker_outage
+FAILED tests/test_market_lifecycle.py::test_periodic_retry_preserves_unexpired_pending_request_token
+FAILED tests/test_platform_v23.py::test_admin_enters_foreign_space_with_real_actor_and_rls
+13 failed, 1708 passed, 372 warnings, 12 subtests passed in 225.45s (0:03:45)

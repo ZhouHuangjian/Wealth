@@ -176,6 +176,8 @@ def quote_list(space):
             or quote.get("provider_attempts", []),
             "nav_quarantine": state.get("nav_quarantine", {}),
             "retained_previous_quote": state.get("retained_previous_quote", False),
+            "reference_estimate": state.get("reference_estimate")
+            or quote.get("reference_estimate"),
         }
         if (item.get("data_quality") or {}).get("status") == "conflict":
             item["status"] = "conflict"
@@ -484,6 +486,12 @@ def refresh_one(space_id, instrument_id, token=None):
             "nav_quarantine": quarantine,
         }
         if quote:
+            # Keep the independent reference visible even when a formal NAV
+            # conflict requires retaining the previous accounting observation.
+            # Its original timestamps and unknown economic date stay intact;
+            # it is never part of observations/Price or the accounting fallback.
+            if quote.get("reference_estimate"):
+                state.data["reference_estimate"] = serial(quote["reference_estimate"])
             state.data["retained_previous_quote"] = bool(
                 not ok and previous_quote.get("price") is not None
             )

@@ -15,6 +15,7 @@ DEFAULT_PRIORITY = {
         "tushare_fund",
         "lixinger_fund",
         "akshare",
+        "sina",
     ],
     "stock": ["tencent", "yahoo", "eastmoney_search", "akshare"],
     "etf": ["tencent", "yahoo", "eastmoney_search", "akshare"],
@@ -175,12 +176,13 @@ _PROVIDERS = [
     {
         "id": "sina",
         "name": "新浪财经",
-        "description": "境内期货、ETF/商品期权和XAU现货参考报价；AKShare为部分商品合约提供备用通道，同源数据不作为独立验证。",
-        "hosts": ["hq.sinajs.cn"],
+        "description": "境内期货、ETF/商品期权和XAU现货参考报价；另提供人民币基金参考估值，仅供查看，不作为正式净值、资产估价或今日收益；AKShare同源数据不作为独立验证。",
+        "hosts": ["hq.sinajs.cn", "stock.finance.sina.com.cn"],
         "capabilities": [
             {"kind": kind, "markets": ["CN"], "operations": ["quote", "search"]}
             for kind in ("future", "option", "gold")
-        ],
+        ]
+        + [{"kind": "fund", "markets": ["CN"], "operations": ["quote"]}],
     },
     {
         "id": "yahoo",
@@ -258,7 +260,7 @@ def provider_directory():
 
 def default_provider_config():
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "enabled": {p["id"]: p["id"] not in _TOKEN_PROVIDERS for p in _PROVIDERS},
         "priority": deepcopy(DEFAULT_PRIORITY),
     }
@@ -307,7 +309,7 @@ def validate_provider_config(data):
         )
     if type(data.get("schema_version", 1)) is not int or data.get(
         "schema_version", 1
-    ) not in (1, 2, 3):
+    ) not in (1, 2, 3, 4):
         raise ValueError("不支持的数据源配置版本")
     result = default_provider_config()
     flags, priorities = data.get("enabled", {}), data.get("priority", {})
@@ -317,6 +319,15 @@ def validate_provider_config(data):
         raise ValueError("数据源启用状态必须为布尔值")
     if not isinstance(priorities, dict) or set(priorities) - set(DEFAULT_PRIORITY):
         raise ValueError("包含未知产品分类")
+    # An omitted priority uses that configuration version's defaults, not the
+    # new capability's defaults. Otherwise an old all-disabled fund setup could
+    # silently start fetching Sina merely because Sina was enabled for futures.
+    legacy_fund_chain = priorities.get(
+        "fund",
+        [provider for provider in DEFAULT_PRIORITY["fund"] if provider != "sina"],
+    )
+    if data.get("schema_version", 1) < 4 and "fund" not in priorities:
+        result["priority"]["fund"] = list(legacy_fund_chain)
     for kind, chain in priorities.items():
         if (
             not isinstance(chain, list)
@@ -346,6 +357,16 @@ def validate_provider_config(data):
                 and "akshare" not in result["priority"][kind]
             ):
                 result["priority"][kind].append("akshare")
+    # A new capability of an already enabled provider. Preserve all explicit
+    # disabling, empty/all-disabled fund chains and current-version omissions.
+    if (
+        data.get("schema_version", 1) < 4
+        and result["enabled"].get("sina")
+        and legacy_fund_chain
+        and any(result["enabled"].get(p) for p in legacy_fund_chain)
+        and "sina" not in result["priority"]["fund"]
+    ):
+        result["priority"]["fund"].append("sina")
     return result
 
 

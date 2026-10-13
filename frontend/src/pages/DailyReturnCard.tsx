@@ -14,6 +14,7 @@ import { dailyReturnNextAction } from "../business-action";
 import { HelpText } from "../help";
 import { profitTone } from "../investment";
 import { useWorkspace } from "../state";
+import LatestFundUpdates from "./LatestFundUpdates";
 
 const sourceLabels: Record<string, string> = {
   institution_snapshot: "机构账户权益",
@@ -98,6 +99,7 @@ export default function DailyReturnCard({
               : "收益明细"}
           </Button>
         </div>
+        <LatestFundUpdates data={data?.latest_fund_updates} />
       </article>
       <Drawer
         title={`${title} · ${data?.date || asOf}`}

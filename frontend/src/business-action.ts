@@ -112,6 +112,26 @@ export function dailyReturnNextAction(
 }
 
 /** Navigation only: facts, amounts and automation settings remain untouched. */
+export function dcaCashReconciliationAction(
+  spaceId: string,
+  row: Values,
+  plan: Values = {},
+): BusinessAction | null {
+  const accountId = row.account_id || plan.account_id;
+  if (!accountId) return null;
+  return {
+    kind: "cash",
+    label: "核对扣款账户",
+    description:
+      "对照实际余额核对账簿流水，仅补录真实遗漏；持仓市值和货币基金份额不能直接当作可用现金。",
+    to: route(spaceId, "assets", {
+      tab: "records",
+      section: "reconcile",
+      account_id: accountId,
+    }),
+  };
+}
+
 export function dcaNextAction(
   spaceId: string,
   row: Values,
@@ -123,6 +143,8 @@ export function dcaNextAction(
     row.details?.automation?.message || automation.message || "",
   );
   const status = String(automation.status || "");
+  const reasonCode =
+    row.details?.automation?.reason_code || automation.reason_code;
   const instrumentId = row.instrument_id || plan.instrument_id;
   const accountId = row.account_id || plan.account_id;
   const holdingAccountId =
@@ -157,14 +179,28 @@ export function dcaNextAction(
         instrument_id: instrumentId,
       },
     );
-  if (status === "waiting_cash")
-    return action(
-      "cash",
-      "核对扣款账户",
-      "先对照银行余额核对账簿中的余额和流水；仅补录真实遗漏，不自动向其他账户补款。",
-      "assets",
-      { tab: "records", section: "reconcile", account_id: accountId },
-    );
+  const invalidTopUp =
+    status === "needs_review" && reasonCode === "dca_top_up_account_invalid";
+  if (status === "waiting_cash" || invalidTopUp)
+    return planId
+      ? action(
+          "plan",
+          invalidTopUp ? "检查补足资金设置" : "设置补足资金来源",
+          invalidTopUp
+            ? "原补足账户已不可用或不符合本计划要求；请重新选择同币种现金账户，或清除补足来源。尚未转入或扣款。"
+            : "核实扣款账户的现金；如需自动补足，可在计划中明确选择来源账户及生效日期。保存后仅对适用且未扣款的期次继续处理。",
+          "assets",
+          {
+            tab: "holdings",
+            action: "edit-plan",
+            focus: "funding",
+            plan_id: planId,
+            instrument_id: instrumentId,
+          },
+        )
+      : invalidTopUp
+        ? null
+        : dcaCashReconciliationAction(spaceId, row, plan);
   if (
     status === "waiting_calendar" ||
     (status === "needs_review" && /开放日|份额精度配置/.test(message))

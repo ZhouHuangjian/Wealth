@@ -1,6 +1,6 @@
 # Wealth 开发路线、验收与开工门槛
 
-维护日期2026-10-09。§1–6保留2026-09-16阶段路线和A01–29原验收意图，不能再理解为应用尚未开发；费用/自动定投/日期的现行口径由[domain-model§12–16](domain-model.md)替代原建议。§8是本轮实际验收索引，[开发状态](development-status.md)记录实现/验证/部署，历史发布不能代替当前测试。
+维护日期2026-10-13。§1–6保留2026-09-16阶段路线和A01–29原验收意图，不能再理解为应用尚未开发；费用/自动定投/日期的现行口径由[domain-model§12–16](domain-model.md)替代原建议。§7–8保留2026-10-09阶段验收事实，§9为2.14.2候选补足能力验收要求；[开发状态](development-status.md)分别记录实现/验证/部署，历史发布不能代替当前测试。
 
 ## 1. 交付路线
 
@@ -111,6 +111,8 @@ G5 必须具备：
 
 ## 7. 当前完成度
 
+本节是2026-10-09当时的阶段快照，以下“未部署”及测试数量不表示当前服务器状态。
+
 当前项目已有实现；2026-10-09初始审查6项差异及追加AUD-007已有修复/隔离验收，未部署。后端1476/12 subtests、前端153、原审查20通过，0012原生小样本恢复通过；真实机构、完整核对替代恢复/Docker、全部页面和规模仍有未验项。具体结果见[审查§8](audits/system-audit-2026-10-09.md#8-授权修复与验收记录)/repair-results.json，不能把全部A/AT组统一标为通过。
 
 ## 8. 2026-10-09 验收场景与持续回归
@@ -138,3 +140,22 @@ G5 必须具备：
 | 备份恢复/规模/运行版本 | test_backup当前5项；audit_local restore-drill；只读health | 密码学/归档及0012原生小样本恢复/最小ACL通过；完整核对替代恢复、Docker、性能、生产SHA/ACL/调度未核实 |
 
 修复完成门槛：对应AUD预期断言通过并进入常规tests；相关A/AT意图和接口/页面/数据库/任务交叉回归；记录固定输入、命令、环境、结果、失败/未跑、版本和数据影响。完整G5/V2上线验收必须补齐真实样本、恢复和规模证据，不能用绿色单元测试数量抵销这些缺口。
+
+## 9. 2.14.2候选指定账户补足验收
+
+状态：已有候选实现，最终完整回归、页面和发布结论仍待本批证据；下表是必须满足的断言，不是“全部通过”的声明。§8中“不自动换卡/赎货币基金”仍成立；新增能力只接受用户明确选定的补足账户和生效范围。业务定义唯一维护在[domain-model§12.5](domain-model.md#125-指定账户补足定投资金2142候选)，契约见[API§22.1](api-contract.md#221-指定资金账户补足2142候选)，命令及排障见[RUNBOOK§8.8](RUNBOOK.md#88-定投余额不足与指定补足来源2142候选)。不重写2.12/2.14.1发布记录。
+
+| 场景 | 验收断言 | 回归入口 |
+| --- | --- | --- |
+| 旧计划、新计划未选来源 | 来源/补足日期默认为空；主账户不足仍等待，其他有钱账户不会被自动选中；主账户足额即使已选来源也不转入 | `test_no_selection_keeps_old_plan_waiting_and_exposes_specific_help`、`test_sufficient_primary_never_uses_backup`；前端配置测试 |
+| 只补差额、净值晚到 | 合成主账户3元、本期10元、所选来源100元，仅转7元，来源剩93元、主账户现金0、在途10元；晚到精确NAV后复用该转账/扣款，不重复入金或份额 | `test_only_shortfall_transfers_and_late_nav_reuses_funding_fact` |
+| 来源也不足及恢复 | 不部分转入、不先扣款；补入有据现金后下一次正常扫描只补一次；冻结、历史使用与晚建期初不能被绕过 | `test_insufficient_backup_has_no_partial_transfer_then_recovers`、`test_backdated_top_up_preserves_frozen_and_historical_cash` |
+| 来源身份与范围 | 跨空间、不同币种、同主账户、归档/快照/非现金账户拒绝；基金/券商仅留存现金可用，货币基金份额不当现金 | `test_invalid_top_up_identity_and_scope_are_rejected`、`test_retained_channel_cash_is_valid`、`test_money_fund_shares_do_not_become_available_cash` |
+| 明确生效日及关闭 | 新选择默认空间当地今天且不早于自动生效日；旧等待只有用户显式回选日期才纳入；重开保留日期；清除双空，off不被新默认值重开；已记账历史保持 | `test_explicit_effective_date_controls_old_waits_and_clearing_does_not_reenable`；`frontend/tests/dca-automation.test.mjs` |
+| 同期失败、并发及重启 | 扣款失败回滚此前补足；独立连接并发及新实例重试最多一笔top-up、一笔debit、一笔confirm，无孤立补足 | `test_debit_failure_rolls_back_transfer_and_retries_once`；`audit_local.py probe dca-top-up-concurrency` |
+| 实际差异、退款/冲正 | 后到机构差异保留原补足并通过已有更正关系处理；孤立/已退款/已冲正阶段进入核对，不再自动补足；后续使用/冻结阻止直接撤销 | `test_actual_amount_correction_keeps_original_top_up_and_never_repeats_it`、`test_unlinked_existing_top_up_is_attention_instead_of_another_transfer`、`test_refund_or_reversal_never_repeats_transfer` |
+| 页面真实入口与权限 | 普通用户从首页余额不足待办打开正确计划资金设置；选来源后显示日期/历史范围及仅记账说明；清除/账外资金关闭来源；核对入口定位主账户；Viewer及跨空间引用不能写入 | `frontend/tests/business-action.test.mjs`及普通用户浏览器，后端权限回归另跑 |
+
+上述后端函数均位于[test_dca_top_up_v2142.py](../backend/tests/test_dca_top_up_v2142.py)。固定时钟、受控申购日历与金额样本独立于真实网络；并发验证使用真实PostgreSQL独立连接，不用串行fixture测试冒充并发。回归记录须包含源提交、运行环境、实际命令、失败/未跑项和合成页面证据；真实银行卡选择、生产历史补记及部署均不因测试通过而获自动授权。
+
+上线前还须核实原交易/份额、转账收益排除、任务重试、权限与冲正回归，以及候选构建和迁移差异。此能力在现有Resource/Event内记录，无批量历史修复；回退须验证旧应用对新配置/补足依赖的兼容，不删除原始事实或用旧备份覆盖上线后数据。

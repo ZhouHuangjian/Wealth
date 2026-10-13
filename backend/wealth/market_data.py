@@ -29,6 +29,7 @@ HOSTS = frozenset(
         "qt.gtimg.cn",
         "web.ifzq.gtimg.cn",
         "hq.sinajs.cn",
+        "stock.finance.sina.com.cn",
         "query1.finance.yahoo.com",
         "push2.eastmoney.com",
         "push2his.eastmoney.com",
@@ -389,6 +390,7 @@ def _fund_quote(inst):
         )
     if inst["market"] != "CN" or not re.fullmatch(r"\d{6}", inst["code"]):
         raise MarketDataError("unsupported_code", "场外基金请输入六位国内基金代码")
+    estimate = None
     try:
         payload = _json(
             _get(
@@ -410,6 +412,18 @@ def _fund_quote(inst):
                 "unsupported_money_fund",
                 "货币基金使用万份收益，不能按单位净值自动估价，请录入实际收益",
             )
+        # Formal NAV and the intraday estimate are separate observations. A
+        # missing NAV field must not discard an estimate already supplied for
+        # this exact code or relabel its timestamp during history fallback.
+        estimate = _quote(
+            inst,
+            price=item.get("GSZ"),
+            kind="estimate",
+            source="天天基金·盘中估值",
+            published_at=item.get("GZTIME"),
+            name=item.get("SHORTNAME"),
+            change_percent=item.get("GSZZL"),
+        )
         result = _quote(
             inst,
             price=item.get("NAV"),
@@ -420,21 +434,25 @@ def _fund_quote(inst):
         )
         if result["price"] is None or result["economic_date"] is None:
             raise MarketDataError("missing_nav", "行情源未返回正式净值")
-        estimate = _quote(
-            inst,
-            price=item.get("GSZ"),
-            kind="estimate",
-            source="天天基金·盘中估值",
-            published_at=item.get("GZTIME"),
-            name=item.get("SHORTNAME"),
-            change_percent=item.get("GSZZL"),
-        )
         result["estimate"] = estimate
         return result
     except MarketDataError as exc:
         if exc.code.startswith("unsupported"):
             raise
-        row = _fund_history(inst)[-1]
+        try:
+            row = _fund_history(inst)[-1]
+        except MarketDataError as history_error:
+            if (
+                history_error.code.startswith("unsupported")
+                or history_error.code == "identity_mismatch"
+            ):
+                raise
+            if estimate and estimate.get("price") is not None:
+                # Another enabled official feed may still provide the NAV.
+                # Without one, the formal quote remains unavailable; an
+                # estimate must never be promoted to an accounting price.
+                return {**_failed(inst, history_error), "estimate": estimate}
+            raise
         return _quote(
             inst,
             price=row["price"],
@@ -443,7 +461,9 @@ def _fund_quote(inst):
             economic_date=row["economic_date"],
             name=row["name"],
             change_percent=row["change_percent"],
-            estimate=_failed(
+            estimate=estimate
+            if estimate and estimate.get("price") is not None
+            else _failed(
                 inst, MarketDataError("estimate_unavailable", "该基金暂无盘中估值")
             ),
         )
@@ -1698,6 +1718,8 @@ def _supports_provider(provider, inst, operation):
     if kind == "fund":
         from .fund_sources import FUND_PROVIDERS
 
+        if provider == "sina":
+            return operation == "quote"
         return provider in FUND_PROVIDERS
     if kind in {"future", "option"} or (
         kind == "gold" and not re.fullmatch(r"\d{6}", code)
@@ -1753,6 +1775,10 @@ def _stock_yahoo_quote(inst):
 def _provider_quote(provider, inst):
     if provider == "akshare":
         from .akshare_provider import quote
+
+        return quote(inst)
+    if provider == "sina" and inst["kind"] == "fund":
+        from .sina_fund_estimate import quote
 
         return quote(inst)
     if inst["kind"] == "fund" and provider != "eastmoney_fund":

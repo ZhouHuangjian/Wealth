@@ -103,6 +103,44 @@ export function estimatePresentation(row: Record<string, any>) {
   };
 }
 
+/** A provider reference is independently dated and never an accounting quote. */
+export function referenceEstimatePresentation(row: Record<string, any>) {
+  const reference = row.reference_estimate;
+  if (
+    !reference ||
+    reference.kind !== "reference_estimate" ||
+    reference.status !== "reference_only" ||
+    reference.code !== row.code ||
+    reference.currency !== row.currency ||
+    reference.economic_date != null ||
+    reference.usable_for_accounting !== false ||
+    reference.usable_for_daily_return !== false ||
+    typeof reference.price !== "string" ||
+    !/^\d+(?:\.\d+)?$/.test(reference.price) ||
+    !/[1-9]/.test(reference.price)
+  )
+    return null;
+  return {
+    price: reference.price,
+    currency: reference.currency,
+    source: sourcePresentation(reference).label,
+    label: ["delayed", "stale", "previous_session"].includes(
+      reference.data_state,
+    )
+      ? "来源参考 · 历史 / 延迟"
+      : "来源参考",
+    publishedAt: reference.published_at || null,
+    fetchedAt: reference.fetched_at || null,
+    baseNav: reference.base_nav ?? null,
+    baseNavDate: reference.base_nav_date || null,
+    changePercent: reference.source_change_percent ?? null,
+    windowStart: reference.observation_window_start || null,
+    windowEnd: reference.observation_window_end || null,
+    message:
+      "收益归属日与完整持仓覆盖尚未核实；这条参考报价不直接计入今日收益或资产估价。",
+  };
+}
+
 export function providerLabel(provider?: string) {
   return (
     (

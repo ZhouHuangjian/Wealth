@@ -823,4 +823,9 @@ def daily_return_overview(
         "knowledge_basis": "currently_recorded_facts",
         "message": "按今日有效行情与上一有效收盘或结算记录计算，扣除实际净投入；不含家庭收支、申购在途本金和独立汇兑损益。缺失行情不按零收益处理。",
     }
+    from .fund_return_updates import latest_fund_updates
+
+    summary["latest_fund_updates"] = latest_fund_updates(
+        evidence, when, currency, holding_items
+    )
     return serial(summary), {key: serial(value) for key, value in holding_items.items()}

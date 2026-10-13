@@ -22,6 +22,7 @@ import {
   estimatePresentation,
   qualityPresentation,
   quoteDetails,
+  referenceEstimatePresentation,
   sourcePresentation,
 } from "../market-quality";
 import QuoteQualityDetails from "./QuoteQualityDetails";
@@ -254,6 +255,7 @@ export function QuotesTable() {
               const details = quoteDetails(r);
               return (
                 !!r.data_quality ||
+                !!referenceEstimatePresentation(r) ||
                 !!(
                   details.quarantined.length ||
                   details.attempts.length ||
@@ -303,24 +305,59 @@ export function QuotesTable() {
               ),
             },
             {
-              title: "盘中估值",
-              render: (_, r) => (
-                <div className="cell-name">
-                  <Money
-                    value={r.estimate?.price ?? r.estimate?.value}
-                    currency={r.kind === "index" ? "" : r.currency}
-                    precision={r.kind === "index" ? 2 : undefined}
-                  />
-                  <small>
-                    {quoteTime(
-                      r.estimate?.published_at || r.estimate?.economic_date,
+              title: "估值与参考",
+              render: (_, r) => {
+                const reference = referenceEstimatePresentation(r);
+                return (
+                  <div className="cell-name">
+                    {(r.estimate || !reference) && (
+                      <>
+                        <Money
+                          value={r.estimate?.price ?? r.estimate?.value}
+                          currency={r.kind === "index" ? "" : r.currency}
+                          precision={r.kind === "index" ? 2 : undefined}
+                        />
+                        <small>
+                          {quoteTime(
+                            r.estimate?.published_at ||
+                              r.estimate?.economic_date,
+                          )}
+                        </small>
+                        <small title={estimatePresentation(r).message}>
+                          {estimatePresentation(r).label}
+                        </small>
+                      </>
                     )}
-                  </small>
-                  <small title={estimatePresentation(r).message}>
-                    {estimatePresentation(r).label}
-                  </small>
-                </div>
-              ),
+                    {reference && (
+                      <>
+                        <small>{reference.label}</small>
+                        <Money
+                          value={reference.price}
+                          currency={reference.currency}
+                          precision={6}
+                        />
+                        <small>报价：{marketTime(reference.publishedAt)}</small>
+                        <Button
+                          type="link"
+                          size="small"
+                          style={{ padding: 0, width: "fit-content" }}
+                          onClick={() =>
+                            setExpandedKeys((keys) =>
+                              keys.includes(r.instrument_id)
+                                ? keys.filter((key) => key !== r.instrument_id)
+                                : [...keys, r.instrument_id],
+                            )
+                          }
+                        >
+                          {expandedKeys.includes(r.instrument_id)
+                            ? "收起参考依据"
+                            : "查看参考依据"}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                );
+              },
             },
             {
               title: "正式净值 / 价格日",

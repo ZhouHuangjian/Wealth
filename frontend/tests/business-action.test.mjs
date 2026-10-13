@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   dcaNextAction,
+  dcaCashReconciliationAction,
   dailyReturnNextAction,
   holdingForAction,
   holdingNextAction,
@@ -75,16 +76,85 @@ test("late NAV and confirmation keep automatic waiting without a manual task", (
     assert.equal(dcaNextAction("space-one", { status }, plan), null);
 });
 
-test("cash shortage points to the actual debit account rather than a fund bill", () => {
+test("cash shortage opens the exact plan funding setting while retaining debit reconciliation", () => {
   const action = dcaNextAction(
     "space-one",
     { automation: { status: "waiting_cash" } },
     plan,
   );
-  assert.equal(action.kind, "cash");
-  assert.equal(url(action).searchParams.get("account_id"), "bank-one");
-  assert.equal(url(action).searchParams.get("section"), "reconcile");
-  assert.match(action.description, /不自动向其他账户补款/);
+  assert.equal(action.kind, "plan");
+  assert.equal(url(action).searchParams.get("plan_id"), "plan-one");
+  assert.equal(url(action).searchParams.get("action"), "edit-plan");
+  assert.equal(url(action).searchParams.get("focus"), "funding");
+  assert.match(action.description, /明确选择来源账户及生效日期/);
+  assert.ok(!url(action).searchParams.has("top_up_account_id"));
+  assert.ok(!url(action).searchParams.has("top_up_start_date"));
+  const reconcile = dcaCashReconciliationAction("space-one", {}, plan);
+  assert.equal(reconcile.kind, "cash");
+  assert.equal(url(reconcile).searchParams.get("account_id"), "bank-one");
+  assert.equal(url(reconcile).searchParams.get("section"), "reconcile");
+  assert.match(reconcile.description, /仅补录真实遗漏/);
+});
+
+test("homepage shortage projection navigates without selecting or enabling funding", () => {
+  const row = {
+    id: "period-old",
+    plan_id: "plan?correct",
+    account_id: "debit-correct",
+    instrument_id: "fund-correct",
+    due_date: "2026-10-08",
+    automation: { status: "waiting_cash" },
+  };
+  const before = structuredClone(row);
+  const action = dcaNextAction("space/one", row);
+  assert.equal(url(action).pathname, "/spaces/space%2Fone/assets");
+  assert.equal(url(action).searchParams.get("plan_id"), "plan?correct");
+  assert.equal(url(action).searchParams.get("instrument_id"), "fund-correct");
+  assert.deepEqual(row, before);
+  assert.ok(!action.to.includes("2026-10-08"));
+  const fallback = dcaNextAction("space-one", {
+    status: "waiting_cash",
+    account_id: "debit-correct",
+  });
+  assert.equal(url(fallback).searchParams.get("account_id"), "debit-correct");
+  assert.equal(dcaNextAction("space-one", { status: "waiting_cash" }), null);
+  assert.equal(dcaCashReconciliationAction("space-one", {}), null);
+});
+
+test("an invalid backup account opens its plan settings instead of nonexistent transactions", () => {
+  for (const row of [
+    { status: "needs_review", reason_code: "dca_top_up_account_invalid" },
+    {
+      automation: { status: "needs_review", message: "请核对" },
+      details: { automation: { reason_code: "dca_top_up_account_invalid" } },
+    },
+  ]) {
+    const action = dcaNextAction("space-one", row, plan);
+    assert.equal(action.kind, "plan");
+    assert.equal(url(action).searchParams.get("plan_id"), plan.id);
+    assert.equal(url(action).searchParams.get("action"), "edit-plan");
+    assert.equal(url(action).searchParams.get("focus"), "funding");
+    assert.ok(!url(action).searchParams.has("event_id"));
+    assert.match(action.description, /尚未转入或扣款/);
+  }
+  assert.equal(
+    dcaNextAction("space", {
+      status: "needs_review",
+      reason_code: "dca_top_up_account_invalid",
+    }),
+    null,
+  );
+  const unrelated = dcaNextAction(
+    "space",
+    {
+      status: "needs_review",
+      reason_code: "invalid",
+      debit_event_id: "existing",
+    },
+    plan,
+  );
+  assert.equal(unrelated.kind, "transaction");
+  assert.equal(url(unrelated).searchParams.get("event_id"), "existing");
 });
 
 test("fee and missing automation configuration open the precise plan", () => {

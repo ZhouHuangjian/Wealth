@@ -1,16 +1,18 @@
-import { Table, Tag } from "antd";
+import { Descriptions, Table, Tag } from "antd";
 import { Money } from "../components";
 import { newestFirst } from "../date-ordering";
 import {
   marketTime,
   qualityPresentation,
   quoteDetails,
+  referenceEstimatePresentation,
   sourcePresentation,
   sourceTimestampMessage,
 } from "../market-quality";
 
 export default function QuoteQualityDetails({ row }: { row: any }) {
   const details = quoteDetails(row),
+    reference = referenceEstimatePresentation(row),
     quality = qualityPresentation(row),
     timestampMessage = sourceTimestampMessage(row);
   const columns = [
@@ -56,6 +58,41 @@ export default function QuoteQualityDetails({ row }: { row: any }) {
         </p>
       )}
       {timestampMessage && <p>{timestampMessage}</p>}
+      {reference && (
+        <div style={{ marginBottom: 16 }}>
+          <strong>来源参考依据</strong>
+          <p>{reference.message}</p>
+          <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
+            <Descriptions.Item label="来源">
+              {reference.source}
+            </Descriptions.Item>
+            <Descriptions.Item label="报价时间（北京时间）">
+              {marketTime(reference.publishedAt)}
+            </Descriptions.Item>
+            <Descriptions.Item label="基准净值">
+              <Money
+                value={reference.baseNav}
+                currency={reference.currency}
+                precision={6}
+              />
+            </Descriptions.Item>
+            <Descriptions.Item label="基准净值日">
+              {reference.baseNavDate || "来源未提供"}
+            </Descriptions.Item>
+            <Descriptions.Item label="来源标注涨跌幅">
+              <Money value={reference.changePercent} precision={4} sign />%
+            </Descriptions.Item>
+            <Descriptions.Item label="获取时间（北京时间）">
+              {marketTime(reference.fetchedAt)}
+            </Descriptions.Item>
+            <Descriptions.Item label="本次报价记录范围" span={2}>
+              {marketTime(reference.windowStart)} 至{" "}
+              {marketTime(reference.windowEnd)}
+              <small>（不等于已核实的收益区间）</small>
+            </Descriptions.Item>
+          </Descriptions>
+        </div>
+      )}
       {!!details.observations.length && (
         <Table
           size="small"

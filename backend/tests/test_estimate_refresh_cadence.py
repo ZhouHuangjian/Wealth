@@ -32,7 +32,9 @@ from wealth.models import (
 TODAY = date(2026, 10, 12)
 PRIOR = date(2026, 10, 9)
 START = datetime(2026, 10, 12, 4, 5, tzinfo=tz.utc)
-CONFIG = {"schema_version": 3, "priority": {"fund": ["eastmoney_fund"]}}
+# This controlled chain stays single-source; legacy capability upgrades have
+# dedicated provider-policy tests and must not introduce a second mock provider.
+CONFIG = {"schema_version": 4, "priority": {"fund": ["eastmoney_fund"]}}
 PRODUCT = {
     "kind": "fund",
     "code": "123456",
