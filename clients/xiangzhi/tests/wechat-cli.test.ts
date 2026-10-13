@@ -74,6 +74,15 @@ test('WeChat media and system notifications become explicit pending placeholders
   assert.doesNotMatch(JSON.stringify(records), /secret|<msg>/);
 });
 
+test('image projection retains only valid MD5 and optional local IDs while omitting paths and payloads', () => {
+  const records = parseWechatPage(fixture([{...row, msg_type: '3', local_id: '9223372036854775802',
+    content: {Image: {md5: 'A'.repeat(32), path: '/sensitive/private.dat', xml: 'sensitive XML'}}}]), diagnostic, 'filehelper').records;
+  assert.deepEqual(records[0].wechatImage, {localId: '9223372036854775802', md5: 'a'.repeat(32)});
+  assert.doesNotMatch(JSON.stringify(records), /sensitive|private|xml/);
+  const withoutLocalId = parseWechatPage(fixture([{...row, msg_type: '3', content: {Image: {md5: 'b'.repeat(32)}}}]), diagnostic, 'filehelper').records;
+  assert.deepEqual(withoutLocalId[0].wechatImage, {md5: 'b'.repeat(32)});
+});
+
 test('WeChat rejects wrong contacts, ambiguous directions, unsafe identifiers, missing accounts, and malformed pages', () => {
   for (const changed of [
     {...row, talker: 'someone_else'}, {...row, direction: 'unknown'}, {...row, direction: undefined},

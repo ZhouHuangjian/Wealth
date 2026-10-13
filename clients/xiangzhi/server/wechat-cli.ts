@@ -8,6 +8,7 @@ import type { MessageKind } from '../shared/types.js';
 export interface WechatRecord {
   id: string; sortSeq: string; sentAt: string | null; role: 'self' | 'peer' | 'system';
   kind: MessageKind; text: string; mediaStatus?: 'pending';
+  wechatImage?: {localId?: string; md5?: string};
 }
 export interface WechatPage { records: WechatRecord[]; hasMore: boolean; accountFingerprint: string }
 export interface WechatContactsPage { contacts: {externalId: string; name: string}[]; hasMore: boolean }
@@ -106,7 +107,18 @@ function projectRecord(value: unknown, contact: string): WechatRecord {
     if (typeof content.Text !== 'string' || !content.Text.length || content.Text.length > 10_000) throw new Error(INVALID);
     record.kind = 'text'; record.text = content.Text;
     delete record.mediaStatus;
-  } else if (type === '3') { record.kind = 'image'; record.text = '[图片，待人工查看]'; }
+  } else if (type === '3') {
+    record.kind = 'image'; record.text = '[图片，待人工查看]';
+    // Query exposes Image.md5, but current wx-cli versions omit local_id.
+    // Keep only bounded identifiers; never retain the image XML or a file path.
+    const image = row.content && typeof row.content === 'object' && !Array.isArray(row.content)
+      ? (row.content as Record<string, unknown>).Image : undefined;
+    const md5 = image && typeof image === 'object' && !Array.isArray(image)
+      ? (image as Record<string, unknown>).md5 : undefined;
+    const localId = typeof row.local_id === 'string' && positiveInteger.test(row.local_id) ? row.local_id : undefined;
+    if (typeof md5 === 'string' && /^[a-fA-F0-9]{32}$/.test(md5)) record.wechatImage = {md5: md5.toLowerCase(), ...(localId ? {localId} : {})};
+    else if (localId) record.wechatImage = {localId};
+  }
   else if (type === '34') { record.kind = 'voice'; record.text = '[语音，待人工查看]'; }
   else if (type === '43' || type === '62') { record.kind = 'video'; record.text = '[视频，待人工查看]'; }
   else if (type === '47') { record.kind = 'emoji'; record.text = '[表情，待人工查看]'; }
@@ -196,7 +208,8 @@ export const searchWechatContacts: WechatContactSearch = async (query, signal) =
   return parseWechatContacts(stdout);
 };
 
-function runWechat(args: string[], signal?: AbortSignal): Promise<{stdout: string; stderr: string}> {
+/** Internal CLI transport shared with bounded, single-file media reads. */
+export function runWechat(args: string[], signal?: AbortSignal): Promise<{stdout: string; stderr: string}> {
   if (signal?.aborted) return Promise.reject(new Error('微信消息读取已取消。'));
   const command = executable();
   return new Promise((resolve, reject) => {

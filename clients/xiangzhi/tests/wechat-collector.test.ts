@@ -264,6 +264,71 @@ test('reviewed media survives identical rereads, but real source changes reset r
   assert.equal(events.length, eventCount + 1); assert.equal(events.at(-1)!.live, false);
 });
 
+test('identifier upgrades and repeated reads preserve recognized summaries, attachments, and reviewed state', async t => {
+  const media = record(100, {kind: 'image', text: '[图片，待人工查看]', mediaStatus: 'pending'});
+  let rows = [media];
+  const {store, collector, events} = setup(t, async () => page(rows), {enabled: true});
+  await collector.poll('wechat-test');
+  store.update(state => {
+    state.messages[0].text = '[图片识别] 合成的识别说明'; state.messages[0].mediaStatus = 'recognized';
+    state.messages[0].imageAttachment = {id: 'attachment', filename: 'fixture.png', mimeType: 'image/png', source: 'wechat'};
+    state.messages[0].imageRecognition = {summary: '合成说明', visibleText: '', facts: [], provider: 'qwen', modelName: 'synthetic', recognizedAt: ''};
+  });
+  const eventCount = events.length;
+  rows = [{...media, wechatImage: {md5: 'a'.repeat(32)}}];
+  await collector.poll('wechat-test');
+  assert.equal(store.read().messages[0].text, '[图片识别] 合成的识别说明');
+  assert.equal(store.read().messages[0].mediaStatus, 'recognized');
+  assert.equal(store.read().messages[0].imageAttachment?.id, 'attachment');
+  assert.equal(store.read().messages[0].imageRecognition?.summary, '合成说明');
+  assert.equal(store.read().messages[0].wechatImage?.md5, 'a'.repeat(32));
+  assert.equal(events.length, eventCount);
+});
+
+test('a changed voice source invalidates its decoded audio and transcription', async t => {
+  const voice = record(100, {kind: 'voice', text: '[语音]', mediaStatus: 'pending'}); let rows = [voice];
+  const {store, collector} = setup(t, async () => page(rows), {enabled: true});
+  await collector.poll('wechat-test');
+  store.update(state => {
+    state.messages[0].audioAttachment = {id: 'stale-audio', filename: 'voice.mp3', mimeType: 'audio/mpeg', source: 'wechat'};
+    state.messages[0].audioRecognition = {text: '合成转写', provider: 'qwen', modelName: 'synthetic', recognizedAt: ''};
+    state.messages[0].text = '[语音识别] 合成转写'; state.messages[0].mediaStatus = 'recognized';
+  });
+  rows = [{...voice, role: 'self'}]; await collector.poll('wechat-test');
+  assert.equal(store.read().messages[0].audioAttachment, undefined); assert.equal(store.read().messages[0].audioRecognition, undefined);
+  assert.equal(store.read().messages[0].mediaStatus, 'pending'); assert.equal(store.read().messages[0].text, '[语音]');
+});
+
+test('only new live peer media arriving with its switch enabled becomes eligible for automatic recognition', async t => {
+  let rows = [record(100, {kind: 'image', text: '[图片]', mediaStatus: 'pending'})];
+  const {store, collector} = setup(t, async () => page(rows), {enabled: true});
+  store.update(state => {state.settings.autoRecognizeImages = true; state.settings.autoTranscribeVoice = true;});
+  await collector.poll('wechat-test');
+  assert.equal(store.read().messages[0].autoMediaEligible, false);
+  rows.push(record(101, {kind: 'image', text: '[图片]', mediaStatus: 'pending'}), record(102, {kind: 'voice', text: '[语音]', mediaStatus: 'pending'}), record(103));
+  await collector.poll('wechat-test');
+  assert.equal(store.read().messages[1].autoMediaEligible, true);
+  assert.equal(store.read().messages[2].autoMediaEligible, true);
+  assert.equal(store.read().messages[3].autoMediaEligible, false);
+  store.update(state => {state.settings.autoRecognizeImages = false;});
+  rows.push(record(104, {kind: 'image', text: '[图片]', mediaStatus: 'pending'}), record(105, {kind: 'voice', role: 'self', text: '[语音]', mediaStatus: 'pending'}));
+  await collector.poll('wechat-test');
+  assert.equal(store.read().messages[4].autoMediaEligible, false); assert.equal(store.read().messages[5].autoMediaEligible, false);
+  store.update(state => {state.settings.autoRecognizeImages = true;}); await collector.poll('wechat-test');
+  assert.equal(store.read().messages[4].autoMediaEligible, false);
+});
+
+test('manually uploaded image context keeps its chronological place when new WeChat messages arrive', async t => {
+  let rows = [record(100)];
+  const {store, collector} = setup(t, async () => page(rows), {enabled: true});
+  await collector.poll('wechat-test');
+  store.update(state => {state.messages.push({id: 'uploaded-context', conversationId: 'wechat-test', role: 'peer', source: 'manual',
+    text: '[上传图片]', kind: 'image', mediaStatus: 'pending', sentAt: '2026-10-10T03:00:01Z', sequence: 2, externalId: null, aiAssisted: false});});
+  rows.push(record(101, {sentAt: '2026-10-10T03:00:02Z'}));
+  await collector.poll('wechat-test');
+  assert.deepEqual(store.read().messages.map(message => message.externalId ?? message.id), ['id-100', 'uploaded-context', 'id-101']);
+});
+
 test('concurrent polls share one query and empty baseline can later collect new text', async t => {
   const gate = deferred<WechatPage>(); let calls = 0;
   const {store, collector, events} = setup(t, async () => {calls++; return calls === 1 ? gate.promise : page([record(1)]);}, {enabled: true});

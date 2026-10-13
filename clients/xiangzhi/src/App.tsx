@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity as ActivityIcon, ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check,
   CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, FileText, HeartHandshake,
-  Leaf, LoaderCircle, MessageCircle, MoreHorizontal, Pause, Plus, Search, Send,
+  Image as ImageIcon, Leaf, LoaderCircle, MessageCircle, Mic, MoreHorizontal, Pause, Plus, Search, Send,
   Settings2, ShieldCheck, Sparkles, Trash2, UserRound, Users, X, Zap,
 } from 'lucide-react';
-import type { Conversation, Draft, DraftSyncConnectionStatus, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, Settings } from '../shared/types';
+import type { AudioRecognition, AudioSettings, Conversation, Draft, DraftSyncConnectionStatus, ImageRecognition, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, ReplyModelChoice, Settings, VisionSettings } from '../shared/types';
 import { api } from './api';
 
 type Page = 'conversations' | 'profile' | 'knowledge' | 'settings' | 'activity' | 'drafts';
@@ -26,9 +26,26 @@ const dateLabel = (value: string | null) => value && !Number.isNaN(new Date(valu
   ? new Date(value).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }) : '未记录日期';
 const jobLabels = { queued: '等待处理', generating: '正在组织回复', drafted: '草稿已生成 · 待你确认', sent: '已发送', cancelled: '已取消', failed: '处理失败', blocked: '已暂停' };
 const messageKindLabels = { text: '文字', image: '图片', voice: '语音', video: '视频', emoji: '表情', file: '文件', link: '链接', system: '系统消息', unknown: '未知消息' };
-const messageDisplayText = (message: Message) => message.mediaStatus === 'reviewed'
+const messageDisplayText = (message: Message) => message.mediaStatus === 'recognized'
+  ? message.text.replace(/^\[[^\]\n]+，(?:待人工查看|待识别|未解析)\]\n?/, '').trim() || (message.kind === 'voice' ? '语音转写结果如下。' : '图片识别结果如下。')
+  : message.mediaStatus === 'reviewed'
   ? message.text.replace(/^\[[^\]\n]+，待人工查看\]\n?/, '').trim() || '已由你查看，媒体内容未自动解析。'
   : message.mediaStatus === 'pending' ? message.text.replace(/^\[([^\]\n]+)，待人工查看\]/, '[$1，未解析]') : message.text;
+const qwenModels = ['qwen3.8-flash', 'qwen3.8-max', 'qwen3.7-plus', 'qwen3.7-max', 'qwen3.7-flash'];
+const imageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+type UploadedImage = { dataUrl: string; filename: string };
+async function readImageFile(file: File): Promise<UploadedImage> {
+  if (!imageTypes.includes(file.type)) throw new Error('请选择 PNG、JPEG、WebP 或 GIF 图片。');
+  if (file.size > 5 * 1024 * 1024) throw new Error('图片需小于或等于 5 MiB。');
+  if (!file.size) throw new Error('图片文件为空，请重新选择。');
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('图片读取未完成，请重试。'));
+    reader.onerror = () => reject(new Error('图片读取未完成，请重试。'));
+    reader.readAsDataURL(file);
+  });
+  return { dataUrl, filename: file.name };
+}
 
 function Toggle({ checked, onChange, label, disabled = false, small = false }: {
   checked: boolean; onChange: () => void; label: string; disabled?: boolean; small?: boolean;
@@ -69,6 +86,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [showImageUpload, setShowImageUpload] = useState(false);
   const [mobileConversation, setMobileConversation] = useState(false);
   const [textById, setTextById] = useState<Record<string, string>>({});
   const [role, setRole] = useState<'self' | 'peer'>('self');
@@ -129,12 +147,13 @@ export default function App() {
     }
     scrolledConversation.current = selectedId;
   }, [lastMessageId, selectedId, page, mobileConversation, adoptedDrafts[selectedId], role]);
-  const drafts = state?.drafts.filter(d => d.conversationId === selectedId && d.basedOnMessageId === lastMessageId).slice(-3) ?? [];
+  const drafts = state?.drafts.filter(d => d.conversationId === selectedId && d.basedOnMessageId === lastMessageId) ?? [];
   const currentJob = state?.jobs.filter(j => j.conversationId === selectedId && ['queued', 'generating'].includes(j.status)).at(-1);
-  const currentUpload = state?.draftUploads?.filter(upload => upload.conversationId === selectedId && upload.destinationId === state.runtime.draftSyncConnection?.bindingId).at(-1);
-  const uploadMatchesCurrentDrafts = !!currentUpload && drafts.length > 0
-    && drafts.length === currentUpload.draftIds.length && drafts.every(draft => currentUpload.draftIds.includes(draft.id));
-  const currentDraftsUploaded = currentUpload?.status === 'uploaded' && uploadMatchesCurrentDrafts;
+  const uploadsForConversation = state?.draftUploads?.filter(upload => upload.conversationId === selectedId && upload.destinationId === state.runtime.draftSyncConnection?.bindingId) ?? [];
+  const currentUpload = uploadsForConversation.at(-1);
+  const uploadMatchesCurrentDrafts = !!currentUpload && drafts.some(draft => currentUpload.draftIds.includes(draft.id));
+  const uploadedDraftIds = new Set(uploadsForConversation.filter(upload => upload.status === 'uploaded').flatMap(upload => upload.draftIds));
+  const currentDraftsUploaded = drafts.length > 0 && drafts.every(draft => uploadedDraftIds.has(draft.id));
   const text = textById[selectedId] || '';
   const setText = (value: string) => {
     setTextById(previous => ({ ...previous, [selectedId]: value }));
@@ -266,12 +285,12 @@ export default function App() {
                 <div className="conversation-start"><span />{messages.length ? dateLabel(messages[0].sentAt) : '从这里开始'}<span /></div>
                 {messages.map((message, index) => <div key={message.id} className={`message-row ${message.role}`}>
                   {message.role === 'peer' && <span className="avatar message-avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</span>}
-                  <div className="message-content"><div className={`bubble ${message.mediaStatus === 'pending' ? 'media-pending' : ''}`}>{message.mediaStatus && <span className={`media-label ${message.mediaStatus}`}><FileText size={12} />{messageKindLabels[message.kind ?? 'unknown']} · {message.mediaStatus === 'pending' ? '未解析' : '已人工查看'}</span>}{messageDisplayText(message)}</div>{message.mediaStatus === 'pending' && <MediaReview message={message} busy={busy} run={run} />}<div className="message-meta">{timeLabel(message.sentAt)}{message.source === 'wechat' && <span>微信读取</span>}{message.source === 'auto' && <span><Sparkles size={10} />自动回复</span>}{message.aiAssisted && message.source !== 'auto' && <span>辅助表达</span>}{message.role === 'self' && index === messages.length - 1 && <CheckCheck size={12} />}</div></div>
+                  <div className="message-content"><div className={`bubble ${message.mediaStatus === 'pending' ? 'media-pending' : ''}`}>{message.mediaStatus && <span className={`media-label ${message.mediaStatus}`}><FileText size={12} />{messageKindLabels[message.kind ?? 'unknown']} · {message.mediaStatus === 'pending' ? '未解析' : message.mediaStatus === 'recognized' ? '模型已识别' : '已人工查看'}</span>}{messageDisplayText(message)}{message.kind === 'image' && <ImageMessage message={message} busy={busy} run={run} visionEnabled={!!state.settings.vision && state.settings.vision.provider !== 'disabled'} />}{message.kind === 'voice' && <VoiceMessage message={message} busy={busy} run={run} audioEnabled={!!state.settings.audio && state.settings.audio.provider !== 'disabled'} />}</div>{message.mediaStatus === 'pending' && <MediaReview message={message} busy={busy} run={run} />}<div className="message-meta">{timeLabel(message.sentAt)}{message.source === 'wechat' && <span>微信读取</span>}{message.source === 'auto' && <span><Sparkles size={10} />自动回复</span>}{message.aiAssisted && message.source !== 'auto' && <span>辅助表达</span>}{message.role === 'self' && index === messages.length - 1 && <CheckCheck size={12} />}</div></div>
                 </div>)}
                 {!messages.length && <div className="empty-chat-start"><Empty title={isWechat ? '等待读取微信消息' : '给这段对话一个开始'}>{isWechat ? '点击下方读取上下文，或在上方“信息处理”开启持续读取。' : isDemo ? '可以发送一句话，或用下方「模拟来信」体验自动回复。' : '消息通道收到来信后，会显示在这里。'}</Empty>{isWechat && <Button kind="secondary" disabled={!!busy || !state.runtime.wechatAvailable || conversation.wechat?.status === 'reading'} onClick={() => readWechatOnce(conversation)}>{busy === `wechat-poll-${conversation.id}` || conversation.wechat?.status === 'reading' ? <LoaderCircle size={14} className="spin" /> : <ArrowDownToLine size={14} />}读取微信上下文</Button>}</div>}
                 {currentJob && <div className="job-indicator"><LoaderCircle size={14} className="spin" /><span>{currentJob.status === 'generating' ? '正在组织回复…' : `${Math.max(0, Math.ceil((new Date(currentJob.dueAt).getTime() - now) / 1000))} 秒后${(currentJob.mode ?? autoMode) === 'draft' ? '生成草稿' : '自动发送'}`}</span><button onClick={pause}>暂停</button></div>}
               </div>
-              <div className="composer"><div className="composer-toolbar"><div className="segmented"><button className={role === 'self' ? 'active' : ''} onClick={() => setRole('self')}>我的回复</button>{isDemo && <button className={role === 'peer' ? 'active' : ''} onClick={() => setRole('peer')}>模拟来信</button>}</div><span>{role === 'peer' ? '以对方身份加入一条演练消息' : '用你的方式，好好说话'}</span></div>
+              <div className="composer"><div className="composer-toolbar"><div className="segmented"><button className={role === 'self' ? 'active' : ''} onClick={() => setRole('self')}>我的回复</button>{isDemo && <button className={role === 'peer' ? 'active' : ''} onClick={() => setRole('peer')}>模拟来信</button>}</div><Button kind="ghost" disabled={!!busy} onClick={() => setShowImageUpload(true)}><ImageIcon size={13} />补充图片</Button></div>
                 <textarea value={text} placeholder={role === 'peer' ? '输入一条对方的消息，体验自动草稿或回复…' : '写下你的回复，或先看看右侧的表达建议…'} aria-label={role === 'peer' ? '模拟对方消息' : '回复内容'} onChange={event => setText(event.target.value)} onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void sendText(text); } }} />
                 {role === 'self' && staleDraft && <div className="stale-draft" role="status">对话或档案已变化，请重新生成建议后再保存反馈或发送。<button onClick={() => setText('')}>清空并重新编辑</button></div>}
                 {role === 'self' && adoptedDrafts[selectedId] && !staleDraft && <div className="feedback-composer"><label htmlFor="feedback-reason">调整原因（可选）</label><input id="feedback-reason" value={feedbackReasonById[selectedId] || ''} maxLength={500} onChange={event => setFeedbackReasonById(previous => ({ ...previous, [selectedId]: event.target.value }))} placeholder="例如：这里先确认情况，不急着安慰" /><div><small>仅保存反馈会保留输入；发送采用的草稿成功后也会记录反馈。</small><Button kind="secondary" disabled={!text.trim() || !!busy} onClick={() => void saveFeedback()}>{busy === 'feedback' ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}仅保存反馈</Button></div></div>}
@@ -281,16 +300,16 @@ export default function App() {
             </> : <Empty title="选择一段对话">从左侧添加微信联系人，或新建演练对话。</Empty>}
           </section>
 
-          <aside className="suggestions-panel" aria-label="表达建议"><div className="panel-heading"><h2><Sparkles size={17} />表达建议</h2><span className="label-pill">{modelIsDemo ? '规则演示' : state.settings.provider === 'codex' ? 'Codex' : 'AI 辅助'}</span></div>
+          <aside className="suggestions-panel" aria-label="表达建议"><div className="panel-heading"><h2><Sparkles size={17} />表达建议</h2><span className="label-pill">{modelIsDemo ? '规则演示' : state.settings.provider === 'codex' ? 'Codex' : state.settings.modelPreset === 'qwen' ? '千问' : 'AI 辅助'}</span></div>
             <p className="panel-description">多一种表达，仍然是你。</p>
             <div className="context-card"><div className="context-icon"><UserRound size={17} /></div><div><strong>{state.runtime.learnedProfileError ? '习惯档案加载异常' : state.learnedProfile ? `习惯档案 v${state.learnedProfile.version} 已加载` : '个人信息档案'}</strong><p>{approved} 条已确认信息 · <button onClick={() => setPage('profile')}>查看档案 <ChevronRight size={12} /></button></p></div></div>
             <label className="intent-label" htmlFor="intent">这一次，你想表达什么？</label><textarea id="intent" className="intent-input" rows={2} placeholder="例如：关心一下，顺便聊聊周末安排" value={intent} onChange={event => setIntent(event.target.value)} />
             <div className="intent-chips">{['自然接话', '表达关心', '轻松邀约'].map(chip => <button key={chip} className={intent === chip ? 'selected' : ''} onClick={() => setIntent(chip)}>{chip}</button>)}</div>
             <Button className="generate-button" onClick={() => void generate()} disabled={!!busy || !conversation || messages.at(-1)?.role !== 'peer' || mediaBlocksGeneration}>{busy === 'suggest' ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}{busy === 'suggest' ? '正在整理表达…' : '生成回复建议'}</Button>
-            {pendingMedia.length > 0 && <p className="pending-media-notice" role="status"><CircleHelp size={14} /><span>最近 20 条消息中有 {pendingMedia.length} 条媒体未解析。{mediaBlocksGeneration ? '自动发送模式下需先查看，或切回草稿模式继续生成。' : '可直接生成草稿；模型只参考已有文字，不会假装理解图片或语音。'}也可在对应消息下补充内容。</span></p>}
+            {pendingMedia.length > 0 && <p className="pending-media-notice" role="status"><CircleHelp size={14} /><span>最近 20 条消息中有 {pendingMedia.length} 条媒体未解析。{mediaBlocksGeneration ? '自动发送模式下需先查看，或切回草稿模式继续生成。' : '可先生成草稿，或在图片下点击识别后重新生成。'}未识别的媒体只作为占位提示。</span></p>}
             {modelIsDemo && <p className="demo-disclosure">当前为本地规则演示，未调用 AI 模型。<button onClick={() => setPage('settings')}>配置模型</button></p>}
             {conversation && <div className="draft-sync-panel"><Button kind="secondary" disabled={!state.runtime.draftSyncConfigured || !drafts.length || !!busy || currentUpload?.status === 'uploading' || currentDraftsUploaded} onClick={syncDrafts}>{busy === 'sync-drafts' || currentUpload?.status === 'uploading' ? <LoaderCircle size={14} className="spin" /> : <Cloud size={14} />}{currentDraftsUploaded ? '当前草稿已同步' : currentUpload?.status === 'failed' && uploadMatchesCurrentDrafts ? '重试同步草稿至服务器' : '同步草稿至服务器'}</Button><p>{state.runtime.draftSyncConfigured ? '仅上传候选回复、联系人显示名和档案版本。' : '先在设置中查看草稿同步配置。'}</p>{currentUpload && <p className={`draft-upload-status ${currentUpload.status}`} role="status"><strong>最近同步：{currentUpload.status === 'uploaded' ? '服务器已确认' : currentUpload.status === 'uploading' ? '正在同步' : '结果未确认'}</strong> · {timeLabel(currentUpload.finishedAt || currentUpload.createdAt)}<span>{currentUpload.detail}</span></p>}</div>}
-            <div className="draft-list">{drafts.length ? drafts.map((draft, index) => <article className="draft-card" key={draft.id}><div className="draft-top"><span className="draft-number">0{index + 1}</span><h3>{draft.label}</h3></div><p className="draft-text">{draft.text}</p><p className="draft-reason">{draft.reason}{draft.provider === 'codex' && <span className="draft-profile">由 Codex 生成</span>}{draft.profileVersion && <span className="draft-profile">参考习惯档案 v{draft.profileVersion}</span>}</p><div className="draft-actions"><button onClick={() => { setRole('self'); setText(draft.text); if (adoptedDrafts[selectedId] !== draft.id) setFeedbackReasonById(previous => ({ ...previous, [selectedId]: '' })); setAdoptedDrafts(previous => ({ ...previous, [selectedId]: draft.id })); notify('已放入回复框，可以继续修改'); }}>采用并编辑 <ArrowRight size={13} /></button>{canSend ? <button className="draft-send" disabled={!!busy} title="发送这条建议" onClick={() => void sendText(draft.text, draft.id)} aria-label={isDemo ? '将建议发送到演练' : '发送这条建议'}><Send size={14} /></button> : <button className="draft-send" title="复制这条建议" onClick={() => void copyReply(draft.text)} aria-label="复制这条建议"><Copy size={14} /></button>}</div></article>) : <div className="suggestion-empty"><span><MessageCircle size={26} strokeWidth={1.4} /></span><p>听懂对方，再认真回应。</p><small>有了对方的消息，就可以生成表达建议。</small></div>}</div>
+            <div className="draft-list">{drafts.length ? drafts.map((draft, index) => <article className="draft-card" key={draft.id}><div className="draft-top"><span className="draft-number">{String(index + 1).padStart(2, '0')}</span><h3>{draft.label}</h3></div><span className="draft-model-source">{draft.provider === 'codex' ? 'Codex' : draft.provider === 'compatible' ? '兼容 API' : draft.provider === 'ollama' ? 'Ollama' : '本地规则'} · {draft.modelName || (draft.provider === 'codex' ? 'Codex 默认模型' : draft.provider === 'demo' ? '本地规则演示' : draft.provider)}{draft.modelChoiceId && state.settings.replyModels?.find(choice => choice.id === draft.modelChoiceId)?.label && ` · ${state.settings.replyModels.find(choice => choice.id === draft.modelChoiceId)?.label}`}</span><p className="draft-text">{draft.text}</p><p className="draft-reason">{draft.reason}{draft.provider === 'codex' && <span className="draft-profile">由 Codex 生成</span>}{draft.profileVersion && <span className="draft-profile">参考习惯档案 v{draft.profileVersion}</span>}</p><div className="draft-actions"><button onClick={() => { setRole('self'); setText(draft.text); if (adoptedDrafts[selectedId] !== draft.id) setFeedbackReasonById(previous => ({ ...previous, [selectedId]: '' })); setAdoptedDrafts(previous => ({ ...previous, [selectedId]: draft.id })); notify('已放入回复框，可以继续修改'); }}>采用并编辑 <ArrowRight size={13} /></button>{canSend ? <button className="draft-send" disabled={!!busy} title="发送这条建议" onClick={() => void sendText(draft.text, draft.id)} aria-label={isDemo ? '将建议发送到演练' : '发送这条建议'}><Send size={14} /></button> : <button className="draft-send" title="复制这条建议" onClick={() => void copyReply(draft.text)} aria-label="复制这条建议"><Copy size={14} /></button>}</div></article>) : <div className="suggestion-empty"><span><MessageCircle size={26} strokeWidth={1.4} /></span><p>听懂对方，再认真回应。</p><small>有了对方的消息，就可以生成表达建议。</small></div>}</div>
             {conversation && <FeedbackHistory state={state} conversationId={selectedId} busy={busy} run={run} compact />}
             <div className="gentle-tip"><Leaf size={15} /><p>建议是灵感，真实的感受由你决定。<br />不要把聊天热度当作对方的承诺。</p></div>
           </aside>
@@ -308,10 +327,137 @@ export default function App() {
     {showImport && <ImportDialog onClose={() => setShowImport(false)} notify={notify} onDone={async id => { await refresh(); setSelectedId(id); setShowImport(false); setPage('conversations'); setMobileConversation(true); }} />}
     {showNew && <AddConversationDialog state={state} notify={notify} onClose={() => setShowNew(false)} onAdded={async id => { await refresh(); setSelectedId(id); setSearch(''); setPage('conversations'); setMobileConversation(true); setRole('self'); setIntent(''); setShowNew(false); }} />}
     {showDetails && conversation && <ConversationDetails conversation={conversation} onClose={() => setShowDetails(false)} busy={busy} run={run} />}
+    {showImageUpload && conversation && <ConversationImageUpload conversation={conversation} busy={busy} run={run} onClose={() => setShowImageUpload(false)} />}
   </div>;
 }
 
 type Run = <T>(key: string, action: () => Promise<T>, success?: string) => Promise<T | undefined>;
+
+function ImageFilePicker({ image, onChange, disabled = false, label = '选择图片' }: {
+  image: UploadedImage | null; onChange: (image: UploadedImage | null) => void; disabled?: boolean; label?: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const request = useRef(0);
+  const [error, setError] = useState('');
+  const [reading, setReading] = useState(false);
+  useEffect(() => () => { request.current += 1; }, []);
+  const choose = async (file?: File) => {
+    if (!file) return;
+    const revision = ++request.current;
+    setReading(true); setError('');
+    try {
+      const next = await readImageFile(file);
+      if (request.current === revision) onChange(next);
+    } catch (cause) {
+      if (request.current === revision) { onChange(null); setError(cause instanceof Error ? cause.message : '图片读取未完成'); }
+    } finally { if (request.current === revision) setReading(false); }
+  };
+  return <div className="image-file-picker">
+    <input ref={input} hidden type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label={label} disabled={disabled || reading} onChange={event => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
+    <div className="image-picker-actions"><Button kind="secondary" disabled={disabled || reading} onClick={() => input.current?.click()}>{reading ? <LoaderCircle size={14} className="spin" /> : <ImageIcon size={14} />}{image ? '更换图片' : label}</Button>{image && <Button kind="ghost" disabled={disabled || reading} onClick={() => { request.current += 1; onChange(null); setError(''); }}>移除</Button>}<small>PNG / JPEG / WebP / GIF · 最大 5 MiB</small></div>
+    {image && <div className="image-upload-preview"><img src={image.dataUrl} alt={`待处理图片：${image.filename}`} /><span>{image.filename}</span></div>}
+    {error && <p className="inline-error" role="alert">{error}</p>}
+  </div>;
+}
+
+function RecognitionResult({ recognition }: { recognition: ImageRecognition }) {
+  return <section className="image-recognition-result" aria-label="图片识别结果">
+    <div className="image-recognition-meta"><Sparkles size={12} /><strong>模型识别</strong><span>{recognition.provider === 'qwen' ? '千问' : recognition.provider === 'codex' ? 'Codex' : '兼容 API'} · {recognition.modelName}</span></div>
+    <p>{recognition.summary}</p>
+    {recognition.visibleText && <details><summary>图片中的文字<ChevronDown size={12} /></summary><pre>{recognition.visibleText}</pre></details>}
+    {recognition.facts.length > 0 && <ul>{recognition.facts.map((fact, index) => <li key={index}>{fact}</li>)}</ul>}
+    <small>{checkedTimeLabel(recognition.recognizedAt)}{recognition.usage && ` · ${recognition.usage.totalTokens} tokens`}</small>
+  </section>;
+}
+
+function AudioResult({ recognition }: { recognition: AudioRecognition }) {
+  return <section className="image-recognition-result audio-recognition-result" aria-label="语音转写结果"><div className="image-recognition-meta"><Mic size={12} /><strong>语音转写</strong><span>{recognition.provider === 'qwen' ? '千问' : '兼容 API'} · {recognition.modelName}</span></div><p>{recognition.text}</p><small>{checkedTimeLabel(recognition.recognizedAt)}{recognition.usage && ` · ${recognition.usage.totalTokens} tokens`}</small></section>;
+}
+
+function AudioFilePicker({ audio, onChange, disabled = false }: {
+  audio: UploadedImage | null; onChange: (audio: UploadedImage | null) => void; disabled?: boolean;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
+  const [reading, setReading] = useState(false);
+  const request = useRef(0);
+  useEffect(() => () => { request.current += 1; }, []);
+  const choose = async (file?: File) => {
+    if (!file) return;
+    const revision = ++request.current;
+    setReading(true); setError('');
+    try {
+      if (!file.size || file.size > 5 * 1024 * 1024) throw new Error('请选择 5 MiB 以内的非空音频文件。');
+      if (!/\.(wav|mp3|aac|amr|3gp)$/i.test(file.name)) throw new Error('请选择 WAV、MP3、AAC、AMR 或 3GP 音频。');
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('音频读取未完成'));
+        reader.onerror = () => reject(new Error('音频读取未完成'));
+        reader.readAsDataURL(file);
+      });
+      if (request.current === revision) onChange({ dataUrl, filename: file.name });
+    } catch (cause) { if (request.current === revision) { onChange(null); setError(cause instanceof Error ? cause.message : '音频读取未完成'); } }
+    finally { if (request.current === revision) setReading(false); }
+  };
+  return <div className="image-file-picker audio-file-picker"><input ref={input} hidden type="file" accept=".wav,.mp3,.aac,.amr,.3gp" disabled={disabled || reading} aria-label="选择语音测试文件" onChange={event => { void choose(event.target.files?.[0]); event.target.value = ''; }} /><div className="image-picker-actions"><Button kind="secondary" disabled={disabled || reading} onClick={() => input.current?.click()}>{reading ? <LoaderCircle size={14} className="spin" /> : <Mic size={14} />}{audio ? '更换音频' : '选择音频'}</Button>{audio && <Button kind="ghost" disabled={disabled || reading} onClick={() => { request.current += 1; onChange(null); setError(''); }}>移除</Button>}<small>WAV / MP3 / AAC / AMR / 3GP · 最大 5 MiB</small></div>{audio && <div className="audio-upload-preview"><audio src={audio.dataUrl} controls preload="metadata" aria-label={`音频预览：${audio.filename}`} /><span>{audio.filename}</span></div>}{error && <p className="inline-error" role="alert">{error}</p>}</div>;
+}
+
+function VoiceMessage({ message, busy, run, audioEnabled }: { message: Message; busy: string; run: Run; audioEnabled: boolean }) {
+  const readKey = `read-voice-${message.id}`;
+  const recognizeKey = `transcribe-voice-${message.id}`;
+  return <div className="message-image message-audio">{message.audioAttachment && <><audio className="message-audio-preview" controls preload="none" src={`/api/messages/${encodeURIComponent(message.id)}/audio`} aria-label="微信语音" /><small className="image-source">{message.audioAttachment.source === 'wechat' ? '微信读取' : '手动上传'} · {message.audioAttachment.filename}</small></>}
+    <div className="message-image-actions">{message.source === 'wechat' && (!message.audioAttachment || message.audioAttachment.source === 'wechat') && <Button kind="secondary" disabled={!!busy} onClick={() => void run(readKey, () => api(`/messages/${message.id}/read-voice`, 'POST', {}), '微信语音已读取，可继续转写')}>{busy === readKey ? <LoaderCircle size={12} className="spin" /> : <ArrowDownToLine size={12} />}{message.audioAttachment ? '重新读取微信语音' : '读取微信语音'}</Button>}{message.audioAttachment && <Button kind="secondary" disabled={!!busy || !audioEnabled} onClick={() => void run(recognizeKey, () => api(`/messages/${message.id}/transcribe-voice`, 'POST', {}), '语音已转写，可参考内容生成回复草稿')}>{busy === recognizeKey ? <LoaderCircle size={12} className="spin" /> : <Mic size={12} />}{message.audioRecognition ? '重新转写语音' : '转写语音'}</Button>}</div>{message.audioAttachment && !audioEnabled && <small className="image-model-hint">先在设置中选择语音转写模型。</small>}{message.audioRecognition && <AudioResult recognition={message.audioRecognition} />}
+  </div>;
+}
+
+function ImageMessage({ message, busy, run, visionEnabled }: {
+  message: Message; busy: string; run: Run; visionEnabled: boolean;
+}) {
+  const [replacement, setReplacement] = useState<UploadedImage | null>(null);
+  const [previewError, setPreviewError] = useState(false);
+  useEffect(() => setPreviewError(false), [message.imageAttachment?.id]);
+  const readKey = `read-image-${message.id}`;
+  const recognizeKey = `recognize-image-${message.id}`;
+  const replaceKey = `replace-image-${message.id}`;
+  const canReadWechat = message.source === 'wechat' && (!message.imageAttachment || message.imageAttachment.source === 'wechat');
+  return <div className="message-image">
+    {message.imageAttachment && <>{previewError ? <p className="image-preview-error" role="status">图片预览未能加载，可重新读取或补充图片。</p> : <img className="message-image-preview" src={`/api/messages/${encodeURIComponent(message.id)}/image`} alt={message.imageAttachment.filename || '对话图片'} onError={() => setPreviewError(true)} />}<small className="image-source">{message.imageAttachment.source === 'wechat' ? '微信读取' : '手动上传'} · {message.imageAttachment.filename}</small></>}
+    <div className="message-image-actions">{canReadWechat && <Button kind="secondary" disabled={!!busy} onClick={() => void run(readKey, () => api(`/messages/${message.id}/read-image`, 'POST', {}), '微信图片已读取，可继续识别')}>{busy === readKey ? <LoaderCircle size={12} className="spin" /> : <ArrowDownToLine size={12} />}{message.imageAttachment ? '重新读取微信图片' : '读取微信图片'}</Button>}{message.imageAttachment && <Button kind="secondary" disabled={!!busy || !visionEnabled} onClick={() => void run(recognizeKey, () => api(`/messages/${message.id}/recognize-image`, 'POST', {}), '图片已识别，可参考识别结果生成回复草稿')}>{busy === recognizeKey ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{message.imageRecognition ? '重新识别图片' : '识别图片'}</Button>}</div>
+    {canReadWechat && <small className="image-model-hint">原图未下载时可能读取缩略图；可先在微信打开原图，再点击重新读取。</small>}
+    {message.imageAttachment && !visionEnabled && <small className="image-model-hint">先在设置中选择图片识别模型。</small>}
+    {message.imageRecognition && <RecognitionResult recognition={message.imageRecognition} />}
+    <details className="image-replacement"><summary>{message.imageAttachment ? '替换本机图片' : '手动补充这张图片'}<ChevronDown size={12} /></summary><ImageFilePicker image={replacement} onChange={setReplacement} disabled={!!busy} label="选择要补充的图片" /><Button kind="secondary" disabled={!!busy || !replacement} onClick={() => { if (replacement) void run(replaceKey, async () => { const result = await api(`/messages/${message.id}/image`, 'POST', replacement); setReplacement(null); return result; }, '图片已保存在本机，点击识别后可用于回复草稿'); }}>{busy === replaceKey ? <LoaderCircle size={12} className="spin" /> : <Check size={12} />}保存到这条消息</Button></details>
+  </div>;
+}
+
+function ConversationImageUpload({ conversation, busy, run, onClose }: {
+  conversation: Conversation; busy: string; run: Run; onClose: () => void;
+}) {
+  const [image, setImage] = useState<UploadedImage | null>(null);
+  const [role, setRole] = useState<'peer' | 'self'>('peer');
+  const key = `upload-image-${conversation.id}`;
+  return <Modal title={`为 ${conversation.name} 补充图片`} description="保存到当前对话，作为草稿的参考内容。" onClose={onClose}>
+    <ImageFilePicker image={image} onChange={setImage} disabled={!!busy} />
+    <label className="field-label">图片来自<select value={role} disabled={!!busy} onChange={event => setRole(event.target.value as 'peer' | 'self')}><option value="peer">对方</option><option value="self">我</option></select></label>
+    <p className="image-upload-note">保存后在消息下点击“识别图片”，再生成回复建议。仅补充上下文，不会发送微信消息。</p>
+    <div className="modal-footer"><Button kind="secondary" disabled={!!busy} onClick={onClose}>取消</Button><Button disabled={!!busy || !image} onClick={() => { if (image) void run(key, async () => { const result = await api(`/conversations/${conversation.id}/images`, 'POST', { ...image, role }); onClose(); return result; }, '图片已加入本机对话，可点击识别'); }}>{busy === key ? <LoaderCircle size={14} className="spin" /> : <Plus size={14} />}加入对话</Button></div>
+  </Modal>;
+}
+
+function ModelNamePicker({ value, onChange, label, required = true }: {
+  value: string; onChange: (value: string) => void; label: string; required?: boolean;
+}) {
+  const [custom, setCustom] = useState(!qwenModels.includes(value));
+  return <div className="model-name-picker"><label className="field-label">{label}<select value={custom || !qwenModels.includes(value) ? 'custom' : value} onChange={event => { const isCustom = event.target.value === 'custom'; setCustom(isCustom); if (!isCustom) onChange(event.target.value); }}><optgroup label="千问模型快捷选择">{qwenModels.map(model => <option key={model} value={model}>{model}</option>)}</optgroup><option value="custom">自定义 Model ID</option></select></label>{(custom || !qwenModels.includes(value)) && <label className="field-label">自定义模型名称<input required={required} value={value} onChange={event => onChange(event.target.value)} placeholder="填写控制台中的 Model ID" autoComplete="off" spellCheck={false} /></label>}</div>;
+}
+
+function ReplyModelsEditor({ choices, onChange, disabled }: { choices: ReplyModelChoice[]; onChange: (choices: ReplyModelChoice[]) => void; disabled: boolean }) {
+  const edit = (id: string, value: Partial<ReplyModelChoice>) => onChange(choices.map(choice => choice.id === id ? { ...choice, ...value } : choice));
+  return <div className="reply-models-editor"><div className="reply-models-heading"><div><h3>同时比较多个回复模型</h3><p>{choices.length ? '各模型分别参考同一份习惯档案和上下文生成草稿，选择后由你发送。' : '未添加时只使用上方回复模型；最多添加 4 个模型。'}</p></div><Button kind="secondary" disabled={disabled || choices.length >= 4} onClick={() => onChange([...choices, { id: crypto.randomUUID(), provider: 'compatible', modelPreset: 'qwen', modelName: 'qwen3.8-flash', label: '' }])}><Plus size={13} />添加模型</Button></div>
+    {choices.map((choice, index) => <div className="reply-model-choice" key={choice.id}><div className="reply-model-choice-top"><strong>模型 {index + 1}</strong><button type="button" className="icon-button" aria-label={`移除回复模型 ${index + 1}`} disabled={disabled} onClick={() => onChange(choices.filter(item => item.id !== choice.id))}><Trash2 size={14} /></button></div><div className="form-grid"><label className="field-label">服务<select disabled={disabled} value={choice.provider === 'compatible' && choice.modelPreset === 'qwen' ? 'qwen' : choice.provider} onChange={event => { const id = event.target.value; edit(choice.id, { provider: id === 'qwen' ? 'compatible' : id as ReplyModelChoice['provider'], modelPreset: id === 'qwen' ? 'qwen' : 'custom', modelName: id === 'qwen' ? 'qwen3.8-flash' : id === 'codex' ? '' : choice.modelName }); }}><option value="qwen">阿里千问</option><option value="codex">Codex</option><option value="compatible">兼容 API</option>{choice.provider === 'ollama' && <option value="ollama">Ollama</option>}{choice.provider === 'demo' && <option value="demo">本地规则演示</option>}</select></label>{choice.modelPreset === 'qwen' ? <ModelNamePicker label={`模型 ${index + 1} 的名称`} value={choice.modelName} onChange={value => edit(choice.id, { modelName: value })} /> : <label className="field-label">具体模型名称<input disabled={disabled} required={choice.provider !== 'codex' && choice.provider !== 'demo'} value={choice.modelName} onChange={event => edit(choice.id, { modelName: event.target.value })} placeholder={choice.provider === 'codex' ? '留空使用 Codex 默认模型' : 'Model ID'} /></label>}</div><label className="field-label">展示名称（可选）<input maxLength={80} disabled={disabled} value={choice.label || ''} onChange={event => edit(choice.id, { label: event.target.value })} placeholder="例如：快速回复、细想一下" /></label></div>)}
+    {choices.length > 0 && <p className="multi-model-note">每次生成会分别调用所选模型，最多展示 12 条草稿。千问和兼容 API 共用回复服务地址与密钥。</p>}
+  </div>;
+}
 
 function ConversationProcessing({ conversation, state, busy, run, onRead }: {
   conversation: Conversation; state: PublicState; busy: string; run: Run; onRead: () => void;
@@ -497,36 +643,85 @@ function AddConversationDialog({ state, notify, onClose, onAdded }: {
 }
 
 function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: (message: string, error?: boolean) => void; refresh: () => Promise<void> }) {
-  const [form, setForm] = useState(() => ({ ...state.settings, autoReplyMode: state.settings.autoReplyMode ?? 'draft', apiKey: '' }));
+  const [form, setForm] = useState<Settings & { hasApiKey: boolean; vision: VisionSettings & {hasApiKey?: boolean}; audio: AudioSettings & {hasApiKey?: boolean} }>(() => ({
+    ...state.settings, autoReplyMode: state.settings.autoReplyMode ?? 'draft', apiKey: '', autoRecognizeImages: !!state.settings.autoRecognizeImages, autoTranscribeVoice: !!state.settings.autoTranscribeVoice,
+    vision: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.vision, apiKey: '' },
+    audio: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-omni-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.audio, apiKey: '' },
+  }));
   const [saving, setSaving] = useState('');
   const [connectionPackage, setConnectionPackage] = useState('');
   const [connectionError, setConnectionError] = useState('');
   const connection = state.runtime.draftSyncConnection;
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const modelNames = useRef<Partial<Record<Settings['provider'], string>>>({ [state.settings.provider]: state.settings.modelName });
+  const [testImage, setTestImage] = useState<UploadedImage | null>(null);
+  const [imageResult, setImageResult] = useState<ImageRecognition | null>(null);
+  const [imageError, setImageError] = useState('');
+  const [testAudio, setTestAudio] = useState<UploadedImage | null>(null);
+  const [audioResult, setAudioResult] = useState<AudioRecognition | null>(null);
+  const [audioError, setAudioError] = useState('');
+  const modelNames = useRef<Partial<Record<Settings['provider'] | 'qwen', string>>>({ [state.settings.modelPreset === 'qwen' ? 'qwen' : state.settings.provider]: state.settings.modelName });
+  const visionModelNames = useRef<Partial<Record<VisionSettings['provider'], string>>>({ [state.settings.vision?.provider ?? 'disabled']: state.settings.vision?.modelName ?? 'qwen3.8-flash' });
   const change = <K extends keyof Settings,>(key: K, value: Settings[K]) => setForm(previous => ({ ...previous, [key]: value }));
-  const selectProvider = (provider: Settings['provider']) => {
-    modelNames.current[form.provider] = form.modelName;
-    setForm(previous => ({ ...previous, provider,
-      modelName: modelNames.current[provider] ?? (provider === 'codex' ? '' : state.settings.modelName),
-      modelUrl: provider === 'ollama' ? 'http://127.0.0.1:11434' : previous.modelUrl,
+  const changeVision = <K extends keyof VisionSettings,>(key: K, value: VisionSettings[K]) => setForm(previous => ({ ...previous, vision: { ...previous.vision, [key]: value } }));
+  const changeAudio = <K extends keyof AudioSettings,>(key: K, value: AudioSettings[K]) => setForm(previous => ({ ...previous, audio: { ...previous.audio, [key]: value } }));
+  const selectProvider = (provider: Settings['provider'], modelPreset: 'custom' | 'qwen' = 'custom') => {
+    modelNames.current[form.modelPreset === 'qwen' ? 'qwen' : form.provider] = form.modelName;
+    setForm(previous => ({ ...previous, provider, modelPreset,
+      modelName: modelNames.current[modelPreset === 'qwen' ? 'qwen' : provider] ?? (modelPreset === 'qwen' ? 'qwen3.8-flash' : provider === 'codex' ? '' : state.settings.modelName),
+      modelUrl: provider === 'ollama' ? 'http://127.0.0.1:11434' : previous.provider === 'ollama' || (modelPreset === 'qwen' && previous.provider === 'demo') ? '' : previous.modelUrl,
+      ...(!['compatible', 'ollama'].includes(provider) ? { vision: { ...previous.vision, useReplyApiKey: false }, audio: { ...previous.audio, useReplyApiKey: false } } : {}),
     }));
     setTestResult(null);
   };
-  async function save(test = false) {
+  const selectVisionProvider = (provider: VisionSettings['provider']) => {
+    visionModelNames.current[form.vision.provider] = form.vision.modelName;
+    setForm(previous => ({ ...previous, vision: { ...previous.vision, provider,
+      modelName: visionModelNames.current[provider] ?? (provider === 'codex' ? '' : provider === 'qwen' ? 'qwen3.8-flash' : previous.vision.modelName),
+      ...(!['compatible', 'ollama'].includes(previous.provider) ? { useReplyApiKey: false } : {}),
+    }, ...(provider === 'disabled' ? { autoRecognizeImages: false } : {}) }));
+    setImageResult(null); setImageError('');
+  };
+  async function save(test = false): Promise<boolean> {
     if (test && form.provider === 'codex' && !form.allowRemoteModel) {
       notify('测试 Codex 前，请先允许向模型服务发送必要的对话片段', true);
-      return;
+      return false;
     }
     setSaving(test ? 'test' : 'save'); setTestResult(null);
     try {
-      const { hasApiKey: _hasApiKey, apiKey, autoReplyEnabled: _autoReply, ...values } = form;
-      await api('/settings', 'PATCH', { ...values, ...(apiKey ? { apiKey } : {}) });
+      const { hasApiKey: _hasApiKey, apiKey, autoReplyEnabled: _autoReply, vision, audio, ...values } = form;
+      const { hasApiKey: _visionHasApiKey, apiKey: visionKey, ...visionValues } = vision;
+      const { hasApiKey: _audioHasApiKey, apiKey: audioKey, ...audioValues } = audio;
+      await api('/settings', 'PATCH', { ...values, ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), vision: { ...visionValues, ...(visionKey?.trim() ? { apiKey: visionKey.trim() } : {}) }, audio: { ...audioValues, ...(audioKey?.trim() ? { apiKey: audioKey.trim() } : {}) } });
       if (test) { const result = await api<{ ok: boolean; message: string }>('/model/test', 'POST'); setTestResult(result); }
       else notify(form.autoReplyMode !== state.settings.autoReplyMode ? '模式已切换，全局开关已暂停；确认模式后可重新开启' : '设置已保存');
-      setForm(previous => ({ ...previous, apiKey: '' }));
+      setForm(previous => ({ ...previous, apiKey: '', vision: { ...previous.vision, apiKey: '' }, audio: { ...previous.audio, apiKey: '' } }));
       await refresh();
-    } catch (error) { notify(error instanceof Error ? error.message : '设置未保存', true); }
+      return true;
+    } catch (error) { notify(error instanceof Error ? error.message : '设置未保存', true); return false; }
+    finally { setSaving(''); }
+  }
+  async function recognizeTestImage() {
+    if (!testImage || form.vision.provider === 'disabled') return;
+    if (!form.vision.allowRemoteModel) { setImageError('请先允许向识别服务发送图片。'); return; }
+    setImageError(''); setImageResult(null);
+    if (!await save()) return;
+    setSaving('image-test');
+    try {
+      const result = await api<ImageRecognition>('/images/test', 'POST', testImage);
+      setImageResult(result); await refresh();
+    } catch (error) { setImageError(error instanceof Error ? error.message : '图片识别未完成，请重试'); }
+    finally { setSaving(''); }
+  }
+  async function transcribeTestAudio() {
+    if (!testAudio || form.audio.provider === 'disabled') return;
+    if (!form.audio.allowRemoteModel) { setAudioError('请先允许向转写服务发送语音。'); return; }
+    setAudioError(''); setAudioResult(null);
+    if (!await save()) return;
+    setSaving('audio-test');
+    try {
+      const result = await api<AudioRecognition>('/audio/test', 'POST', testAudio);
+      setAudioResult(result); await refresh();
+    } catch (error) { setAudioError(error instanceof Error ? error.message : '语音转写未完成，请重试'); }
     finally { setSaving(''); }
   }
   async function updateConnection(action: 'save' | 'disable' | 'environment') {
@@ -565,19 +760,48 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
   }
   return <><div className="section-heading"><div className="eyebrow">MAKE IT YOURS</div><h1>按照你的节奏工作。</h1><p>选择模型、控制回复节奏，明确每一次数据的去向。</p></div>
     <form className="settings-layout" onSubmit={event => { event.preventDefault(); void save(); }}>
-      <section className="settings-card"><div className="settings-section-title"><span><FileText size={19} /></span><div><h2>收到消息后怎样处理</h2><p>全局开关和联系人开关都开启后，才会处理新的来信。</p></div></div><div className="provider-options reply-mode-options">{([{ id: 'draft', title: '自动生成草稿', detail: '生成后等待你修改、复制或手动发送' }, { id: 'send', title: '自动发送回复', detail: '生成后直接通过当前对话通道发送' }] as const).map(mode => <label className={`provider-option ${form.autoReplyMode === mode.id ? 'selected' : ''}`} key={mode.id}><input type="radio" name="autoReplyMode" checked={form.autoReplyMode === mode.id} onChange={() => change('autoReplyMode', mode.id)} /><span><strong>{mode.title}{mode.id === 'draft' && ' · 推荐'}</strong><small>{mode.detail}</small></span>{form.autoReplyMode === mode.id && <Check size={15} />}</label>)}</div><div className="info-box"><ShieldCheck size={17} /><span>{form.autoReplyMode === 'draft' ? '草稿模式不会自动发送消息。采用建议后，可以仅保存反馈，或由你决定是否发送。' : '自动发送会实际送出回复；本机演练对话只写入本机。'}切换模式并保存后，全局开关会暂停，需要你重新开启。</span></div></section>
+      <section className="settings-card"><div className="settings-section-title"><span><FileText size={19} /></span><div><h2>收到消息后怎样处理</h2><p>全局开关和联系人开关都开启后，才会处理新的来信。</p></div></div><div className="provider-options reply-mode-options">{([{ id: 'draft', title: '自动生成草稿', detail: '生成后等待你修改、复制或手动发送' }, { id: 'send', title: '自动发送回复', detail: '生成后直接通过当前对话通道发送' }] as const).map(mode => <label className={`provider-option ${form.autoReplyMode === mode.id ? 'selected' : ''}`} key={mode.id}><input type="radio" name="autoReplyMode" checked={form.autoReplyMode === mode.id} disabled={mode.id === 'send' && (form.replyModels?.length || 0) > 1} onChange={() => change('autoReplyMode', mode.id)} /><span><strong>{mode.title}{mode.id === 'draft' && ' · 推荐'}</strong><small>{mode.detail}</small></span>{form.autoReplyMode === mode.id && <Check size={15} />}</label>)}</div><div className="info-box"><ShieldCheck size={17} /><span>{form.autoReplyMode === 'draft' ? '草稿模式不会自动发送消息。采用建议后，可以仅保存反馈，或由你决定是否发送。' : '自动发送会实际送出回复；本机演练对话只写入本机。'}切换模式并保存后，全局开关会暂停，需要你重新开启。</span></div></section>
       <section className="settings-card"><div className="settings-section-title"><span><Sparkles size={19} /></span><div><h2>回复模型</h2><p>先体验演练，也可以连接你自己的模型。</p></div></div>
-        <div className="provider-options model-provider-options">{([{ id: 'demo', title: '本地规则演示', detail: '无需配置 · 不调用 AI' }, { id: 'codex', title: 'Codex', detail: '由服务端 Codex CLI 生成' }, { id: 'ollama', title: 'Ollama', detail: '连接本机模型服务' }, { id: 'compatible', title: '兼容 API', detail: '连接兼容模型服务' }] as const).map(provider => <label className={`provider-option ${form.provider === provider.id ? 'selected' : ''}`} key={provider.id}><input type="radio" name="provider" checked={form.provider === provider.id} onChange={() => selectProvider(provider.id)} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{form.provider === provider.id && <Check size={15} />}</label>)}</div>
+        <div className="provider-options model-provider-options">{([{ id: 'demo', title: '本地规则演示', detail: '无需配置 · 不调用 AI' }, { id: 'codex', title: 'Codex', detail: '由服务端 Codex CLI 生成' }, { id: 'qwen', title: '阿里千问', detail: '选择具体千问模型' }, { id: 'ollama', title: 'Ollama', detail: '连接本机模型服务' }, { id: 'compatible', title: '兼容 API', detail: '连接其他兼容模型服务' }] as const).map(provider => {
+          const selected = (form.provider === 'compatible' && form.modelPreset === 'qwen' ? 'qwen' : form.provider) === provider.id;
+          return <label className={`provider-option ${selected ? 'selected' : ''}`} key={provider.id}><input type="radio" name="provider" checked={selected} onChange={() => selectProvider(provider.id === 'qwen' ? 'compatible' : provider.id, provider.id === 'qwen' ? 'qwen' : 'custom')} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{selected && <Check size={15} />}</label>;
+        })}</div>
         {form.provider === 'demo' ? <div className="info-box"><CircleHelp size={17} /><span>本地规则演示用于体验流程，回复由固定规则生成，不代表 AI 模型能力。所有演练消息只保存在本机。</span></div> : <>
           {form.provider === 'codex' ? <>
             <div className="codex-status" role="status"><span className={`status-dot ${state.runtime.codexAvailable ? '' : 'unavailable'}`} /><div><strong>{state.runtime.codexAvailable ? '已检测到 Codex CLI' : 'Codex CLI 暂不可用'}{state.runtime.codexVersion && <small>{state.runtime.codexVersion}</small>}</strong><p>{state.runtime.codexStatus}</p><p>此检测不联网，不代表已登录或模型可调用。</p></div><Button kind="secondary" disabled={!!saving} onClick={() => void checkCodex()}>{saving === 'check' ? <LoaderCircle size={13} className="spin" /> : <Search size={13} />}重新检测</Button></div>
             <label className="field-label">模型名称（可选）<input placeholder="留空使用 Codex 默认模型" value={form.modelName} onChange={event => change('modelName', event.target.value)} /><small>使用应用所在机器的 Codex 登录配置，无需在这里填写服务地址或 API 密钥。</small></label>
             <div className="info-box codex-context-note"><CircleHelp size={17} /><span>按 Mac 生成、腾讯云存放草稿的方式使用：在 Mac 上选择 Codex，并加载习惯档案和当前会话上下文。它不会自动继承我们在 Codex 中的聊天；腾讯云仅接收和展示已生成的草稿。</span></div>
-          </> : <div className="form-grid"><label className="field-label">模型服务地址<input type="url" required placeholder={form.provider === 'ollama' ? 'http://127.0.0.1:11434' : 'https://your-model-service/v1'} value={form.modelUrl} onChange={event => change('modelUrl', event.target.value)} /></label><label className="field-label">模型名称<input required placeholder={form.provider === 'ollama' ? 'qwen3:8b' : '模型服务提供的名称'} value={form.modelName} onChange={event => change('modelName', event.target.value)} /></label></div>}
+          </> : <div className="form-grid"><label className="field-label">模型服务地址<input type="url" required placeholder={form.provider === 'ollama' ? 'http://127.0.0.1:11434' : form.modelPreset === 'qwen' ? 'https://你的业务空间域名/compatible-mode/v1' : 'https://your-model-service/v1'} value={form.modelUrl} onChange={event => change('modelUrl', event.target.value)} />{form.modelPreset === 'qwen' && <small>填写百炼业务空间的完整 Base URL，包含 /compatible-mode/v1。</small>}</label>{form.modelPreset === 'qwen' ? <ModelNamePicker label="回复模型名称" value={form.modelName} onChange={value => change('modelName', value)} /> : <label className="field-label">模型名称<input required placeholder={form.provider === 'ollama' ? 'qwen3:8b' : '模型服务提供的名称'} value={form.modelName} onChange={event => change('modelName', event.target.value)} /></label>}</div>}
           {form.provider === 'compatible' && <label className="field-label">API 密钥 <span className="field-hint">{state.settings.hasApiKey ? '已保存密钥；留空保留现有密钥' : '仅保存在本机，不会回显'}</span><input type="password" autoComplete="off" value={form.apiKey} onChange={event => change('apiKey', event.target.value)} placeholder={state.settings.hasApiKey ? '•••••••• 已配置' : '输入 API 密钥'} /></label>}
+          {form.modelPreset === 'qwen' && <label className="checkbox-label"><input type="checkbox" checked={!!form.modelThinkingEnabled} onChange={event => change('modelThinkingEnabled', event.target.checked)} /><span><strong>回复启用思考模式</strong><small>默认关闭以缩短测试等待；开启后可能增加耗时和 tokens，需模型支持。</small></span></label>}
           <label className="checkbox-label"><input type="checkbox" checked={form.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许向模型服务发送必要的对话片段</strong><small>{form.provider === 'codex' ? 'Codex CLI 虽在本机运行，仍会调用远端模型。开启后，生成所需的对话、习惯档案和反馈会交给模型服务。' : '使用非本机服务时需要开启；提供商会收到生成回复所需的内容与档案。'}</small></span></label></>}
-        <div className="test-model"><Button kind="secondary" onClick={() => void save(true)} disabled={!!saving || (form.provider === 'codex' && (!form.allowRemoteModel || !state.runtime.codexAvailable))}>{saving === 'test' ? <LoaderCircle size={14} className="spin" /> : <Zap size={14} />}{form.provider === 'codex' ? '保存并测试生成' : '保存并测试连接'}</Button>{testResult && <span className={testResult.ok ? 'success-text' : 'error-text'} role="status">{testResult.message}</span>}</div>
+        <ReplyModelsEditor choices={form.replyModels || []} onChange={choices => setForm(previous => ({ ...previous, replyModels: choices, ...(choices.length > 1 ? { autoReplyMode: 'draft' } : {}) }))} disabled={!!saving} />
+        {form.provider !== 'compatible' && form.replyModels?.some(choice => choice.provider === 'compatible') && <div className="multi-model-api"><h3>比较模型共用的 API 配置</h3><label className="field-label">兼容 API 服务地址<input type="url" required value={form.modelUrl} onChange={event => change('modelUrl', event.target.value)} placeholder="https://你的业务空间域名/compatible-mode/v1" /></label><label className="field-label">API 密钥<span className="field-hint">{state.settings.hasApiKey ? '已保存；留空保留现有密钥' : '仅保存在本机，不会回显'}</span><input type="password" autoComplete="off" value={form.apiKey} onChange={event => change('apiKey', event.target.value)} placeholder={state.settings.hasApiKey ? '•••••••• 已配置' : '输入 API 密钥'} /></label></div>}
+        {form.provider === 'demo' && !!form.replyModels?.length && <label className="checkbox-label"><input type="checkbox" checked={form.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许向比较模型发送必要的对话片段</strong><small>所选模型会参考当前对话、习惯档案及校准反馈。</small></span></label>}
+        {!!form.replyModels?.length && <p className="multi-model-note">添加后使用列表中所选模型生成草稿。多个模型比较时使用草稿模式，由你选择后发送。</p>}
+        <div className="test-model"><Button kind="secondary" onClick={() => void save(true)} disabled={!!saving || (form.provider === 'codex' && (!form.allowRemoteModel || !state.runtime.codexAvailable))}>{saving === 'test' ? <LoaderCircle size={14} className="spin" /> : <Zap size={14} />}{form.provider === 'codex' ? '保存并测试默认模型' : '保存并测试默认连接'}</Button>{testResult && <span className={testResult.ok ? 'success-text' : 'error-text'} role="status">{testResult.message}</span>}</div>
         {form.provider === 'codex' && <p className="model-test-hint">{!form.allowRemoteModel ? '先勾选上方授权，再测试生成。' : '测试会发起一次真实模型调用，可能消耗额度。'}仅保存设置不会调用模型。</p>}
+      </section>
+      <section className="settings-card image-settings-card"><div className="settings-section-title"><span><ImageIcon size={19} /></span><div><h2>图片识别模型</h2><p>与回复模型分别选择。识别结果可作为后续回复草稿的参考。</p></div></div>
+        <label className="checkbox-label media-auto-switch"><input type="checkbox" checked={!!form.autoRecognizeImages} disabled={!!saving || form.vision.provider === 'disabled'} onChange={event => change('autoRecognizeImages', event.target.checked)} /><span><strong>自动识别收到的图片</strong><small>默认关闭。开启后仅处理新收到的图片；历史图片仍可逐条手动识别。</small></span></label>
+        <div className="provider-options vision-provider-options">{([{ id: 'disabled', title: '暂不识别', detail: '保留图片供你查看' }, { id: 'qwen', title: '阿里千问', detail: '选择支持图片的千问模型' }, { id: 'codex', title: 'Codex', detail: '通过本机 Codex 识图' }, { id: 'compatible', title: '兼容 API', detail: '连接其他视觉模型' }] as const).map(provider => <label className={`provider-option ${form.vision.provider === provider.id ? 'selected' : ''}`} key={provider.id}><input type="radio" name="vision-provider" checked={form.vision.provider === provider.id} onChange={() => selectVisionProvider(provider.id)} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{form.vision.provider === provider.id && <Check size={15} />}</label>)}</div>
+        {form.vision.provider !== 'disabled' && <>{form.vision.provider === 'codex' ? <label className="field-label">图片识别模型名称（可选）<input value={form.vision.modelName} onChange={event => changeVision('modelName', event.target.value)} placeholder="留空使用 Codex 默认模型" /><small>使用本机 Codex 登录配置；选择支持图片输入的模型。</small></label> : <>
+          <div className="form-grid"><label className="field-label">图片识别服务地址<input type="url" value={form.vision.modelUrl} onChange={event => changeVision('modelUrl', event.target.value)} placeholder={form.vision.provider === 'qwen' ? 'https://你的业务空间域名/compatible-mode/v1' : 'https://your-model-service/v1'} /><small>可与回复服务相同，识别模型名称单独指定。</small></label>{form.vision.provider === 'qwen' ? <ModelNamePicker label="图片识别模型名称" value={form.vision.modelName} onChange={value => changeVision('modelName', value)} /> : <label className="field-label">图片识别模型名称<input required value={form.vision.modelName} onChange={event => changeVision('modelName', event.target.value)} placeholder="支持图片输入的 Model ID" /></label>}</div>
+          <label className="checkbox-label"><input type="checkbox" checked={form.vision.useReplyApiKey} disabled={!['compatible', 'ollama'].includes(form.provider)} onChange={event => changeVision('useReplyApiKey', event.target.checked)} /><span><strong>使用回复服务的 API 密钥</strong><small>仅限回复模型为兼容 API 或 Ollama，且两个服务地址来源相同；否则单独填写识别密钥。</small></span></label>
+          {!form.vision.useReplyApiKey && <label className="field-label">图片识别 API 密钥<span className="field-hint">{state.settings.vision?.hasApiKey ? '已保存；留空保留现有密钥' : '仅保存在本机，不会回显'}</span><input type="password" autoComplete="off" value={form.vision.apiKey || ''} onChange={event => changeVision('apiKey', event.target.value)} placeholder={state.settings.vision?.hasApiKey ? '•••••••• 已配置' : '输入图片识别 API 密钥'} /></label>}
+          {form.vision.provider === 'qwen' && <label className="checkbox-label"><input type="checkbox" checked={!!form.vision.thinkingEnabled} onChange={event => changeVision('thinkingEnabled', event.target.checked)} /><span><strong>图片识别启用思考模式</strong><small>默认关闭；开启后需模型支持，可能增加耗时和 tokens。</small></span></label>}
+        </>}
+        <label className="checkbox-label"><input type="checkbox" checked={form.vision.allowRemoteModel} onChange={event => changeVision('allowRemoteModel', event.target.checked)} /><span><strong>允许向识别服务发送图片</strong><small>识别时会将所选图片发送给上述模型服务。</small></span></label></>}
+        <div className="image-test-panel"><h3>上传图片测试</h3><p>先选一张图片，再点击识别。此测试不加入聊天上下文。</p><ImageFilePicker image={testImage} onChange={image => { setTestImage(image); setImageResult(null); setImageError(''); }} disabled={!!saving} /><Button kind="secondary" disabled={!!saving || !testImage || form.vision.provider === 'disabled' || !form.vision.allowRemoteModel} onClick={() => void recognizeTestImage()}>{saving === 'image-test' ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}{saving === 'image-test' ? '正在识别图片…' : '保存并识别这张图片'}</Button><small className="model-test-hint">识别会发起一次模型调用，可能消耗额度。选择文件和保存设置不会调用模型。</small>{imageError && <p className="inline-error" role="alert">{imageError}</p>}{imageResult && <RecognitionResult recognition={imageResult} />}</div>
+      </section>
+      <section className="settings-card audio-settings-card"><div className="settings-section-title"><span><Mic size={19} /></span><div><h2>语音转写模型</h2><p>将语音转成文字，再作为生成回复草稿的参考。</p></div></div>
+        <label className="checkbox-label media-auto-switch"><input type="checkbox" checked={!!form.autoTranscribeVoice} disabled={!!saving || form.audio.provider === 'disabled'} onChange={event => change('autoTranscribeVoice', event.target.checked)} /><span><strong>自动转写收到的语音</strong><small>默认关闭。与图片识别独立控制；开启后仅处理新收到的语音。</small></span></label>
+        <div className="provider-options audio-provider-options">{([{ id: 'disabled', title: '暂不转写', detail: '保留语音供你查看' }, { id: 'qwen', title: '阿里千问', detail: '使用支持音频的千问模型' }, { id: 'compatible', title: '兼容 API', detail: '连接其他音频模型' }] as const).map(provider => <label className={`provider-option ${form.audio.provider === provider.id ? 'selected' : ''}`} key={provider.id}><input type="radio" name="audio-provider" checked={form.audio.provider === provider.id} onChange={() => { setForm(previous => ({ ...previous, audio: { ...previous.audio, provider: provider.id, ...(!['compatible', 'ollama'].includes(previous.provider) ? { useReplyApiKey: false } : {}) }, ...(provider.id === 'disabled' ? { autoTranscribeVoice: false } : {}) })); setAudioResult(null); setAudioError(''); }} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{form.audio.provider === provider.id && <Check size={15} />}</label>)}</div>
+        {form.audio.provider !== 'disabled' && <><div className="form-grid"><label className="field-label">语音转写服务地址<input type="url" value={form.audio.modelUrl} onChange={event => changeAudio('modelUrl', event.target.value)} placeholder={form.audio.provider === 'qwen' ? 'https://你的业务空间域名/compatible-mode/v1' : 'https://your-model-service/v1'} /><small>可与回复服务相同；模型需支持音频输入。</small></label><label className="field-label">语音转写模型名称<input required value={form.audio.modelName} onChange={event => changeAudio('modelName', event.target.value)} placeholder="qwen3.8-omni-flash" list="audio-models" /><datalist id="audio-models"><option value="qwen3.8-omni-flash" /></datalist></label></div>
+        <label className="checkbox-label"><input type="checkbox" checked={form.audio.useReplyApiKey} disabled={!['compatible', 'ollama'].includes(form.provider)} onChange={event => changeAudio('useReplyApiKey', event.target.checked)} /><span><strong>使用回复服务的 API 密钥</strong><small>仅限回复模型为兼容 API 或 Ollama，且两个服务地址来源相同；否则单独填写转写密钥。</small></span></label>
+        {!form.audio.useReplyApiKey && <label className="field-label">语音转写 API 密钥<span className="field-hint">{state.settings.audio?.hasApiKey ? '已保存；留空保留现有密钥' : '仅保存在本机，不会回显'}</span><input type="password" autoComplete="off" value={form.audio.apiKey || ''} onChange={event => changeAudio('apiKey', event.target.value)} placeholder={state.settings.audio?.hasApiKey ? '•••••••• 已配置' : '输入语音转写 API 密钥'} /></label>}
+        <label className="checkbox-label"><input type="checkbox" checked={form.audio.allowRemoteModel} onChange={event => changeAudio('allowRemoteModel', event.target.checked)} /><span><strong>允许向转写服务发送语音</strong><small>转写时会将所选音频发送给上述模型服务。</small></span></label></>}
+        <div className="image-test-panel audio-test-panel"><h3>上传语音测试</h3><p>此测试只转写所选音频，不加入聊天上下文。</p><AudioFilePicker audio={testAudio} onChange={audio => { setTestAudio(audio); setAudioResult(null); setAudioError(''); }} disabled={!!saving} /><Button kind="secondary" disabled={!!saving || !testAudio || form.audio.provider === 'disabled' || !form.audio.allowRemoteModel} onClick={() => void transcribeTestAudio()}>{saving === 'audio-test' ? <LoaderCircle size={14} className="spin" /> : <Mic size={14} />}{saving === 'audio-test' ? '正在转写语音…' : '保存并转写这段语音'}</Button><small className="model-test-hint">转写会发起一次模型调用，可能消耗额度。</small>{audioError && <p className="inline-error" role="alert">{audioError}</p>}{audioResult && <AudioResult recognition={audioResult} />}</div>
       </section>
       <section className="settings-card"><div className="settings-section-title"><span><Cloud size={19} /></span><div><h2>草稿同步 · Wealth</h2><p>Mac 负责生成，Wealth 使用原账号登录查看候选回复。</p></div></div>
         <div className="sync-connection-status" role="status"><strong>{connection?.source === 'disabled' ? '同步连接已停用' : state.runtime.draftSyncConfigured ? '同步连接已配置 · 令牌已隐藏' : '尚未配置可用连接'}</strong><small>{connection?.source === 'saved' ? '配置已保存到本机，优先于环境配置。远端验证结果见下方。' : connection?.source === 'environment' ? '当前使用本机服务环境配置。' : connection?.source === 'disabled' ? '已清除设备令牌，不会自动恢复环境配置。' : ''}</small>{connection?.uploadUrl && <code>{connection.uploadUrl}</code>}{connection?.error && <p className="inline-error">{connection.error}</p>}</div>

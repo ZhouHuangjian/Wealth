@@ -49,7 +49,7 @@ export function buildDraftBatch(conversation: Conversation, drafts: Draft[]): Dr
     createdAt: new Date(Math.min(...drafts.map(draft => Date.parse(draft.createdAt)))).toISOString(),
     provider: first.provider,
     profileVersion: first.profileVersion ?? null,
-    drafts: drafts.map(({text, label, reason}) => ({text, label, reason})),
+    drafts: drafts.map(({text, label, reason, modelName}) => ({text, label:modelName?`${modelName} · ${label}`.slice(0,40):label, reason})),
   };
   const id = createHash('sha256').update(JSON.stringify({packet, draftIds: drafts.map(draft => draft.id)})).digest('hex');
   const parsed = cloudDraftBatchSchema.safeParse({id, ...packet});

@@ -17,9 +17,14 @@ import { assertReplyContextReady } from './message-context.js';
 import { draftSyncConfig, isDraftSyncConfigured, isDraftInboxConfigured, buildDraftBatch, uploadDraftBatch, cloudDraftBatchSchema, type DraftSyncConfig } from './draft-sync.js';
 import { DraftSyncConnection } from './draft-sync-connection.js';
 import { checkDraftConnection, draftConnectionCheckUrl, DraftConnectionCheckError } from './draft-sync-check.js';
+import { recognizeImage } from './image-recognition.js';
+import { transcribeAudio } from './audio-recognition.js';
+import { readWechatImage, readWechatVoice } from './wechat-images.js';
+import { MediaFiles, parseImageUpload, parseAudioUpload, MAX_MEDIA_BYTES } from './media-files.js';
+import { MediaAutomation } from './media-automation.js';
 import { bridgeConfig, createSender, isBridgeConfigured, isBridgeReceiveConfigured, secureEqual, validateEndpoint, type BridgeConfig } from './bridge.js';
 import { RemoteManagement, remoteSettingsSchema, remoteSettings, remoteConversation, wechatAddSchema, conversationPatchSchema, searchCommandSchema, patchCommandSchema } from './remote-management.js';
-import type { AppState, Conversation, Message, PublicState, Settings } from '../shared/types.js';
+import type { AppState, Conversation, Message, PublicState, Settings, ImageAttachment } from '../shared/types.js';
 
 const text = z.string().trim().min(1).max(10000);
 const id = z.string().min(1).max(300);
@@ -32,6 +37,11 @@ const settingsSchema = z.object({
   provider: z.enum(['demo','ollama','compatible','codex']).optional(),
   modelUrl: z.string().trim().max(2048).optional(), modelName: z.string().trim().max(200).optional(),
   apiKey: z.string().max(4096).optional(), allowRemoteModel: z.boolean().optional(),
+  modelPreset:z.enum(['custom','qwen']).optional(), modelThinkingEnabled:z.boolean().optional(),
+  autoRecognizeImages:z.boolean().optional(),autoTranscribeVoice:z.boolean().optional(),
+  replyModels:z.array(z.object({id:z.string().min(1).max(100),provider:z.enum(['demo','ollama','compatible','codex']),modelName:z.string().trim().max(200),modelPreset:z.enum(['custom','qwen']).optional(),label:z.string().trim().max(80).optional()}).strict()).max(4).refine(items=>new Set(items.map(item=>item.id)).size===items.length).optional(),
+  vision:z.object({provider:z.enum(['qwen','compatible','codex','disabled']),modelUrl:z.string().trim().max(2048),modelName:z.string().trim().max(200),apiKey:z.string().max(4096).optional(),useReplyApiKey:z.boolean(),allowRemoteModel:z.boolean(),thinkingEnabled:z.boolean().optional()}).strict().optional(),
+  audio:z.object({provider:z.enum(['qwen','compatible','disabled']),modelUrl:z.string().trim().max(2048),modelName:z.string().trim().max(200),apiKey:z.string().max(4096).optional(),useReplyApiKey:z.boolean(),allowRemoteModel:z.boolean()}).strict().optional(),
   replyDelaySeconds: z.number().int().min(1).max(300).optional(),
   cooldownSeconds: z.number().int().min(0).max(3600).optional(), dailyLimit: z.number().int().min(1).max(200).optional(),
   quietHoursEnabled: z.boolean().optional(),
@@ -40,6 +50,7 @@ const settingsSchema = z.object({
 }).strict();
 
 export function checkModelReady(settings: Settings): void {
+  if(settings.replyModels?.length){for(const model of settings.replyModels)checkModelReady({...settings,...model,replyModels:[]});return;}
   if (settings.provider === 'demo') return;
   if (settings.provider === 'codex') {
     if (!settings.allowRemoteModel) throw new Error('Codex 会调用模型服务，请先允许发送必要的对话片段。');
@@ -70,11 +81,16 @@ export function createApplication(options: {
   uploadDrafts?: typeof uploadDraftBatch;
   checkDraftConnection?: typeof checkDraftConnection;
   remoteFetch?: typeof fetch;
+  recognizeImage?:typeof recognizeImage;transcribeAudio?:typeof transcribeAudio;
+  readWechatImage?:typeof readWechatImage;readWechatVoice?:typeof readWechatVoice;
   generate?: typeof generateDrafts; send?: ReturnType<typeof createSender>;
 }) {
   const app = express();
   const newDatabase = options.databasePath === ':memory:' || !existsSync(options.databasePath);
   const store = new Store(options.databasePath);
+  const mediaFiles=new MediaFiles(options.databasePath);
+  mediaFiles.prune(store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]));
+  const mediaRequests=new Map<string,{controller:AbortController;promise:Promise<void>}>();
   if (options.seed !== false && newDatabase) seedDemo(store);
   const profileManifestPath = options.profileManifestPath === undefined ? resolve('private/learning/2026-10-10-v1/current-profile.json') : options.profileManifestPath;
   let learnedProfileError: string | null = null;
@@ -107,8 +123,13 @@ export function createApplication(options: {
     activeSends.set(conversation.id,key);
     try {return await rawSend(conversation,text,key,signal);} finally {activeSends.delete(conversation.id);}
   };
-  const generate = options.generate ?? generateDrafts;
-  const engine = new AutoReplyEngine(store, { send }, { generate, onDrafts:async cid=>{ await syncDrafts(cid,true); } });
+  const generate = options.generate ?? ((state,cid,intent,signal)=>generateDrafts(state,cid,intent,signal,{onModelFailure:failure=>{
+    store.update(s=>addActivity(s,'warning','部分模型未生成回复',`模型 ${failure.modelName||failure.provider} 未完成，其余候选仍可比较。`,cid));
+  }}));
+  const engine = new AutoReplyEngine(store, { send }, { generate, onDrafts:async cid=>{ await syncDrafts(cid,true); },mediaPending:cid=>{
+    const state=store.read();return state.messages.some(m=>m.conversationId===cid&&m.mediaStatus==='pending'
+      &&(m.autoMediaEligible||mediaRequests.has(m.id))&&(m.kind==='image'?state.settings.autoRecognizeImages:m.kind==='voice'&&state.settings.autoTranscribeVoice));
+  } });
   const session = randomBytes(32).toString('hex');
   const manualSending = new Set<string>();
   const suggestionRequests = new Map<string,string>();
@@ -116,9 +137,11 @@ export function createApplication(options: {
   const wechatInspection = options.inspectWechat ?? inspectWechat;
   const collector = new WechatCollector(store,{query:options.queryWechat,onMessages:(cid,latestId,live)=>{
     engine.conversationChanged(cid); suggestionRequests.delete(cid);
+    mediaFiles.prune(store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]));
     if(live && latestId) engine.enqueue(cid,latestId);
+    if(live) void mediaAutomation.tick();
   }});
-  async function syncDrafts(cid: string, automatic = false) {
+  async function syncDrafts(cid: string, automatic = false, onlyDraftIds?:string[]):Promise<{ok:true;id:string;duplicate:boolean;batches?:{id:string;duplicate:boolean}[]}|undefined> {
     const state = store.read();
     if (automatic && !state.settings.syncDraftsEnabled) return;
     const conversation = conversationOf(state,cid);
@@ -127,8 +150,18 @@ export function createApplication(options: {
     const revision = syncRevision;
     if (!isDraftSyncConfigured(syncConfig)) throw new Error('请先在设置中保存草稿同步配置。');
     const latest = state.messages.filter(item=>item.conversationId===cid).at(-1);
-    const drafts = state.drafts.filter(item=>item.conversationId===cid && item.basedOnMessageId===latest?.id);
+    const drafts = state.drafts.filter(item=>item.conversationId===cid && item.basedOnMessageId===latest?.id&&(!onlyDraftIds||onlyDraftIds.includes(item.id)));
     if (!drafts.length) throw new Error('当前没有可同步的有效草稿，请先生成回复。');
+    if(!onlyDraftIds){
+      const groups=new Map<string,typeof drafts>();
+      for(const draft of drafts){const key=JSON.stringify([draft.provider,draft.modelChoiceId??'',draft.modelName??'']);groups.set(key,[...(groups.get(key)??[]),draft]);}
+      if(groups.size>1||drafts.length>3){
+        if([...groups.values()].some(group=>group.length>3))throw new Error('单个模型的草稿批次过大，请重新生成。');
+        const receipts=await Promise.all([...groups.values()].map(group=>syncDrafts(cid,automatic,group.map(d=>d.id))));
+        const batches=receipts.filter((item):item is NonNullable<typeof item>=>!!item).map(({id,duplicate})=>({id,duplicate}));
+        return {ok:true,id:batches[0].id,duplicate:batches.every(item=>item.duplicate),batches};
+      }
+    }
     const batch = buildDraftBatch(conversation,drafts);
     if (state.draftUploads?.some(item=>item.id===batch.id && item.destinationId===destinationId && item.status==='uploaded')) return {ok:true as const,id:batch.id,duplicate:true};
     const uploadKey = `${destinationId}:${batch.id}`;
@@ -179,7 +212,7 @@ export function createApplication(options: {
     next();
   });
   app.use('/api/sync/drafts',express.json({limit:'32kb'}));
-  app.use(express.json({limit: '6mb'}));
+  app.use(express.json({limit: '8mb'}));
   app.get('/api/health', (_req,res) => res.json({ok:true,version:'0.1.0'}));
   app.get('/api/session', (req,res) => {
     res.setHeader('Set-Cookie', `${sessionCookieName(req)}=${session}; Path=/; HttpOnly; SameSite=Strict`);
@@ -195,8 +228,10 @@ export function createApplication(options: {
   });
   const publicState = (): PublicState => {
     const s = store.read();
-    const { apiKey, ...settings } = s.settings;
-    return { ...s, settings:{...settings,hasApiKey:!!apiKey}, knowledge:KNOWLEDGE,
+    const { apiKey, vision, audio, ...settings } = s.settings;
+    const publicVision=vision?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(vision):undefined;
+    const publicAudio=audio?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(audio):undefined;
+    return { ...s, settings:{...settings,hasApiKey:!!apiKey,...(publicVision?{vision:publicVision}:{}),...(publicAudio?{audio:publicAudio}:{})}, knowledge:KNOWLEDGE,
       runtime: { channel:isBridgeReceiveConfigured(config)?'webhook':'simulator',bridgeConfigured:isBridgeConfigured(config),bridgeReceiveConfigured:isBridgeReceiveConfigured(config),bridgeSendConfigured:isBridgeConfigured(config),learnedProfileError,
         codexAvailable:codexStatus.available,codexVersion:codexStatus.version,codexStatus:codexStatus.message,
         draftSyncConfigured:isDraftSyncConfigured(syncConnection.config()),draftInboxConfigured:isDraftInboxConfigured(syncConnection.config()),draftSyncConnection:syncConnection.status(),remoteManagement:remote.status(),
@@ -273,6 +308,7 @@ export function createApplication(options: {
   const setWechatEnabled = (cid:string, enabled:boolean) => {
     if(enabled&&!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
     collector.setEnabled(cid,enabled);
+    if(!enabled){for(const message of store.read().messages.filter(m=>m.conversationId===cid))cancelMedia(message.id);store.update(s=>{for(const message of s.messages.filter(m=>m.conversationId===cid))message.autoMediaEligible=false;});}
     engine.conversationChanged(cid);suggestionRequests.delete(cid);
     store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});
   };
@@ -289,15 +325,106 @@ export function createApplication(options: {
     const message=store.read().messages.find(m=>m.id===param(req));
     if(!message?.mediaStatus) throw new Error('该消息不需要媒体确认。');
     if(message.mediaStatus==='reviewed') return res.json({ok:true,duplicate:true});
+    cancelMedia(message.id);
     engine.conversationChanged(message.conversationId);suggestionRequests.delete(message.conversationId);
     store.update(s=>{
-      const m=s.messages.find(m=>m.id===message.id)!;m.mediaStatus='reviewed';
+      const m=s.messages.find(m=>m.id===message.id)!;m.mediaStatus='reviewed';m.autoMediaEligible=false;
+      if(summary){delete m.imageRecognition;delete m.audioRecognition;}
       if(summary) m.text=`${m.text}\n[本人查看后补充] ${summary}`;
       s.drafts=s.drafts.filter(d=>d.conversationId!==message.conversationId);
       addActivity(s,'info','媒体已由本人查看',summary?'已保存本人补充说明；未自动生成或发送回复。':'仅标记已查看，模型仍不知道媒体具体内容。',message.conversationId);
     });
     res.json({ok:true});
   });
+  const uploadSchema=z.object({dataUrl:z.string().min(1).max(Math.ceil(MAX_MEDIA_BYTES*4/3)+200),filename:z.string().max(255).optional()}).strict();
+  const messageOf=(mid:string)=>{const m=store.read().messages.find(m=>m.id===mid);if(!m)throw Object.assign(new Error('消息不存在。'),{status:404});return m;};
+  const mediaConfiguration=(s:Settings,kind:'image'|'voice')=>JSON.stringify([kind==='image'?s.vision:s.audio,s.apiKey,s.modelUrl]);
+  const cancelMedia=(mid?:string)=>{for(const [key,entry] of mediaRequests)if(!mid||mid===key)entry.controller.abort();};
+  const invalidateMediaContext=(cid:string)=>{engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});};
+  async function readMessageMedia(mid:string,kind:'image'|'voice',signal?:AbortSignal,forceRead=false) {
+    const message=messageOf(mid),attachment=kind==='image'?message.imageAttachment:message.audioAttachment;
+    if(message.kind!==kind)throw new Error(kind==='image'?'该消息不是图片。':'该消息不是语音。');
+    if(attachment&&(!forceRead||message.source!=='wechat'))return mediaFiles.read(attachment);
+    const state=store.read(),c=conversationOf(state,message.conversationId);
+    if(message.source!=='wechat'||c.channel!=='wechat'||!c.externalId)throw new Error('请先上传原始媒体文件。');
+    const file=await (kind==='image'?(options.readWechatImage??readWechatImage):(options.readWechatVoice??readWechatVoice))({contact:c.externalId,message,accountFingerprint:c.wechat?.accountFingerprint??undefined},signal);
+    signal?.throwIfAborted();
+    const current=messageOf(mid),currentConversation=conversationOf(store.read(),message.conversationId);
+    if(current.sourceFingerprint!==message.sourceFingerprint||currentConversation.externalId!==c.externalId||currentConversation.wechat?.accountFingerprint!==c.wechat?.accountFingerprint)throw Object.assign(new Error('微信消息或账号已变化，请重新读取。'),{status:409});
+    const prior=kind==='image'?current.imageAttachment:current.audioAttachment;
+    if(forceRead&&prior?.id!==attachment?.id)throw Object.assign(new Error('媒体附件已变化，请重新读取。'),{status:409});
+    if(prior&&!forceRead)return mediaFiles.read(prior);
+    const saved=mediaFiles.save(file,'wechat');
+    if(forceRead&&prior){cancelMedia(mid);invalidateMediaContext(current.conversationId);}
+    try{store.update(s=>{const m=s.messages.find(m=>m.id===mid)!;if(kind==='image'){m.imageAttachment=saved;if(file.wechatImage)m.wechatImage={...m.wechatImage,...file.wechatImage};if(forceRead)delete m.imageRecognition;}else{m.audioAttachment=saved;if(forceRead)delete m.audioRecognition;}if(forceRead){m.mediaStatus='pending';m.autoMediaEligible=false;}});}
+    catch(error){mediaFiles.delete(saved);throw error;}
+    if(forceRead)mediaFiles.delete(prior);
+    return file;
+  }
+  async function recognizeMessage(mid:string,kind:'image'|'voice',signal?:AbortSignal) {
+    if(mediaRequests.has(mid))throw Object.assign(new Error('这条媒体正在处理中，请等待结果。'),{status:409});
+    const controller=new AbortController(),combined=signal?AbortSignal.any([signal,controller.signal]):controller.signal;
+    const pending=(async()=>{
+      const before=store.read(),message=messageOf(mid),configuration=mediaConfiguration(before.settings,kind);
+      const file=await readMessageMedia(mid,kind,combined);
+      const attachment=kind==='image'?messageOf(mid).imageAttachment:messageOf(mid).audioAttachment;
+      const result=kind==='image'?await (options.recognizeImage??recognizeImage)(before.settings,file,combined):await (options.transcribeAudio??transcribeAudio)(before.settings,file,combined);
+      combined.throwIfAborted();
+      const state=store.read(),current=messageOf(mid),currentAttachment=kind==='image'?current.imageAttachment:current.audioAttachment;
+      if(closed||mediaConfiguration(state.settings,kind)!==configuration||currentAttachment?.id!==attachment?.id||current.sourceFingerprint!==message.sourceFingerprint)throw Object.assign(new Error('媒体或模型配置已变化，旧识别结果已忽略。'),{status:409});
+      invalidateMediaContext(current.conversationId);
+      store.update(s=>{
+        const m=s.messages.find(m=>m.id===mid)!;m.mediaStatus='recognized';m.autoMediaEligible=false;
+        if(kind==='image')m.imageRecognition=result as Message['imageRecognition'];else m.audioRecognition=result as Message['audioRecognition'];
+        addActivity(s,'success',kind==='image'?'图片已识别':'语音已转写','识别内容已加入当前对话，可生成回复草稿。',m.conversationId);
+      });
+    })();
+    mediaRequests.set(mid,{controller,promise:pending});
+    try{await pending;}finally{if(mediaRequests.get(mid)?.controller===controller)mediaRequests.delete(mid);}
+  }
+  const mediaAutomation=new MediaAutomation(store,{
+    recognize:recognizeMessage,
+    onComplete:cid=>{const latest=store.read().messages.filter(m=>m.conversationId===cid).at(-1);if(latest?.role==='peer')engine.enqueue(cid,latest.id,true);},
+    onFailure:(cid,kind)=>store.update(s=>addActivity(s,'warning',kind==='image'?'图片自动识别未完成':'语音自动转写未完成','可在这条消息中手动重试或上传媒体文件。',cid)),
+  });
+  app.post('/api/images/test',async(req,res)=>{
+    const before=store.read().settings,file=parseImageUpload(uploadSchema.parse(req.body));
+    const recognition=await (options.recognizeImage??recognizeImage)(before,file);
+    if(mediaConfiguration(store.read().settings,'image')!==mediaConfiguration(before,'image'))throw Object.assign(new Error('识图配置已变化，请重新测试。'),{status:409});
+    res.json(recognition);
+  });
+  app.post('/api/audio/test',async(req,res)=>{
+    const before=store.read().settings,file=parseAudioUpload(uploadSchema.parse(req.body));
+    const recognition=await (options.transcribeAudio??transcribeAudio)(before,file);
+    if(mediaConfiguration(store.read().settings,'voice')!==mediaConfiguration(before,'voice'))throw Object.assign(new Error('语音配置已变化，请重新测试。'),{status:409});
+    res.json(recognition);
+  });
+  app.post('/api/conversations/:id/images',(req,res)=>{
+    const {role,...input}=uploadSchema.extend({role:z.enum(['self','peer']).default('peer')}).parse(req.body);
+    const cid=param(req);conversationOf(store.read(),cid);
+    const attachment=mediaFiles.save(parseImageUpload(input),'upload'),now=new Date().toISOString();
+    const message:Message={id:randomUUID(),conversationId:cid,role,text:'[上传图片，待识别]',kind:'image',mediaStatus:'pending',imageAttachment:attachment,sentAt:now,sequence:Math.max(0,...store.read().messages.filter(m=>m.conversationId===cid).map(m=>m.sequence))+1,source:'manual',externalId:null,aiAssisted:false};
+    invalidateMediaContext(cid);
+    try{store.update(s=>{s.messages.push(message);conversationOf(s,cid).updatedAt=now;});}catch(error){mediaFiles.delete(attachment);throw error;}
+    res.status(201).json(message);
+  });
+  app.post('/api/messages/:id/image',(req,res)=>{
+    const mid=param(req),message=messageOf(mid);if(message.kind!=='image')throw new Error('该消息不是图片。');
+    const saved=mediaFiles.save(parseImageUpload(uploadSchema.parse(req.body)),'upload'),prior=message.imageAttachment;
+    cancelMedia(mid);invalidateMediaContext(message.conversationId);
+    try{store.update(s=>{const m=s.messages.find(m=>m.id===mid)!;m.imageAttachment=saved;delete m.imageRecognition;m.mediaStatus='pending';m.autoMediaEligible=false;});}
+    catch(error){mediaFiles.delete(saved);throw error;}
+    mediaFiles.delete(prior);res.json({image:saved});
+  });
+  for(const kind of ['image','voice'] as const){
+    app.post(`/api/messages/:id/read-${kind}`,async(req,res)=>{z.object({}).strict().parse(req.body??{});await readMessageMedia(param(req),kind,undefined,true);res.json({ok:true});});
+    app.post(`/api/messages/:id/${kind==='image'?'recognize-image':'transcribe-voice'}`,async(req,res)=>{z.object({}).strict().parse(req.body??{});await recognizeMessage(param(req),kind);const message=messageOf(param(req));res.json({recognition:kind==='image'?message.imageRecognition:message.audioRecognition});});
+    app.get(`/api/messages/:id/${kind==='image'?'image':'audio'}`,(req,res)=>{
+      const message=messageOf(param(req)),attachment=kind==='image'?message.imageAttachment:message.audioAttachment;
+      if(!attachment)throw Object.assign(new Error('本机媒体尚未读取。'),{status:404});
+      const file=mediaFiles.read(attachment);res.type(file.mimeType).set('Content-Disposition','inline').send(file.bytes);
+    });
+  }
   app.post('/api/codex/check',async (_req,res)=>{await checkCodex();res.json(publicState());});
   app.post('/api/sync/drafts',(req,res)=>{
     if(!isDraftInboxConfigured(syncConnection.config()) || !secureEqual(req.headers.authorization??'',`Bearer ${syncConnection.config().inboxToken}`)) return res.status(401).json({error:'草稿接收凭据无效或尚未配置。'});
@@ -326,10 +453,17 @@ export function createApplication(options: {
   const patchSettings = (input:unknown) => {
     const patch = settingsSchema.parse(input);
     const old = store.read().settings;
-    const next = { ...old, ...patch };
+    const next = { ...old, ...patch,
+      ...(patch.vision?{vision:{...old.vision,...patch.vision}}:{}),...(patch.audio?{audio:{...old.audio,...patch.audio}}:{}) };
+    // Existing remote controls choose one primary model; honor that selection.
+    if(patch.replyModels===undefined&&((patch.provider!==undefined&&patch.provider!==old.provider)||(patch.modelName!==undefined&&patch.modelName!==old.modelName)))next.replyModels=[];
+    if((next.replyModels?.length??0)>1&&next.autoReplyMode==='send'){next.autoReplyMode='draft';next.autoReplyEnabled=false;}
     if (next.autoReplyMode !== old.autoReplyMode) next.autoReplyEnabled = false;
     if(patch.allowRemoteModel===false && old.allowRemoteModel) next.autoReplyEnabled=false;
     if(next.provider!=='demo' && next.provider!=='codex' && next.modelUrl.trim()) validateEndpoint(next.modelUrl);
+    for(const item of [next.vision,next.audio])if(item&&item.provider!=='disabled'&&item.provider!=='codex'&&item.modelUrl.trim())validateEndpoint(item.modelUrl);
+    if(next.autoRecognizeImages&&(!next.vision||next.vision.provider==='disabled'))throw new Error('请先配置图片识别模型，再开启自动识图。');
+    if(next.autoTranscribeVoice&&(!next.audio||next.audio.provider==='disabled'))throw new Error('请先配置语音模型，再开启自动转写。');
     if(next.syncDraftsEnabled && !isDraftSyncConfigured(syncConnection.config())) throw new Error('请先在设置中保存草稿同步配置。');
     if(next.autoReplyEnabled) checkModelReady(next);
     if(next.autoReplyEnabled && next.autoReplyMode==='send' && store.read().conversations.some(c=>c.channel==='wechat'&&c.autoReplyEnabled)) throw new Error('微信采集通道仅支持自动草稿，请先关闭这些会话的自动处理或切回草稿模式。');
@@ -341,11 +475,13 @@ export function createApplication(options: {
     // Model or scheduling changes cancel pending work; newly arriving messages use the new settings.
     const needsCancel = Object.entries(patch).some(([key,value])=>key!=='autoReplyEnabled' && key!=='syncDraftsEnabled' && key!=='remoteManagementEnabled' && old[key as keyof Settings]!==value) || patch.autoReplyEnabled===false;
     if (needsCancel) {engine.pause(); suggestionRequests.clear();}
+    if(mediaConfiguration(next,'image')!==mediaConfiguration(old,'image')||mediaConfiguration(next,'voice')!==mediaConfiguration(old,'voice'))cancelMedia();
     store.update(s=>{
       s.settings = next;
       if(needsCancel) s.drafts=[];
       addActivity(s,'info',next.autoReplyEnabled?'自动回复已开启':'设置已保存',next.autoReplyEnabled?'只对已开启的联系人生效。':'自动回复当前关闭。');
     });
+    mediaAutomation.invalidate();
     if(patch.remoteManagementEnabled!==undefined && old.remoteManagementEnabled!==patch.remoteManagementEnabled)remote.invalidate(!patch.remoteManagementEnabled);
   };
   app.patch('/api/settings',(req,res)=>{patchSettings(req.body);res.json(publicState());});
@@ -385,8 +521,10 @@ export function createApplication(options: {
     if(manualSending.has(cid)||activeSends.has(cid)) return res.status(409).json({error:'该会话有发送正在确认，请稍后删除。'});
     engine.conversationChanged(cid);
     collector.cancel(cid);
+    const attachments=store.read().messages.filter(m=>m.conversationId===cid).flatMap(m=>[m.imageAttachment,m.audioAttachment]);
+    for(const message of store.read().messages.filter(m=>m.conversationId===cid))cancelMedia(message.id);
     store.update(s=>{s.sendAttempts=(s.sendAttempts??[]).filter(a=>a.conversationId!==cid);});
-    deleteConversation(store,cid); res.json({ok:true});
+    deleteConversation(store,cid);for(const attachment of attachments)mediaFiles.delete(attachment);res.json({ok:true});
   });
 
   app.post('/api/conversations/:id/messages', (req,res)=>{
@@ -505,7 +643,7 @@ export function createApplication(options: {
     if(preview.needsSelfId) throw new Error('请先选择哪一位是你。');
     engine.pause();const result=commitImport(store,body);store.update(s=>{s.drafts=[];});res.json(result);
   });
-  app.post('/api/demo', (_req,res)=>{seedDemo(store);res.json(publicState());});
+  app.post('/api/demo', (_req,res)=>{const attachments=store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]);cancelMedia();seedDemo(store);for(const attachment of attachments)mediaFiles.delete(attachment);res.json(publicState());});
   app.post('/api/bridge/incoming', (req,res)=>{
     if(!isBridgeReceiveConfigured(config)||!secureEqual(req.headers.authorization??'',`Bearer ${config.inboundToken}`)) return res.status(401).json({error:'消息桥接未配置或凭据无效。'});
     const body=z.object({eventId:id,conversationId:id,text,direction:z.enum(['incoming','outgoing']).default('incoming'),timestamp:z.string().datetime({offset:true}).optional(),idempotencyKey:id.optional()}).parse(req.body);
@@ -567,5 +705,5 @@ export function createApplication(options: {
       return {conversation:remoteConversation(conversationOf(store.read(),cid))};
     },
   });
-  return {app,store,engine,collector,remote,publicState,close:()=>{remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
+  return {app,store,engine,collector,remote,mediaAutomation,publicState,close:()=>{mediaAutomation.stop();cancelMedia();remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
 }

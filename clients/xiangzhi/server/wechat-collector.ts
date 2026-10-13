@@ -135,19 +135,40 @@ export class WechatCollector {
             if(existing.externalId?.startsWith('seq:') && !record.id.startsWith('seq:')) {
               byId.delete(existing.externalId); existing.externalId = record.id; byId.set(record.id,existing);
             }
-            if (existing.sourceFingerprint !== hash) {
+            const imageChanged = existing.wechatImage?.md5 && record.wechatImage?.md5
+              && existing.wechatImage.md5 !== record.wechatImage.md5;
+            if (existing.sourceFingerprint !== hash || imageChanged) {
               Object.assign(existing, {text:record.text,role:record.role,kind:record.kind,mediaStatus:record.mediaStatus,
-                sentAt:record.sentAt,sourceSequence:record.sortSeq,sourceFingerprint:hash});
+                sentAt:record.sentAt,sourceSequence:record.sortSeq,sourceFingerprint:hash,
+                wechatImage: record.wechatImage, imageRecognition: undefined, imageAttachment: undefined,
+                audioRecognition: undefined, audioAttachment: undefined,
+                autoMediaEligible: false});
               changed = true;
+            } else if (record.wechatImage) {
+              // Adding identifiers to a previously collected placeholder must not
+              // replace a reviewed/recognized summary or invalidate its drafts.
+              existing.wechatImage = {...existing.wechatImage, ...record.wechatImage};
             }
             continue;
           }
           const message: Message = {id:randomUUID(),conversationId:cid,role:record.role,text:record.text,sentAt:record.sentAt,
             sequence:0,source:'wechat',externalId:record.id,aiAssisted:false,kind:record.kind,mediaStatus:record.mediaStatus,
-            sourceSequence:record.sortSeq,sourceFingerprint:hash};
+            sourceSequence:record.sortSeq,sourceFingerprint:hash,wechatImage:record.wechatImage,
+            autoMediaEligible: !historyOnly && record.role === 'peer'
+              && ((record.kind === 'image' && state.settings.autoRecognizeImages)
+                || (record.kind === 'voice' && state.settings.autoTranscribeVoice))};
           list.push(message); byId.set(record.id,message); newIds.add(message.id); added++; changed = true;
         }
-        list.sort((a,b) => compareSeq(a.sourceSequence ?? '0', b.sourceSequence ?? '0') || a.id.localeCompare(b.id));
+        // Uploaded context stays near its timestamp instead of moving ahead of
+        // all WeChat messages merely because it has no sourceSequence.
+        const manual = list.filter(m => m.source !== 'wechat');
+        const ordered = list.filter(m => m.source === 'wechat').sort((a,b) => compareSeq(a.sourceSequence ?? '0', b.sourceSequence ?? '0') || a.id.localeCompare(b.id));
+        for (const message of manual.sort((a,b) => a.sequence - b.sequence)) {
+          const at = message.sentAt ? Date.parse(message.sentAt) : NaN;
+          const index = Number.isFinite(at) ? ordered.findIndex(m => m.sentAt && Date.parse(m.sentAt) > at) : -1;
+          ordered.splice(index < 0 ? ordered.length : index, 0, message);
+        }
+        list.splice(0, list.length, ...ordered);
         list.forEach((m,index) => {m.sequence = index + 1;});
         state.messages = [...state.messages.filter(m => m.conversationId !== cid), ...list];
         w.cursor = high; w.accountFingerprint = account; w.initialized = true;

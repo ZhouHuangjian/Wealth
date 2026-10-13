@@ -1,5 +1,30 @@
 export type Provider = 'demo' | 'ollama' | 'compatible' | 'codex';
 export type AutoReplyMode = 'draft' | 'send';
+export interface VisionSettings {
+  provider: 'qwen' | 'compatible' | 'codex' | 'disabled';
+  modelUrl: string; modelName: string; apiKey?: string;
+  useReplyApiKey: boolean; allowRemoteModel: boolean; thinkingEnabled?: boolean;
+}
+export interface ImageRecognition {
+  summary: string; visibleText: string; facts: string[];
+  provider: 'qwen' | 'compatible' | 'codex'; modelName: string; recognizedAt: string;
+  usage?: {promptTokens: number; completionTokens: number; totalTokens: number};
+}
+export interface ImageAttachment {
+  id: string; filename: string; mimeType: string; source: 'upload' | 'wechat';
+}
+export interface AudioSettings {
+  provider: 'qwen' | 'compatible' | 'disabled';
+  modelUrl: string; modelName: string; apiKey?: string;
+  useReplyApiKey: boolean; allowRemoteModel: boolean;
+}
+export interface AudioRecognition {
+  text: string; provider: 'qwen' | 'compatible'; modelName: string; recognizedAt: string;
+  usage?: {promptTokens: number; completionTokens: number; totalTokens: number};
+}
+export interface ReplyModelChoice {
+  id: string; provider: Provider; modelName: string; modelPreset?: 'custom' | 'qwen'; label?: string;
+}
 export interface Settings {
   autoReplyEnabled: boolean;
   autoReplyMode: AutoReplyMode;
@@ -9,6 +34,12 @@ export interface Settings {
   modelUrl: string;
   modelName: string;
   apiKey: string;
+  modelPreset?: 'custom' | 'qwen';
+  modelThinkingEnabled?: boolean;
+  vision?: VisionSettings;
+  audio?: AudioSettings;
+  autoRecognizeImages?: boolean; autoTranscribeVoice?: boolean;
+  replyModels?: ReplyModelChoice[];
   allowRemoteModel: boolean;
   replyDelaySeconds: number;
   cooldownSeconds: number;
@@ -31,7 +62,12 @@ export interface Message {
   id: string; conversationId: string; role: 'self' | 'peer' | 'system'; text: string;
   sentAt: string | null; sequence: number; source: 'demo' | 'import' | 'manual' | 'bridge' | 'auto' | 'wechat';
   externalId: string | null; aiAssisted: boolean;
-  kind?: MessageKind; mediaStatus?: 'pending' | 'reviewed'; sourceSequence?: string; sourceFingerprint?: string;
+  kind?: MessageKind; mediaStatus?: 'pending' | 'reviewed' | 'recognized'; sourceSequence?: string; sourceFingerprint?: string;
+  imageAttachment?: ImageAttachment; imageRecognition?: ImageRecognition;
+  wechatImage?: {localId?: string; md5?: string};
+  audioAttachment?: ImageAttachment;
+  audioRecognition?: AudioRecognition;
+  autoMediaEligible?: boolean;
 }
 export interface ProfileClaim {
   id: string; category: 'preference' | 'style' | 'fact' | 'boundary';
@@ -41,7 +77,7 @@ export interface ProfileClaim {
 export interface Draft {
   id: string; conversationId: string; basedOnMessageId: string; text: string;
   label: string; reason: string; createdAt: string; provider: Provider;
-  profileVersion?: string | null; profileDigest?: string | null;
+  profileVersion?: string | null; profileDigest?: string | null; modelName?: string; modelChoiceId?: string;
 }
 export interface LearnedProfile {
   version: string; digest: string; title: string; loadedAt: string;
@@ -97,7 +133,7 @@ export interface AppState {
   sendAttempts?: {id:string; conversationId:string; fingerprint:string; status:'sending'|'sent'|'unknown'; createdAt:string}[];
 }
 export interface PublicState extends Omit<AppState, 'settings'> {
-  settings: Omit<Settings, 'apiKey'> & { hasApiKey: boolean };
+  settings: Omit<Settings, 'apiKey' | 'vision' | 'audio'> & { hasApiKey: boolean; vision?: Omit<VisionSettings, 'apiKey'> & {hasApiKey: boolean}; audio?: Omit<AudioSettings, 'apiKey'> & {hasApiKey: boolean} };
   knowledge: Knowledge[];
   runtime: {
     channel: 'simulator' | 'webhook'; bridgeConfigured: boolean; autoRunning: boolean; modelLabel: string;
