@@ -4,6 +4,7 @@ import {
   configuredHoldingColumns,
   defaultHoldingDisplay,
   holdingDailyAmount,
+  holdingLatestReturnAmount,
   holdingMarketValue,
   holdingPendingAmount,
   hasPendingPurchases,
@@ -34,6 +35,75 @@ const holding = (id, overrides = {}) => ({
     status: "estimated",
   },
   ...overrides,
+});
+
+test("missing conversion FX preserves valid original-currency daily return without making a converted total", () => {
+  const row = holding("foreign", {
+    currency: "USD",
+    daily_return: {
+      date: asOf,
+      currency: "USD",
+      amount: "2.15",
+      base_currency: "CNY",
+      base_amount: null,
+      status: "unavailable",
+      native_status: "estimated",
+      missing_reason_code: "fx_missing",
+    },
+  });
+  assert.equal(holdingDailyAmount(row, asOf), "2.15");
+  assert.equal(row.daily_return.base_amount, null);
+  assert.equal(summarizeHoldings([row], asOf).groups[0].daily.amount, "2.15");
+  assert.equal(
+    holdingDailyAmount({ ...row, scope_unconfirmed: true }, asOf),
+    null,
+  );
+  assert.equal(
+    holdingDailyAmount(
+      {
+        ...row,
+        daily_return: { ...row.daily_return, native_status: "unavailable" },
+      },
+      asOf,
+    ),
+    null,
+  );
+  assert.equal(holdingDailyAmount(row, "2026-09-29"), null);
+});
+
+test("recent formal return cannot bypass an unverified holding scope, but valid native FX results remain visible", () => {
+  const row = holding("foreign", {
+    currency: "USD",
+    latest_confirmed_return: {
+      observation_kind: "formal",
+      currency: "USD",
+      amount: "2.15",
+      date: "2026-09-25",
+      status: "unavailable",
+      native_status: "confirmed",
+      missing_reason_code: "fx_missing",
+    },
+  });
+  assert.equal(holdingLatestReturnAmount(row), "2.15");
+  assert.equal(
+    holdingLatestReturnAmount({ ...row, scope_unconfirmed: true }),
+    null,
+  );
+  assert.equal(
+    holdingLatestReturnAmount({ ...row, status: "needs_reconciliation" }),
+    null,
+  );
+  assert.equal(holdingLatestReturnAmount({ ...row, contributes: false }), null);
+  assert.equal(
+    holdingLatestReturnAmount({
+      ...row,
+      latest_confirmed_return: {
+        ...row.latest_confirmed_return,
+        observation_kind: "estimate",
+      },
+    }),
+    null,
+  );
 });
 
 test("holding display settings are separately keyed by real user and workspace, without anonymous fallback", () => {

@@ -9,9 +9,11 @@ import { useResource, useWorkspace } from "../state";
 import { investmentKinds, monthBounds, profitTone } from "../investment";
 import { QuoteStatus, Rate } from "./InvestmentWorkspace";
 import { newestFirst } from "../date-ordering";
+import { Link } from "react-router-dom";
+import { dailyReturnNextAction } from "../business-action";
 
 export default function ProfitCalendar() {
-  const { hidden } = useWorkspace();
+  const { hidden, space } = useWorkspace();
   const today = dateToday();
   const [month, setMonth] = useState(today.slice(0, 7)),
     [period, setPeriod] = useState("day"),
@@ -334,6 +336,13 @@ export default function ProfitCalendar() {
                         {hidden ? "内容已隐藏" : r.message}
                       </small>
                     )}
+                    {!hidden &&
+                      ["unavailable", "partial"].includes(r.status) &&
+                      dailyReturnNextAction(space.id, r) && (
+                        <Link to={dailyReturnNextAction(space.id, r)!.to}>
+                          {dailyReturnNextAction(space.id, r)!.label}
+                        </Link>
+                      )}
                   </div>
                 ),
               },

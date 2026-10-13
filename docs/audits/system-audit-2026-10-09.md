@@ -325,3 +325,39 @@ Ubuntu24.04/Python3.13.16服务器独立候选库：关键459、完整1498及12�
 - 初次诊断脚本容器路径错误在读业务数据前失败，修正后继续；不是应用业务失败。未跑本轮完整1598回归、真实外部适配器网络验证、全页面、历史重算或部署。
 
 后续批次及验收见[开发状态](../development-status.md#2026-10-12-首页估算收益排查有诊断未修复)，影响范围按[项目地图](../project-map.md#修改影响表)及现行规则定位；提出方案不代表已修复。
+
+## 12. 2026-10-13 估值与收益一致性修复（候选）
+
+用户授权开始修改并检查其他相关问题后，在`codex/estimate-return-diagnosis-20261012`从诊断提交`1459c78`继续实现2.14.1候选。§11保留2026-10-12当时的线上2.14.0观察、原2失败/4通过及未修复状态，不回写为当时已通过。以下为候选实现与阶段验证，**最终冻结、Linux候选完整回归及部署结果待统一补充**；尚无本批生产历史数据修复、迁移或原始账务变更。2026-10-13 12:45:55（北京时间）最后只读核实生产仍为2.14.0、镜像`5e769074…`、schema0015。
+
+### 12.1 发现、复现与最小修复
+
+表中测试均使用固定时钟、受控交易日历及合成价格/账簿，不依赖当天网络；代码位置以函数名为稳定入口。金额仅为合成断言，不包含真实持仓。
+
+| 编号 / 优先级 | 用户症状、实际与预期 / 根因位置 | 可复现输入与最小实现 | 回归入口与验收 |
+| --- | --- | --- | --- |
+| EST-001 / P1 | 健康刷新仍暂时撤下今日收益；5分钟beat与worker起点比较错过扫描，600秒缓存撞上600秒fetch有效期。`settings`、`fund_sources._data_cache_ttl`、`market_sync._refresh_is_due/refresh_due` | §11.2的0.2秒worker偏差和599.8秒缓存样本。盘中TTL60秒、正式/历史600秒；scan60秒、单产品300秒；正常请求锚点、旧/无效锚点回退真实尝试，锁内复查到期和租约 | `test_estimate_refresh_cadence.py`：正常来源连续可算，恒价新tick可更新；并发/队列/失联重试不重复提交；35分钟旧报价、停用仍拒绝；Event/JournalLine/PositionMovement不变 |
+| EST-002 / P2 | 有较早NAV却泛称“缺少正式价格”，partial或待更新没有直接说明和出口。`investments._calendar_item`、`daily_returns.spot`、`DailyReturnCard/HoldingsOverview` | 无今日estimate但前日正式收益可算；部分可算且known_amount=0；正式NAV配自动推算份额。新增缺口码/精确message、摘要与真实对象路由，条目覆盖和原币/折算标签；较早收益只带原日期显示 | `test_estimate_availability_20261013.py`及前端daily-return/business-action/holding-display：缺口不造0，金额隐藏保留；页面须点击到对应行情/规则/交易/核对/汇率，错误对象不能跳到另一对象 |
+| EST-004 / P1 | 日收益已正式、持仓/净资产却仍用同日旧估值。`investments`持仓价格选择与`portfolio`共用读链 | 10份、基准10、同日参考12/正式11，交换写入顺序；同日持仓与估算净资产均110，reference_delta=0。次日参考13应仍显示130；选择正式价格优先仅限同日 | `test_portfolio::test_formal_nav_supersedes_same_day_estimate_in_holdings_and_wealth`；首页/持仓/配置一致，三条Price全保留，次日估值不被旧NAV遮蔽 |
+| EST-005 / P1 | 缺折算FX把有效原币日收益一并隐藏。`daily_returns.ReturnEvidence.convert`、`holdingDailyAmount/holdingLatestReturnAmount` | 原币收益10、显示币种无FX或FX已8日；`native_status/native_message`保留原资格、amount=10而base_amount=null，汇总留缺口；补当日1.2汇率后折算12。最近正式收益同时补齐scope_unconfirmed保护 | `test_estimate_availability_20261013::test_missing_or_old_fx_preserves_native_return_without_filling_total`、holding-display回归；原币可见但不得凑完整总额，范围待核实不能借最近正式值绕过 |
+| EST-006 / P1 | 日历与首页对机构权益的外部资金/缺中间交易日处理不同，资金转入可被误当收益。`investments.profit_calendar`、`daily_returns.ReturnEvidence.snapshot` | 权益1000→1100并收入/转入100应收益0，股息100仍收益100；正式快照跨缺失开放日为空、仅跨休市可算；日历复用同一ReturnEvidence及EXTERNAL_FLOWS，仅采正式结算 | `test_return_calendar_consistency.py`：income/expense/refund/transfer/fx净资本剔除，分红保留；日历与首页同口径；仅盘中权益不进正式日历，不改Snapshot或原流水 |
+| EST-007 / P1 | 无关产品股息改变机构账户日历结果。`investments.profit_calendar`股息循环覆盖函数的account_id/instrument_id筛选参数 | 选机构账户，有另一账户产品分红；循环身份改用独立局部变量，保留请求筛选 | `test_unrelated_product_dividend_does_not_change_snapshot_account_filter`：返回仅所选机构账户，合成5元收益不变，其他产品不混入 |
+| EST-008 / P1 | 日历可沿用过旧FX，首页已经提示缺FX，同日同币种结果矛盾。日历`converted_item`与`ReturnEvidence.convert` | 收益日的FX年龄7日可用、8日不可用，未来FX不能用；候选统一日收益FX边界，保留原币金额。最终实现/回归状态待补 | `test_return_calendar_consistency::test_calendar_and_home_share_dated_fx_coverage`及原币FX回归；同日期币种一致，缺FX时汇总amount/base_amount留空，不改FxRate |
+| EST-009 / P1 | 新鲜子估值被较老正式源fetch拖失效，或不同tick借主报价新fetch续期。`daily_returns.ReturnEvidence.spot`报价身份绑定 | 650秒旧正式源+新鲜子估值；仅类型、code/currency/source/economic_date/value/published_at严格匹配选用Price时用子fetched_at。有quote但不匹配返回quote_metadata_mismatch；旧无quote状态保守兼容 | `test_fresh_intraday_uses_own_fetch_time_not_other_nav_source`、`test_unrelated_quote_cannot_lend_its_fresh_fetch_time`：正确新估值可算；任一身份/tick不匹配等待对应证据，不改Price时间、不借主fetch、原600/1200秒保护保留 |
+
+EST-003/OD-05仍是待决政策：午休/收盘后是否另展示“最新带时间估算”须产品、来源和时段依据，不在本批放宽时效。§11中5只基金缺盘中数据为当时来源覆盖观察，不宣称永久不支持、不推定为5个代码缺陷，也不通过打开用户停用来源凑数。
+
+### 12.2 接口、数据影响与回滚边界
+
+兼容增加`missing_reason_code/native_status/native_message/fetched_at`，保留旧状态枚举、原币amount和折算base_amount语义；已知部分只汇总有效折算项。每日收益、持仓、净资产和日历是读结果，本批不新增迁移、不改Event/JournalLine/PositionMovement/SourceRecord.raw、机构快照或历史Price；正式同日替代不删除旧估值。overview计算版本升级候选v26，只读拒绝旧v24/v25缓存，GET不写Projection或提高账簿修订。
+
+回滚按应用/读算法及缓存版本兼容执行，保留已发生的正确行情与账务事实；不得为了撤销展示差异恢复旧库覆盖新数据。候选与前一镜像、认证备份和配置需要冻结后记录，最终生产部署验证另列。若后续需要修历史收益投影，须先逐空间/日期差异预览、核验原事实不变、备份、幂等重建和审计；本批没有执行该操作。权限、身份/币种、重复记账、冲突隔离与用户关闭偏好均保留。
+
+### 12.3 验证状态与维护入口
+
+- 已执行阶段：前端196项全部通过，TypeScript、所改文件格式、构建通过（仅已有大包警告）；本地完整后端1676项及12项子测试通过，0跳过、224.05秒。之后追加严格报价元数据匹配与核对导航，最终Linux候选全量仍待跑。此前106项及93项为定向组合，不相加、不冒充最终完整回归。阶段测试输出由本批最终验收汇集；诊断旧失败日志继续保留在`evidence/2026-10-12/`。
+- 已完成合成owner浏览器：CNY部分收益+2、1/3项可算及缺数原因；USD原币+2未填入CNY总额；首页明细到汇率、首页/持仓到正确基金行情；隐藏后明细无金融内容。测试中重建曾导致一次旧chunk 404，重启隔离web并reload后完成，不能声称首次无异常；没有以此代表生产浏览器。
+- 待统一补充：最终冻结SHA、候选完整回归、模型差异、最后核对导航改动的交互、候选镜像、生产备份与只读核验、部署时间。未以服务测试代替页面验收。
+- 未扩张范围：真实机构样本、全部QDII跨市场时段、真实上游适配网络、运行规模、生产恢复/历史修复、EST-003产品时效策略。只有当前可复现输入支持的缺陷进入本批。
+
+规则只维护[领域模型§14](../domain-model.md#14-指标字典估算与缺失)；接口见[api-contract§21](../api-contract.md#21-每日收益与持仓展示现行)；改动影响和回归选取见[项目地图](../project-map.md#修改影响表)；排障及安全重试见[RUNBOOK§8.7](../RUNBOOK.md#87-估值不显示与跨页面收益差异2141候选)；状态和最终发布信息见[开发状态](../development-status.md)与[2.14.1记录](../release-2.14.1.md)。

@@ -42,10 +42,23 @@ _DATA_CACHE = {}
 _IN_FLIGHT = {}
 _DATA_LOCK = threading.Lock()
 _DATA_CACHE_BYTES = 16 * 1024 * 1024
+INTRADAY_CACHE_TTL = 60
+FORMAL_CACHE_TTL = 600
+
+
+def _data_cache_ttl(provider, operation):
+    # Eastmoney's latest response includes intraday estimates, even when a
+    # particular response has none. Do not hide the next tick behind the NAV
+    # cache. Formal-only feeds and historical observations keep their longer TTL.
+    return (
+        INTRADAY_CACHE_TTL
+        if provider == "eastmoney_fund" and operation == "quote"
+        else FORMAL_CACHE_TTL
+    )
 
 
 def _cached_provider_call(provider, inst, operation, start=None, end=None):
-    """Ten-minute public data cache, sharing concurrent identical refreshes.
+    """Public data cache, sharing concurrent identical refreshes.
 
     Keys never include user names/tenant IDs or plaintext credentials. Normalize
     from public product identity only so one user's custom display label cannot
@@ -72,7 +85,7 @@ def _cached_provider_call(provider, inst, operation, start=None, end=None):
     now = time.monotonic()
     with _DATA_LOCK:
         cached = _DATA_CACHE.get(key)
-        if cached and now - cached[0] < 600:
+        if cached and now - cached[0] < _data_cache_ttl(provider, operation):
             return deepcopy(cached[1])
         pending = _IN_FLIGHT.get(key)
         creator = pending is None
@@ -102,7 +115,9 @@ def _cached_provider_call(provider, inst, operation, start=None, end=None):
             if size <= 2_000_000:
                 with _DATA_LOCK:
                     for stale in [
-                        k for k, v in _DATA_CACHE.items() if now - v[0] >= 600
+                        k
+                        for k, v in _DATA_CACHE.items()
+                        if now - v[0] >= _data_cache_ttl(k[0], k[4])
                     ]:
                         _DATA_CACHE.pop(stale)
                     while _DATA_CACHE and (

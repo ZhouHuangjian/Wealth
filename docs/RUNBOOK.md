@@ -1,6 +1,6 @@
 # 本地启动、部署与恢复手册
 
-维护日期2026-10-10。提供本地启动和compose容器步骤；现行定位与回归入口见[项目地图](project-map.md)，初始审查边界见[审查报告](audits/system-audit-2026-10-09.md)。2.12.0已完成保数据发布，2026-10-10 08:13:25（北京时间）最终验收通过；本版镜像、任务、认证备份与只读核验范围见[2.12发布](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)。历史服务器记录见[部署记录](server-deployment.md)，2026-10-09的2.11公网版本及SSH阻塞属于发布前阶段。系统没有外部付款、自动机构账单拉取或自动汇率能力。
+维护日期2026-10-13。提供本地启动和compose容器步骤；现行定位与回归入口见[项目地图](project-map.md)，初始审查边界见[审查报告](audits/system-audit-2026-10-09.md)。2.14.1为待最终验证/部署候选，估值排障见§8.7；生产最后只读核实为2026-10-13 12:45:55（北京时间）的2.14.0，schema0015。2.12.0保数据发布的历史时间、镜像、任务与核验范围保留在[2.12发布](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)。历史服务器记录见[部署记录](server-deployment.md)，不能将旧记录代替当次运行核验。系统没有外部付款、自动机构账单拉取或自动汇率能力。
 
 2.10.0 新增数据源 Token 加密存储。运维必须保留原 `DJANGO_SECRET_KEY`；轮换使用 `DJANGO_SECRET_KEY_FALLBACKS`（旧密钥的 JSON 数组），过渡期间重新保存 Token 后才能移除旧密钥。后台只提供写入/删除及状态，不提供读取明文；不要直接编辑数据库密文。公开官方净值无需 Token，订阅 Token 仅在独立管理台 → 数据源配置，默认停用。详细来源范围、故障与差异处理见 [2.10.0 发布说明](release-2.10.0.md)。
 
@@ -280,4 +280,25 @@ CI 通过不代表真实机构样本、性能规模、浏览器全部状态或�
 
 2.12工具位于 `.runtime/v212/deploy/`，采用两阶段停写/指纹/认证备份流程，并管理主机`backup.py/database_privileges.py`冻结安装、前任快照及receipt。先验候选，再prepare停止备份计时器并确认服务/PID停止，安装工具后停应用写入并备份；拿到认证本地副本才apply。回滚先停写，只在完整指纹仍为准备时状态且文件哈希一致时恢复前任操作文件；已有新数据时保留新备份工具，仅审查兼容的镜像回退，不能恢复旧数据库覆盖新数据。失败不清卷、不重置账号或队列，不重新开启旧禁用计划或数据源。
 
-首页返回结构或计算变化必须升级 `reporting.OVERVIEW_CALCULATION_VERSION`。当前v25只读绕过旧v24投影并实时返回定位字段；排查不要删除旧Projection、强制提高空间修订或手工补账来刷新页面。正常任务重算可以生成当前版本投影，GET不写缓存。真实行情/机构样本、规模、历史收益重算、全部权限路径和实际系统减少动画偏好切换等未覆盖范围继续保留，不因发布完成而关闭。
+首页返回结构或计算变化必须升级 `reporting.OVERVIEW_CALCULATION_VERSION`。2.12当时的v25只读绕过旧v24投影并实时返回定位字段；2.14.1候选升级为v26。排查不要删除旧Projection、强制提高空间修订或手工补账来刷新页面。正常任务重算可以生成当前版本投影，GET不写缓存。真实行情/机构样本、规模、历史收益重算、全部权限路径和实际系统减少动画偏好切换等未覆盖范围继续保留，不因发布完成而关闭。
+
+### 8.7 估值不显示与跨页面收益差异（2.14.1候选）
+
+先记录实际版本/镜像、日期、展示币种、金额隐藏状态和接口返回；按同一空间、账户、产品、日期比较首页、持仓、日历。卡片partial是已计算部分，覆盖按条目数；完整总额为空不能据此认为所有原币收益都为空。明细点击可定位产品行情、规则、交易、账户核对或汇率；导航本身不调平或补账。
+
+1. `no_estimate/no_current_price`：查看精确产品与净值日、estimate绝对值及公布时刻。来源没有盘中估值就留空；较早正式收益仅带其真实日期展示，不能移到今天或拿涨幅乘不相干NAV。
+2. `fetch_expired/quote_delayed/quote_time_missing/refresh_failed`：分别核查真实fetch、来源pub、Price记录时刻及最近任务结果。盘中缓存60秒、扫描60秒、单产品目标周期300秒，不等于任何行情都承诺5分钟到达。锁内按请求锚点及租约复查，队列或来源失败先修对应环节，禁止改时间戳让旧报价“变新”。复合来源还须核实子estimate与选用Price的类型、产品、币种、来源、日期、值和pub是否一致；`quote_metadata_mismatch`须等待匹配的观察和证据到齐，不删除quote或改主fetch绕过。旧无quote状态仅保守兼容读取。
+3. `missing_baseline`或缺开放日：缺的是可比收益区间。只补有依据的缺失价格/快照，不能按零、均摊或临时放宽日历凑今日收益。日历需正式权益；首页盘中权益可用不代表日历可正式入列。
+4. `fx_missing`：原币`amount/native_status`与折算`base_amount/status`分别看。采用收益日及以前最多7个自然日的有效FX；补齐后读侧自动恢复折算，不再次记一笔收益。
+5. `holding_reconciliation`、成本/交易日期或公司行动缺口：按提示核对真实记录及证据。机构权益包含范围、分红和净资本流入分别核查；不要为了让收益一致改写快照或原流水。已知NAV冲突仍按§8.2处理，不删隔离。
+
+本批固定时钟/受控日历/离线样本回归入口如下；实际命令、结果和未完成项记录到本批验收，不把命令存在当作执行通过：
+
+```sh
+.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 test tests/test_estimate_refresh_cadence.py tests/test_estimate_availability_20261013.py tests/test_return_calendar_consistency.py tests/test_portfolio.py tests/test_overview_projection_version.py
+node --experimental-strip-types --test frontend/tests/daily-return.test.mjs frontend/tests/holding-display.test.mjs frontend/tests/business-action.test.mjs
+```
+
+页面必验首页缺数→明细→对应产品、隐藏金额、部分可算零值、缺FX原币可见、正式价格+推算份额标记、日历与机构账户资金流场景。随后按[修改影响表](project-map.md#修改影响表)执行受影响的任务/权限/财务回归、模型差异及构建检查。2.14.1无新迁移，既有schema仍需与实际部署核实；不沿用2.12的0012假设，2.14.0已至0015。
+
+候选overview为`account-equity-v26`，旧v24/v25缓存只读绕过并实时计算，不删历史Projection、不造修订。发布前冻结候选、认证备份和检查应用兼容；最终部署需另填实际镜像、服务任务及只读接口证据。回滚退应用/读算法并保留所有Price、FX、快照、Event、JournalLine、PositionMovement和正确新事实；不能恢复旧库覆盖正常运行后的数据。本批不执行生产历史修复/回填，后续确需重建历史投影仍按§8.4先做差异预览。

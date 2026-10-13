@@ -19,6 +19,7 @@ import { useResource, useWorkspace } from "../state";
 import { QuoteStatus, RefreshQuotes } from "./InvestmentWorkspace";
 import {
   marketTime,
+  estimatePresentation,
   qualityPresentation,
   quoteDetails,
   sourcePresentation,
@@ -204,7 +205,7 @@ export function QuotesTable() {
           showIcon
           message={
             target
-              ? `已定位净值来源：${target.name || target.code}`
+              ? `已定位产品行情：${target.name || target.code}`
               : "指定产品没有可查看的行情记录，或不在当前空间。"
           }
           description={
@@ -314,6 +315,9 @@ export function QuotesTable() {
                     {quoteTime(
                       r.estimate?.published_at || r.estimate?.economic_date,
                     )}
+                  </small>
+                  <small title={estimatePresentation(r).message}>
+                    {estimatePresentation(r).label}
                   </small>
                 </div>
               ),

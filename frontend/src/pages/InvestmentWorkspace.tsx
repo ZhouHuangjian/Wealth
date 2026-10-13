@@ -829,7 +829,8 @@ export default function InvestmentWorkspace({
                     },
                     {
                       key: "daily",
-                      title: "今日估算收益",
+                      title:
+                        asOf === dateToday() ? "今日估算收益" : "当日估算收益",
                       render: (_, r) => (
                         <HoldingDailyReturn row={r} asOf={asOf} />
                       ),

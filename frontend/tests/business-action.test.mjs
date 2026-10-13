@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   dcaNextAction,
+  dailyReturnNextAction,
   holdingForAction,
   holdingNextAction,
 } from "../src/business-action.ts";
@@ -13,6 +14,53 @@ const plan = {
   automation: { holding_account_id: "holding-one" },
 };
 const url = (action) => new URL(action.to, "https://synthetic.invalid");
+
+test("return gaps locate that product's market evidence rather than another holding", () => {
+  const action = dailyReturnNextAction("space/one", {
+    instrument_id: "fund?one",
+    missing_reason_code: "no_estimate",
+    to: "https://untrusted.invalid",
+    amount: "123.45",
+  });
+  assert.equal(url(action).pathname, "/spaces/space%2Fone/analytics");
+  assert.equal(url(action).searchParams.get("tab"), "settlement");
+  assert.equal(url(action).searchParams.get("section"), "quotes");
+  assert.equal(url(action).searchParams.get("instrument_id"), "fund?one");
+  assert.ok(!action.to.includes("123.45"));
+  assert.ok(!action.to.includes("untrusted"));
+  assert.equal(dailyReturnNextAction("space", {}), null);
+});
+
+test("FX and product calendar gaps open their own correction destinations", () => {
+  const fx = dailyReturnNextAction("space", {
+    missing_reason_code: "fx_missing",
+    instrument_id: "fund",
+  });
+  assert.equal(url(fx).pathname, "/spaces/space/manage");
+  assert.equal(url(fx).searchParams.get("tab"), "fx");
+  const calendar = dailyReturnNextAction("space", {
+    missing_reason_code: "calendar_unverified",
+    instrument_id: "fund",
+  });
+  assert.equal(url(calendar).searchParams.get("action"), "edit-product");
+  assert.equal(url(calendar).searchParams.get("instrument_id"), "fund");
+  const account = dailyReturnNextAction("space", { account_id: "institution" });
+  assert.equal(url(account).searchParams.get("section"), "reconcile");
+  assert.equal(url(account).searchParams.get("account_id"), "institution");
+  const trade = dailyReturnNextAction("space", {
+    account_id: "actual-account",
+    instrument_id: "fund",
+    missing_reason_code: "trade_date_unverified",
+  });
+  assert.equal(url(trade).searchParams.get("tab"), "investments");
+  assert.equal(url(trade).searchParams.get("account_id"), "actual-account");
+  const snapshot = dailyReturnNextAction("space", {
+    account_id: "actual-account",
+    instrument_id: "future",
+    missing_reason_code: "account_snapshot_needed",
+  });
+  assert.equal(url(snapshot).searchParams.get("section"), "reconcile");
+});
 
 test("late NAV and confirmation keep automatic waiting without a manual task", () => {
   for (const status of [
@@ -128,6 +176,32 @@ test("holding checking retains both identities and does not select another holdi
   assert.equal(url(action).searchParams.get("account_id"), "b");
   assert.equal(url(action).searchParams.get("instrument_id"), "i");
   assert.equal(url(action).searchParams.get("action"), "check-holding");
+});
+
+test("a daily-return reconciliation payload locates the original holding without holdings-only eligibility", () => {
+  // The home/calendar return API supplies reconciliation evidence, while the
+  // destination holdings API supplies current reconciliation_eligibility.
+  const row = {
+    account_id: "holding-account",
+    instrument_id: "fund-one",
+    kind: "fund",
+    date: "2026-10-12",
+    amount: null,
+    status: "unavailable",
+    missing_reason_code: "holding_reconciliation",
+    message: "原持仓金额、成本或收益范围待核对，暂不确认该日收益",
+    reconciliation: { status: "unresolved", opening_event_id: "opening-one" },
+  };
+  const original = structuredClone(row);
+  const action = dailyReturnNextAction("space-one", row);
+  assert.equal(action.kind, "holding");
+  assert.equal(url(action).pathname, "/spaces/space-one/assets");
+  assert.equal(url(action).searchParams.get("tab"), "holdings");
+  assert.equal(url(action).searchParams.get("action"), "check-holding");
+  assert.equal(url(action).searchParams.get("account_id"), "holding-account");
+  assert.equal(url(action).searchParams.get("instrument_id"), "fund-one");
+  assert.equal(url(action).searchParams.has("opening_event_id"), false);
+  assert.deepEqual(row, original);
 });
 
 test("holding without an eligible opening asks for actual transaction evidence", () => {

@@ -1,15 +1,25 @@
 import { Tooltip } from "antd";
+import { Link } from "react-router-dom";
 import { Info } from "lucide-react";
 import { Money } from "../components";
 import { HelpText } from "../help";
 import { summarizeHoldings } from "../holding-display";
-import { holdingDailyAmount } from "../holding-display";
+import {
+  holdingDailyAmount,
+  holdingLatestReturnAmount,
+} from "../holding-display";
 import type { HoldingRow } from "../holding-display";
 import { useWorkspace } from "../state";
 import { percentText, profitTone } from "../investment";
 import PendingPurchaseDetails from "./PendingPurchaseDetails";
 import { dateToday } from "../api";
-import { returnDateDisplay } from "../daily-return";
+import {
+  dailyReturnIssueLabel,
+  dailyReturnItemLabel,
+  nativeReturnStatus,
+  returnDateDisplay,
+} from "../daily-return";
+import { dailyReturnNextAction } from "../business-action";
 
 export function HoldingDailyReturn({
   row,
@@ -20,36 +30,20 @@ export function HoldingDailyReturn({
   asOf: string;
   latest?: boolean;
 }) {
-  const { hidden } = useWorkspace();
+  const { hidden, space } = useWorkspace();
   if (row.pending_only === true) return <span className="unknown">—</span>;
   const data = latest ? row.latest_confirmed_return : row.daily_return;
   const dates = returnDateDisplay(data);
   const recent = row.latest_confirmed_return;
-  const recentValue =
-    !latest &&
-    recent?.observation_kind === "formal" &&
-    ["confirmed", "estimated"].includes(recent.status) &&
-    recent.currency === row.currency &&
-    row.status !== "needs_reconciliation" &&
-    !row.is_reference_position &&
-    row.contributes !== false
-      ? recent.amount
-      : null;
+  const recentValue = !latest ? holdingLatestReturnAmount(row) : null;
   const value = latest
-    ? data?.observation_kind === "formal" &&
-      ["confirmed", "estimated"].includes(data.status) &&
-      data.currency === row.currency &&
-      row.status !== "needs_reconciliation" &&
-      !row.is_reference_position &&
-      row.contributes !== false
-      ? data.amount
-      : null
+    ? holdingLatestReturnAmount(row)
     : holdingDailyAmount(row, asOf);
   const description = hidden
     ? "显示金额后可查看收益说明"
     : data?.message ||
       (value != null
-        ? `${latest && data?.status === "estimated" ? "按正式净值与推算份额计算" : data?.status === "confirmed" ? "按正式价格计算" : "参考估值，尚非最终结算"}${data?.interval_start ? `；计算基准 ${data.interval_start}` : ""}`
+        ? `${latest && nativeReturnStatus(data) === "estimated" ? "按正式净值与推算份额计算" : nativeReturnStatus(data) === "confirmed" ? "按正式价格计算" : "参考估值，尚非最终结算"}${data?.interval_start ? `；计算基准 ${data.interval_start}` : ""}`
         : row.is_reference_position || row.contributes === false
           ? "参考持仓或已由机构权益覆盖，不重复计算日收益"
           : "缺少对应日期的行情或收益基准");
@@ -60,12 +54,23 @@ export function HoldingDailyReturn({
         dates.returnDate ? `收益归属 ${dates.returnDate}` : "",
         dates.navDate ? `净值归属 ${dates.navDate}` : "",
         dates.publishedAt ? `数据源公布 ${dates.publishedAt}（北京时间）` : "",
+        dates.fetchedAt ? `系统获取 ${dates.fetchedAt}（北京时间）` : "",
         dates.observedAt
-          ? `系统获取 ${dates.observedAt}（北京时间）；获取时间不改变收益归属日`
+          ? `记录时间 ${dates.observedAt}（北京时间）；记录时间不改变收益归属日`
           : "",
       ]
         .filter(Boolean)
         .join("；");
+  const issue =
+    !hidden &&
+    !row.is_reference_position &&
+    row.contributes !== false &&
+    row.status !== "needs_reconciliation" &&
+    row.scope_unconfirmed !== true &&
+    (value == null || data?.missing_reason_code === "fx_missing");
+  const action = issue
+    ? dailyReturnNextAction(space.id, { ...row, ...data })
+    : null;
   return (
     <Tooltip title={detail}>
       <div className={`cell-name ${hidden ? "" : profitTone(value)}`}>
@@ -81,14 +86,7 @@ export function HoldingDailyReturn({
             ? latest
               ? "等待正式净值"
               : "待更新"
-            : latest
-              ? data?.quantity_source === "estimated" ||
-                data?.status === "estimated"
-                ? "净值收益 · 含推算份额"
-                : "净值收益"
-              : data?.status === "confirmed"
-                ? "正式收益"
-                : "估算"}
+            : dailyReturnItemLabel(data)}
         </small>
         {value == null && recentValue != null && (
           <small>
@@ -102,6 +100,14 @@ export function HoldingDailyReturn({
             {" · "}
             {returnDateDisplay(recent).returnDate}
           </small>
+        )}
+        {issue && data?.missing_reason_code && (
+          <small>{dailyReturnIssueLabel(data)}</small>
+        )}
+        {action && (
+          <Link to={action.to} title={action.description}>
+            {action.label}
+          </Link>
         )}
       </div>
     </Tooltip>

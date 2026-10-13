@@ -1,3 +1,5 @@
+import { nativeReturnStatus } from "./daily-return.ts";
+
 /** Display-only preferences and exact decimal summaries. Never changes recorded holdings. */
 export type HoldingRow = Record<string, any>;
 export const holdingColumnDefinitions = [
@@ -248,10 +250,23 @@ export function holdingDailyAmount(row: HoldingRow, asOf: string) {
     !row.is_reference_position &&
     row.contributes !== false &&
     daily?.date === asOf &&
-    ["estimated", "confirmed"].includes(daily?.status) &&
+    ["estimated", "confirmed"].includes(nativeReturnStatus(daily)) &&
     daily.currency === row.currency &&
     decimal(daily.amount) !== null
     ? daily.amount
+    : null;
+}
+export function holdingLatestReturnAmount(row: HoldingRow) {
+  const latest = row.latest_confirmed_return;
+  return reliable(row) &&
+    row.pending_only !== true &&
+    !row.is_reference_position &&
+    row.contributes !== false &&
+    latest?.observation_kind === "formal" &&
+    ["estimated", "confirmed"].includes(nativeReturnStatus(latest)) &&
+    latest.currency === row.currency &&
+    decimal(latest.amount) !== null
+    ? latest.amount
     : null;
 }
 export function sortHoldings(

@@ -501,11 +501,12 @@ def holdings_summary(
             .order_by("-economic_date", "-published_at", "-created_at")
             .first()
         )
-        # An older indicative quote is not fresher information than today's NAV.
-        if (
-            reference
-            and row["price_date"]
-            and reference.economic_date < row["price_date"]
+        formal_quote = formal_price(space, instrument, when)
+        # A formal result supersedes an estimate for the same valuation day,
+        # even if the old estimate is fetched again after the result arrives.
+        if reference and (
+            (row["price_date"] and reference.economic_date < row["price_date"])
+            or (formal_quote and reference.economic_date <= formal_quote.economic_date)
         ):
             reference = None
         purchase_date = (
@@ -552,7 +553,7 @@ def holdings_summary(
             instrument,
             row["quantity"],
             when,
-            formal_price(space, instrument, when),
+            formal_quote,
             reference_only=True,
         )
         use_manual_reference = manual_reference is not None and (
@@ -832,6 +833,7 @@ def _calendar_item(
         "source": None,
         "status": "unavailable",
         "message": "缺少正式价格",
+        "missing_reason_code": None,
     }
     date_error = next(
         (
@@ -842,7 +844,11 @@ def _calendar_item(
         None,
     )
     if date_error:
-        return {**base, "message": date_error}
+        return {
+            **base,
+            "message": date_error,
+            "missing_reason_code": "trade_date_unverified",
+        }
     from .holding_checks import read_holding_check
 
     read_check = check_reader or read_holding_check
@@ -868,6 +874,7 @@ def _calendar_item(
         return {
             **base,
             "message": "原持仓金额、成本或收益范围待核对，暂不确认该日收益",
+            "missing_reason_code": "holding_reconciliation",
             "reconciliation": check,
         }
     actions_today = [item for item in corporate_actions if item["date"] == when]
@@ -879,11 +886,16 @@ def _calendar_item(
             **base,
             "corporate_actions": actions_today,
             "message": "该日有分红或折算提示，请核对并补录实际记录",
+            "missing_reason_code": "corporate_action",
         }
     if is_derivative_instrument(instrument) or account.valuation_mode == "snapshot":
-        return {**base, "message": "期货期权收益须按机构权益与真实入出金计算"}
+        return {
+            **base,
+            "message": "期货期权收益须按机构权益与真实入出金计算",
+            "missing_reason_code": "account_snapshot_needed",
+        }
     if q_after and (not closing or closing.economic_date != when):
-        return base
+        return {**base, "missing_reason_code": "no_current_price"}
     from .valuation_calendar import open_days_between, return_calendar
 
     opening_lag = (
@@ -897,7 +909,11 @@ def _calendar_item(
         else None
     )
     if q_before and (not opening or opening_lag is None or opening_lag != 0):
-        return {**base, "message": "缺少交易日行情、上一有效价格或日历覆盖"}
+        return {
+            **base,
+            "message": "缺少交易日行情、上一有效价格或日历覆盖",
+            "missing_reason_code": "missing_baseline",
+        }
     # Multi-day gaps are disclosed. Intervening actual trades require a daily
     # quote on their date, otherwise a later observation cannot move that P&L.
     if q_before and opening.economic_date < prior:
@@ -905,7 +921,11 @@ def _calendar_item(
             row for row in movements if opening.economic_date < row["date"] < when
         ]
         if between:
-            return {**base, "message": "报价缺口内有持仓变动，无法分配每日收益"}
+            return {
+                **base,
+                "message": "报价缺口内有持仓变动，无法分配每日收益",
+                "missing_reason_code": "movement_gap",
+            }
     opening_value = q_before * opening.value if q_before else ZERO
     closing_value = q_after * closing.value if q_after else ZERO
     capital = ZERO
@@ -916,7 +936,11 @@ def _calendar_item(
         kind = event.kind
         if kind in {"buy", "fund_confirm"}:
             if row["cost"] is None:
-                return {**base, "message": "交易成本缺失"}
+                return {
+                    **base,
+                    "message": "交易成本缺失",
+                    "missing_reason_code": "missing_trade_cost",
+                }
             contribution = row["cost"]
         elif kind in {"sell", "fund_redeem"}:
             contribution = -dec(event.payload["amount"])
@@ -929,17 +953,25 @@ def _calendar_item(
             elif closing:
                 contribution = row["quantity"] * closing.value
             else:
-                return base
+                return {**base, "missing_reason_code": "no_current_price"}
         elif kind == "position_transfer":
             if not closing:
-                return base
+                return {**base, "missing_reason_code": "no_current_price"}
             contribution = row["quantity"] * closing.value
         elif kind == "split":
             contribution = ZERO
         else:
-            return {**base, "message": "该持仓变动尚不能计算每日收益"}
+            return {
+                **base,
+                "message": "该持仓变动尚不能计算每日收益",
+                "missing_reason_code": "unknown_movement",
+            }
         if contribution is None:
-            return {**base, "message": "原始取得成本缺失"}
+            return {
+                **base,
+                "message": "原始取得成本缺失",
+                "missing_reason_code": "missing_opening_cost",
+            }
         capital += contribution
         added_capital += max(ZERO, contribution)
     for event in payouts:
@@ -970,97 +1002,6 @@ def _calendar_item(
         "interval_start": opening.economic_date if opening and q_before else when,
         "capital_flow": capital,
         "dividends": distributions,
-    }
-
-
-def _snapshot_calendar_item(account, snapshots, flows, when):
-    # Intraday equity is a reference observation, never a settled daily return.
-    has_observation = any(row.economic_date <= when for row in snapshots)
-    snapshots = [
-        row
-        for row in snapshots
-        if row.details.get("valuation_basis") not in {"intraday", "unknown"}
-    ]
-    current = next(
-        (row for row in reversed(snapshots) if row.economic_date <= when), None
-    )
-    if not current and not has_observation:
-        return None
-    previous = next(
-        (row for row in reversed(snapshots) if row.economic_date < when), None
-    )
-    base = {
-        "account_id": str(account.pk),
-        "account_name": account.name,
-        "instrument_id": None,
-        "name": account.name,
-        "code": "",
-        "kind": "future" if account.kind in {"future", "futures"} else "account",
-        "currency": account.currency,
-        "date": str(when),
-        "amount": None,
-        "return_rate": None,
-        "source": "institution_snapshot",
-        "status": "unavailable",
-        "message": "缺少该日或上次机构权益",
-        "scope": "account",
-    }
-    if not current:
-        return {**base, "message": "已有盘中或口径未知权益，尚缺正式结算权益"}
-    if (
-        current.economic_date != when
-        or not previous
-        or (when - previous.economic_date).days > 7
-    ):
-        return base
-    for snapshot in [previous, current]:
-        from .option_positions import has_option_reference
-
-        if snapshot.includes_options is not True and has_option_reference(
-            account.tenant,
-            account_id=account.pk,
-            when=snapshot.economic_date,
-            active_only=True,
-        ):
-            return {**base, "message": "已记录期权持仓，机构结算权益尚未确认包含期权"}
-        if (
-            not snapshot.complete
-            or snapshot.includes_options is None
-            or (
-                snapshot.includes_options is False
-                and snapshot.details.get("no_option_positions") is not True
-            )
-        ):
-            return {**base, "message": "机构权益包含范围尚未核实"}
-        relevant = [
-            line
-            for line in flows
-            if snapshots[0].economic_date
-            <= line.event.economic_date
-            <= snapshot.economic_date
-        ]
-        if any(
-            str(line.event_id) not in snapshot.included_event_ids for line in relevant
-        ):
-            return {**base, "message": "机构权益未声明是否包含实际入出金"}
-    period_flows = [
-        line.amount
-        for line in flows
-        if previous.economic_date < line.event.economic_date <= when
-    ]
-    capital = sum(period_flows, ZERO)
-    amount = current.equity - previous.equity - capital
-    basis = previous.equity + sum((max(value, ZERO) for value in period_flows), ZERO)
-    return {
-        **base,
-        "amount": amount,
-        "basis": basis,
-        "return_rate": amount / basis if basis > ZERO else None,
-        "status": "confirmed",
-        "message": "",
-        "price_date": current.economic_date,
-        "interval_start": previous.economic_date,
-        "capital_flow": capital,
     }
 
 
@@ -1111,7 +1052,9 @@ def profit_calendar(
     instrument_id=None,
     kind=None,
 ):
-    from .reporting import FORMAL_PRICE_KINDS, fx
+    from .reporting import FORMAL_PRICE_KINDS
+    from .daily_returns import convert_return_currency
+    from .models import FxRate
 
     end = day(end)
     start = day(start) if start else end.replace(day=1)
@@ -1183,15 +1126,15 @@ def profit_calendar(
         reversal__isnull=True,
         reverses__isnull=True,
     ):
-        account_id = event.payload.get("account_id")
-        instrument_id = event.payload.get("instrument_id")
-        if not instrument_id:
+        dividend_account_id = event.payload.get("account_id")
+        dividend_instrument_id = event.payload.get("instrument_id")
+        if not dividend_instrument_id:
             links = dividend_links.get(str(event.pk), set())
             if len(links) == 1:
                 linked_account, linked_instrument = next(iter(links))
-                if linked_account == account_id:
-                    instrument_id = linked_instrument
-        key = (account_id, instrument_id)
+                if linked_account == dividend_account_id:
+                    dividend_instrument_id = linked_instrument
+        key = (dividend_account_id, dividend_instrument_id)
         if key[0] in accounts and key[1] in instruments:
             dividends[key].append(event)
             movement_groups.setdefault(key, [])
@@ -1199,8 +1142,6 @@ def profit_calendar(
         row.data.get("instrument_id"): _corporate_actions(row.data)
         for row in Resource.objects.filter(tenant=space, kind="market_quotes")
     }
-    snapshot_groups = defaultdict(list)
-    flow_groups = defaultdict(list)
     snapshot_accounts = {
         aid: account
         for aid, account in accounts.items()
@@ -1208,44 +1149,24 @@ def profit_calendar(
     }
     # A broker statement covers the whole account. It cannot be attributed to a
     # selected individual option or future without contract-level settlement.
-    if not instrument_id and (not kind or kind in DERIVATIVES):
-        from .account_opening import effective_snapshots
+    snapshot_evidence = None
+    if snapshot_accounts and not instrument_id and (not kind or kind in DERIVATIVES):
+        from .daily_returns import ReturnEvidence
 
-        for snapshot in (
-            effective_snapshots(space)
-            .filter(account_id__in=snapshot_accounts, economic_date__lte=end)
-            .order_by("economic_date", "created_at")
-        ):
-            snapshot_groups[str(snapshot.account_id)].append(snapshot)
-        for line in JournalLine.objects.filter(
-            tenant=space,
-            account_id__in=snapshot_accounts,
-            code="cash",
-            event__kind__in=["transfer", "fx"],
-            event__economic_date__lte=end,
-            event__reversal__isnull=True,
-            event__reverses__isnull=True,
-        ).select_related("event"):
-            flow_groups[str(line.account_id)].append(line)
-    fx_cache = {}
-
-    def converted_item(item, when):
-        key = (item["currency"], when)
-        if key not in fx_cache:
-            fx_cache[key] = fx(space, item["currency"], space.base_currency, when)
-        rate = fx_cache[key]
-        item["base_amount"] = (
-            item["amount"] * rate
-            if item["amount"] is not None and rate is not None
-            else None
+        # Use the same statement scope, cashflow and calendar rules as the home
+        # return card. Load once for this request, never once for every day.
+        snapshot_evidence = ReturnEvidence(
+            space, end, account_id=account_id, instrument_id=instrument_id, kind=kind
         )
-        item["base_basis"] = (
-            item.get("basis", ZERO) * rate if rate is not None else None
+    fx_rows = (
+        snapshot_evidence.fx_rows
+        if snapshot_evidence
+        else list(
+            FxRate.objects.filter(
+                tenant=space, purpose="valuation", economic_date__lte=end
+            ).order_by("-economic_date", "-created_at")
         )
-        if item["amount"] is not None and rate is None:
-            item["status"] = "unavailable"
-            item["message"] = "缺少该日汇率"
-        return item
+    )
 
     days = []
     when = start
@@ -1267,13 +1188,27 @@ def profit_calendar(
                     corporate_actions.get(iid, []),
                 )
                 if item is not None:
-                    items.append(converted_item(item, when))
-            for aid, snapshots in snapshot_groups.items():
-                item = _snapshot_calendar_item(
-                    accounts[aid], snapshots, flow_groups[aid], when
-                )
-                if item is not None:
-                    items.append(converted_item(item, when))
+                    items.append(
+                        convert_return_currency(item, space.base_currency, fx_rows)
+                    )
+            if snapshot_evidence:
+                for aid in snapshot_accounts:
+                    if not any(
+                        row.economic_date <= when
+                        for row in snapshot_evidence.snapshots[aid]
+                    ):
+                        continue
+                    item = snapshot_evidence.snapshot(
+                        aid, when, estimated=False, allow_cash_carry_forward=False
+                    )
+                    item["kind"] = (
+                        "future"
+                        if accounts[aid].kind in {"future", "futures"}
+                        else "account"
+                    )
+                    items.append(
+                        convert_return_currency(item, space.base_currency, fx_rows)
+                    )
         known_items = [row for row in items if row["base_amount"] is not None]
         known = sum((row["base_amount"] for row in known_items), ZERO)
         complete = bool(items) and len(known_items) == len(items)

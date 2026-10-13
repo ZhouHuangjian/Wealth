@@ -110,6 +110,7 @@ def reject_writes(execute, sql, params, many, context):
     return execute(sql, params, many, context)
 
 
+@pytest.mark.parametrize("legacy_version", ["account-equity-v24", "account-equity-v25"])
 @pytest.mark.parametrize(
     ("status", "message"),
     [
@@ -117,13 +118,15 @@ def reject_writes(execute, sql, params, many, context):
         ("needs_review", "正式净值来源存在差异，请核对"),
     ],
 )
-def test_legacy_overview_cache_is_recomputed_read_only(pending_home, status, message):
+def test_legacy_overview_cache_is_recomputed_read_only(
+    pending_home, status, message, legacy_version
+):
     app, occurrence = pending_home
     with tenant_context(app.space.pk):
         occurrence.details["automation"] = {"status": status, "message": message}
         occurrence.save(update_fields=["details"])
         legacy_payload = deepcopy(overview(app.space))
-        legacy_payload["calculation_version"] = LEGACY_VERSION
+        legacy_payload["calculation_version"] = legacy_version
         # The actual 2.11.0 build (0103fc8) emitted this limited todo shape.
         # Its automation.message is generic, so the original reason is lost.
         for todo in legacy_payload["todos"]:
@@ -159,7 +162,7 @@ def test_legacy_overview_cache_is_recomputed_read_only(pending_home, status, mes
             assert todo.get("instrument_id") == occurrence.details["instrument_id"]
             assert todo.get("occurrence_id") == str(occurrence.pk)
             assert todo["details"]["automation"]["message"] == message
-            assert payload["calculation_version"] != LEGACY_VERSION
+            assert payload["calculation_version"] != legacy_version
             assert not payload.get("cached", False)
             assert saved_state(app.space) == before
         cached.refresh_from_db()

@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { Button, Drawer, Table, Tag } from "antd";
 import { ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
 import { dateToday } from "../api";
 import { Blank, Money } from "../components";
 import {
   dailyReturnDisplay,
-  dailyReturnLabels,
+  dailyReturnItemLabel,
+  dailyReturnIssues,
   returnDateDisplay,
 } from "../daily-return";
+import { dailyReturnNextAction } from "../business-action";
 import { HelpText } from "../help";
 import { profitTone } from "../investment";
 import { useWorkspace } from "../state";
@@ -28,12 +31,13 @@ export default function DailyReturnCard({
   asOf: string;
   currency: string;
 }) {
-  const { hidden } = useWorkspace();
+  const { hidden, space } = useWorkspace();
   const [open, setOpen] = useState(false);
   const view = dailyReturnDisplay(data);
   const displayCurrency = data?.currency || currency;
   const title = asOf === dateToday() ? "今日估算收益" : "当日估算收益";
   const rows = data?.items || [];
+  const issues = dailyReturnIssues(data);
   return (
     <>
       <article className="net-worth-card daily-return-card">
@@ -60,7 +64,7 @@ export default function DailyReturnCard({
           {view.rate && !hidden ? (
             <span className={profitTone(data?.return_rate)}>{view.rate}</span>
           ) : view.partial ? (
-            <span>已知部分</span>
+            <span>已计算部分，非全部收益</span>
           ) : (
             <span>
               {view.status === "no_position"
@@ -70,6 +74,17 @@ export default function DailyReturnCard({
           )}
           <time>{data?.date || asOf}</time>
         </div>
+        {!hidden && ["partial", "unavailable"].includes(view.status) && (
+          <p className="daily-return-gaps">
+            {issues.length
+              ? issues
+                  .slice(0, 2)
+                  .map((issue) => `${issue.count} 项${issue.label}`)
+                  .join("；") + (issues.length > 2 ? "等" : "")
+              : "缺少对应日期的行情或计算依据"}
+            。缺少部分保留空缺。
+          </p>
+        )}
         <div className="daily-return-bottom">
           <small>{hidden ? "金额已隐藏" : view.coverage}</small>
           <Button
@@ -78,7 +93,9 @@ export default function DailyReturnCard({
             onClick={() => setOpen(true)}
             icon={<ChevronRight size={14} />}
           >
-            收益明细
+            {issues.length || view.status === "unavailable"
+              ? "查看明细与原因"
+              : "收益明细"}
           </Button>
         </div>
       </article>
@@ -98,7 +115,9 @@ export default function DailyReturnCard({
           <>
             <div className="daily-return-detail-summary">
               <div>
-                <small>{view.partial ? "已知部分收益" : title}</small>
+                <small>
+                  {view.partial ? "已计算部分收益（非全部）" : title}
+                </small>
                 <strong className={profitTone(view.amount)}>
                   <Money value={view.amount} currency={displayCurrency} sign />
                 </strong>
@@ -184,9 +203,7 @@ export default function DailyReturnCard({
                   render: (_, row) => (
                     <div className="cell-name">
                       <span>
-                        {dailyReturnLabels[row.status] ||
-                          row.status ||
-                          "待更新"}
+                        {dailyReturnItemLabel(row)}
                         {returnDateDisplay(row).returnDate
                           ? ` · 收益归属 ${returnDateDisplay(row).returnDate}`
                           : ""}
@@ -196,6 +213,24 @@ export default function DailyReturnCard({
                           净值 / 价格归属 {returnDateDisplay(row).navDate}
                         </small>
                       )}
+                      {returnDateDisplay(row).publishedAt && (
+                        <small>
+                          报价公布 {returnDateDisplay(row).publishedAt}
+                          （北京时间）
+                        </small>
+                      )}
+                      {returnDateDisplay(row).fetchedAt && (
+                        <small>
+                          系统获取 {returnDateDisplay(row).fetchedAt}
+                          （北京时间）
+                        </small>
+                      )}
+                      {returnDateDisplay(row).observedAt && (
+                        <small>
+                          记录时间 {returnDateDisplay(row).observedAt}
+                          （北京时间）
+                        </small>
+                      )}
                       {row.interval_start && (
                         <small>计算基准 {row.interval_start}</small>
                       )}
@@ -203,6 +238,17 @@ export default function DailyReturnCard({
                         <small>{sourceLabels[row.source] || row.source}</small>
                       )}
                       {row.message && <small>{row.message}</small>}
+                      {dailyReturnNextAction(space.id, row) && (
+                        <Link
+                          to={dailyReturnNextAction(space.id, row)!.to}
+                          onClick={() => setOpen(false)}
+                          title={
+                            dailyReturnNextAction(space.id, row)!.description
+                          }
+                        >
+                          {dailyReturnNextAction(space.id, row)!.label}
+                        </Link>
+                      )}
                     </div>
                   ),
                 },

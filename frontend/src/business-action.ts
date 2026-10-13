@@ -21,6 +21,96 @@ function route(spaceId: string, page: string, values: Values) {
   return `/spaces/${encodeURIComponent(spaceId)}/${page}?${params}`;
 }
 
+/** Resolve only known application destinations; never accept a URL from quote data. */
+export function dailyReturnNextAction(
+  spaceId: string,
+  row: Values,
+): BusinessAction | null {
+  if (row.missing_reason_code === "fx_missing")
+    return {
+      kind: "cash",
+      label: "查看汇率记录",
+      description: "补全收益日期适用的折算汇率；原币收益不因缺少汇率而消失。",
+      to: route(spaceId, "manage", { tab: "fx" }),
+    };
+  if (row.missing_reason_code === "calendar_unverified" && row.instrument_id)
+    return {
+      kind: "product",
+      label: "核实产品规则",
+      description: "核实该产品的交易日与适用市场，不用其他市场的日期代替。",
+      to: route(spaceId, "assets", {
+        tab: "records",
+        section: "products",
+        action: "edit-product",
+        instrument_id: row.instrument_id,
+      }),
+    };
+  if (
+    row.missing_reason_code === "holding_reconciliation" &&
+    row.account_id &&
+    row.instrument_id
+  )
+    return {
+      kind: "holding",
+      label: "核对这笔持仓",
+      description:
+        "对照相同日期和份额范围核对原持仓；进入后会重新检查这笔持仓是否仍可核对。",
+      to: route(spaceId, "assets", {
+        tab: "holdings",
+        action: "check-holding",
+        account_id: row.account_id,
+        instrument_id: row.instrument_id,
+      }),
+    };
+  if (
+    [
+      "opening_baseline",
+      "trade_date_unverified",
+      "corporate_action",
+      "movement_gap",
+      "missing_trade_cost",
+      "unknown_movement",
+      "missing_opening_cost",
+    ].includes(row.missing_reason_code) &&
+    row.account_id
+  )
+    return {
+      kind: "transaction",
+      label: "查看账户交易",
+      description: "核实此账户的期初持仓及交易日期，不为补收益虚构历史流水。",
+      to: route(spaceId, "cashbook", {
+        tab: "investments",
+        account_id: row.account_id,
+      }),
+    };
+  if (
+    row.instrument_id &&
+    row.missing_reason_code !== "account_snapshot_needed"
+  )
+    return {
+      kind: "market",
+      label: "查看产品行情",
+      description: "查看此产品的报价、日期与来源；可用数据到齐后系统重新计算。",
+      to: route(spaceId, "analytics", {
+        tab: "settlement",
+        section: "quotes",
+        instrument_id: row.instrument_id,
+      }),
+    };
+  if (row.account_id)
+    return {
+      kind: "cash",
+      label: "核对账户数据",
+      description: "对照相同日期的机构权益与实际流水，核实缺少的账户依据。",
+      to: route(spaceId, "assets", {
+        tab: "records",
+        section: "reconcile",
+        account_id: row.account_id,
+      }),
+    };
+  return null;
+}
+
 /** Navigation only: facts, amounts and automation settings remain untouched. */
 export function dcaNextAction(
   spaceId: string,

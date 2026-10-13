@@ -75,6 +75,34 @@ export function marketTime(value: unknown, absent = "来源未提供") {
       });
 }
 
+/** The formal NAV's healthy state does not establish a usable intraday estimate. */
+export function estimatePresentation(row: Record<string, any>) {
+  const estimate = row.estimate;
+  if (!estimate || (estimate.price == null && estimate.value == null))
+    return {
+      label: "暂无盘中估值",
+      message: estimate?.message || "当前来源未提供盘中估值。",
+      warning: true,
+    };
+  if (["delayed", "stale", "previous_session"].includes(estimate.data_state))
+    return {
+      label: "历史 / 延迟报价",
+      message: "仅供查看该时刻的行情，不能据此认定当前今日收益可计算。",
+      warning: true,
+    };
+  if (estimate.status !== "ok" || !estimate.published_at)
+    return {
+      label: "估值依据待核实",
+      message: estimate.message || "报价时间或状态尚不完整。",
+      warning: true,
+    };
+  return {
+    label: "盘中参考",
+    message: "今日收益还需匹配适用份额、日期及收益基准。",
+    warning: false,
+  };
+}
+
 export function providerLabel(provider?: string) {
   return (
     (

@@ -414,6 +414,42 @@ def test_reference_and_formal_mix_retains_each_items_basis(book):
     assert {row["basis"] for row in result["items"]} == {"formal", "reference"}
 
 
+@pytest.mark.parametrize("reference_first", [True, False])
+def test_formal_nav_supersedes_same_day_estimate_in_holdings_and_wealth(
+    book, reference_first
+):
+    from wealth.investments import holdings_summary
+
+    hold(book)
+    price(book)
+    if reference_first:
+        price(book, "12", TODAY, kind="reference")
+    price(book, "11", TODAY)
+    if not reference_first:
+        # A late response must not make an estimate newer than a formal result
+        # for the same economic day.
+        price(book, "12", TODAY, kind="reference")
+
+    row = holdings_summary(book.space, TODAY)["items"][0]
+    assert D(row["market_value"]) == D("110")
+    assert row["estimate_value"] is None
+    assert row["estimate_profit"] is None
+    comparison = net_worth_comparison(book.space, TODAY)
+    assert D(comparison["estimated"]["net_assets"]) == D("110")
+    assert D(comparison["estimated"]["reference_delta"]) == D("0")
+    allocation = portfolio_analysis(book.space, TODAY)
+    assert D(allocation["total_value"]) == D("110")
+    assert allocation["items"][0]["basis"] == "formal"
+    # Selection changes the projection; all three observations remain intact.
+    assert Price.objects.filter(tenant=book.space).count() == 3
+
+    # The next day's estimate covers a different interval and remains useful.
+    price(book, "13", "2026-05-08", kind="reference")
+    following = holdings_summary(book.space, "2026-05-08")["items"][0]
+    assert D(following["estimate_value"]) == D("130")
+    assert following["estimate_date"] == "2026-05-08"
+
+
 def test_foreign_tag_and_member_ids_cannot_expose_another_workspace(book):
     other = Workspace.objects.create(name="机密空间")
     with tenant_context(other.pk):
