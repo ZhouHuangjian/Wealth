@@ -25,6 +25,8 @@ import { MediaAutomation } from './media-automation.js';
 import { bridgeConfig, createSender, isBridgeConfigured, isBridgeReceiveConfigured, secureEqual, validateEndpoint, type BridgeConfig } from './bridge.js';
 import { RemoteManagement, remoteSettingsSchema, remoteSettings, remoteConversation, wechatAddSchema, conversationPatchSchema, searchCommandSchema, patchCommandSchema } from './remote-management.js';
 import type { AppState, Conversation, Message, PublicState, Settings, ImageAttachment } from '../shared/types.js';
+import { contactAutoMediaEnabled, contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
+import { replyModelsSchema } from './contact-processing-schema.js';
 
 const text = z.string().trim().min(1).max(10000);
 const id = z.string().min(1).max(300);
@@ -39,7 +41,7 @@ const settingsSchema = z.object({
   apiKey: z.string().max(4096).optional(), allowRemoteModel: z.boolean().optional(),
   modelPreset:z.enum(['custom','qwen']).optional(), modelThinkingEnabled:z.boolean().optional(),
   autoRecognizeImages:z.boolean().optional(),autoTranscribeVoice:z.boolean().optional(),
-  replyModels:z.array(z.object({id:z.string().min(1).max(100),provider:z.enum(['demo','ollama','compatible','codex']),modelName:z.string().trim().max(200),modelPreset:z.enum(['custom','qwen']).optional(),label:z.string().trim().max(80).optional()}).strict()).max(4).refine(items=>new Set(items.map(item=>item.id)).size===items.length).optional(),
+  replyModels:replyModelsSchema.optional(),
   vision:z.object({provider:z.enum(['qwen','compatible','codex','disabled']),modelUrl:z.string().trim().max(2048),modelName:z.string().trim().max(200),apiKey:z.string().max(4096).optional(),useReplyApiKey:z.boolean(),allowRemoteModel:z.boolean(),thinkingEnabled:z.boolean().optional()}).strict().optional(),
   audio:z.object({provider:z.enum(['qwen','compatible','disabled']),modelUrl:z.string().trim().max(2048),modelName:z.string().trim().max(200),apiKey:z.string().max(4096).optional(),useReplyApiKey:z.boolean(),allowRemoteModel:z.boolean()}).strict().optional(),
   replyDelaySeconds: z.number().int().min(1).max(300).optional(),
@@ -90,7 +92,7 @@ export function createApplication(options: {
   const store = new Store(options.databasePath);
   const mediaFiles=new MediaFiles(options.databasePath);
   mediaFiles.prune(store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]));
-  const mediaRequests=new Map<string,{controller:AbortController;promise:Promise<void>}>();
+  const mediaRequests=new Map<string,{kind:'image'|'voice';controller:AbortController;promise:Promise<void>}>();
   if (options.seed !== false && newDatabase) seedDemo(store);
   const profileManifestPath = options.profileManifestPath === undefined ? resolve('private/learning/2026-10-10-v1/current-profile.json') : options.profileManifestPath;
   let learnedProfileError: string | null = null;
@@ -123,12 +125,13 @@ export function createApplication(options: {
     activeSends.set(conversation.id,key);
     try {return await rawSend(conversation,text,key,signal);} finally {activeSends.delete(conversation.id);}
   };
-  const generate = options.generate ?? ((state,cid,intent,signal)=>generateDrafts(state,cid,intent,signal,{onModelFailure:failure=>{
+  const generateModel = options.generate ?? ((state,cid,intent,signal)=>generateDrafts(state,cid,intent,signal,{onModelFailure:failure=>{
     store.update(s=>addActivity(s,'warning','部分模型未生成回复',`模型 ${failure.modelName||failure.provider} 未完成，其余候选仍可比较。`,cid));
   }}));
+  const generate:typeof generateDrafts = (state,cid,intent,signal) => generateModel({...state,settings:effectiveContactSettings(state.settings,state.conversations.find(c=>c.id===cid))},cid,intent,signal);
   const engine = new AutoReplyEngine(store, { send }, { generate, onDrafts:async cid=>{ await syncDrafts(cid,true); },mediaPending:cid=>{
-    const state=store.read();return state.messages.some(m=>m.conversationId===cid&&m.mediaStatus==='pending'
-      &&(m.autoMediaEligible||mediaRequests.has(m.id))&&(m.kind==='image'?state.settings.autoRecognizeImages:m.kind==='voice'&&state.settings.autoTranscribeVoice));
+    const state=store.read(),conversation=state.conversations.find(c=>c.id===cid);return state.messages.some(m=>m.conversationId===cid&&m.mediaStatus==='pending'
+      &&(m.autoMediaEligible||mediaRequests.has(m.id))&&(m.kind==='image'||m.kind==='voice')&&contactAutoMediaEnabled(conversation,m.kind));
   } });
   const session = randomBytes(32).toString('hex');
   const manualSending = new Set<string>();
@@ -339,7 +342,7 @@ export function createApplication(options: {
   const uploadSchema=z.object({dataUrl:z.string().min(1).max(Math.ceil(MAX_MEDIA_BYTES*4/3)+200),filename:z.string().max(255).optional()}).strict();
   const messageOf=(mid:string)=>{const m=store.read().messages.find(m=>m.id===mid);if(!m)throw Object.assign(new Error('消息不存在。'),{status:404});return m;};
   const mediaConfiguration=(s:Settings,kind:'image'|'voice')=>JSON.stringify([kind==='image'?s.vision:s.audio,s.apiKey,s.modelUrl]);
-  const cancelMedia=(mid?:string)=>{for(const [key,entry] of mediaRequests)if(!mid||mid===key)entry.controller.abort();};
+  const cancelMedia=(mid?:string,kind?:'image'|'voice')=>{for(const [key,entry] of mediaRequests)if((!mid||mid===key)&&(!kind||entry.kind===kind))entry.controller.abort();};
   const invalidateMediaContext=(cid:string)=>{engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});};
   async function readMessageMedia(mid:string,kind:'image'|'voice',signal?:AbortSignal,forceRead=false) {
     const message=messageOf(mid),attachment=kind==='image'?message.imageAttachment:message.audioAttachment;
@@ -379,7 +382,7 @@ export function createApplication(options: {
         addActivity(s,'success',kind==='image'?'图片已识别':'语音已转写','识别内容已加入当前对话，可生成回复草稿。',m.conversationId);
       });
     })();
-    mediaRequests.set(mid,{controller,promise:pending});
+    mediaRequests.set(mid,{kind,controller,promise:pending});
     try{await pending;}finally{if(mediaRequests.get(mid)?.controller===controller)mediaRequests.delete(mid);}
   }
   const mediaAutomation=new MediaAutomation(store,{
@@ -462,20 +465,26 @@ export function createApplication(options: {
     if(patch.allowRemoteModel===false && old.allowRemoteModel) next.autoReplyEnabled=false;
     if(next.provider!=='demo' && next.provider!=='codex' && next.modelUrl.trim()) validateEndpoint(next.modelUrl);
     for(const item of [next.vision,next.audio])if(item&&item.provider!=='disabled'&&item.provider!=='codex'&&item.modelUrl.trim())validateEndpoint(item.modelUrl);
-    if(next.autoRecognizeImages&&(!next.vision||next.vision.provider==='disabled'))throw new Error('请先配置图片识别模型，再开启自动识图。');
-    if(next.autoTranscribeVoice&&(!next.audio||next.audio.provider==='disabled'))throw new Error('请先配置语音模型，再开启自动转写。');
+    // Legacy global media flags are accepted for old clients, but only contact
+    // switches control automation and are validated when a contact enables them.
     if(next.syncDraftsEnabled && !isDraftSyncConfigured(syncConnection.config())) throw new Error('请先在设置中保存草稿同步配置。');
-    if(next.autoReplyEnabled) checkModelReady(next);
+    if(next.autoReplyEnabled) {
+      const active=store.read().conversations.filter(c=>c.autoReplyEnabled);
+      for(const conversation of active)checkModelReady(effectiveContactSettings(next,conversation));
+      if(!active.length)checkModelReady(next);
+    }
     if(next.autoReplyEnabled && next.autoReplyMode==='send' && store.read().conversations.some(c=>c.channel==='wechat'&&c.autoReplyEnabled)) throw new Error('微信采集通道仅支持自动草稿，请先关闭这些会话的自动处理或切回草稿模式。');
     if (next.quietHoursEnabled && next.quietStart === next.quietEnd) throw new Error('免打扰的开始和结束时间不能相同。');
     if (next.autoReplyMode === 'send' && next.autoReplyEnabled && store.read().conversations.some(c=>c.channel==='webhook' && c.autoReplyEnabled)) {
       if(!isBridgeConfigured(config)) throw new Error('当前桥接仅接收消息，尚未配置发送接口。');
-      if(next.provider==='demo') throw new Error('规则演示不能自动发送到外部会话，请关闭自动回复或选择真实模型。');
+      if(store.read().conversations.some(c=>c.channel==='webhook'&&c.autoReplyEnabled&&contactUsesDemo(next,c))) throw new Error('规则演示不能自动发送到外部会话，请关闭自动回复或选择真实模型。');
     }
+    if(next.autoReplyMode==='send'&&next.autoReplyEnabled&&store.read().conversations.some(c=>c.autoReplyEnabled&&(effectiveContactSettings(next,c).replyModels?.length??0)>1))throw new Error('部分联系人选择了多个回复模型，请使用草稿模式。');
     // Model or scheduling changes cancel pending work; newly arriving messages use the new settings.
     const needsCancel = Object.entries(patch).some(([key,value])=>key!=='autoReplyEnabled' && key!=='syncDraftsEnabled' && key!=='remoteManagementEnabled' && old[key as keyof Settings]!==value) || patch.autoReplyEnabled===false;
     if (needsCancel) {engine.pause(); suggestionRequests.clear();}
-    if(mediaConfiguration(next,'image')!==mediaConfiguration(old,'image')||mediaConfiguration(next,'voice')!==mediaConfiguration(old,'voice'))cancelMedia();
+    if(mediaConfiguration(next,'image')!==mediaConfiguration(old,'image'))cancelMedia(undefined,'image');
+    if(mediaConfiguration(next,'voice')!==mediaConfiguration(old,'voice'))cancelMedia(undefined,'voice');
     store.update(s=>{
       s.settings = next;
       if(needsCancel) s.drafts=[];
@@ -498,21 +507,38 @@ export function createApplication(options: {
   });
   const patchConversation = (cid:string,input:unknown) => {
     const body=conversationPatchSchema.parse(input);
-    const c=conversationOf(store.read(),cid);
+    const state=store.read(),c=conversationOf(state,cid),{processing,...information}=body;
+    const next:Conversation={...c,...information};
+    if(processing){
+      const {replyModels,...media}=processing;
+      next.processing={...c.processing,...media};
+      if(replyModels===null)delete next.processing.replyModels;
+      else if(replyModels!==undefined)next.processing.replyModels=replyModels;
+    }
+    const effective=effectiveContactSettings(state.settings,next);
+    if(processing?.autoRecognizeImages===true&&(!state.settings.vision||state.settings.vision.provider==='disabled'))throw new Error('请先配置图片识别模型，再为此联系人开启自动识图。');
+    if(processing?.autoTranscribeVoice===true&&(!state.settings.audio||state.settings.audio.provider==='disabled'))throw new Error('请先配置语音模型，再为此联系人开启自动转写。');
+    if(next.autoReplyEnabled&&(body.autoReplyEnabled!==undefined||processing?.replyModels!==undefined))checkModelReady(effective);
+    if(next.autoReplyEnabled&&(effective.replyModels?.length??0)>1&&state.settings.autoReplyMode==='send')throw new Error('此联系人选择了多个回复模型，请使用草稿模式。');
     if(body.autoReplyEnabled && c.channel==='wechat') {
-      if(store.read().settings.autoReplyMode!=='draft') throw new Error('微信采集通道只支持自动草稿，请先切换为草稿模式。');
-      checkModelReady(store.read().settings);
+      if(state.settings.autoReplyMode!=='draft') throw new Error('微信采集通道只支持自动草稿，请先切换为草稿模式。');
     }
     if(body.autoReplyEnabled && c.channel==='webhook') {
       if(!isBridgeReceiveConfigured(config)) throw new Error('消息接收接口尚未配置。');
-      if(store.read().settings.autoReplyMode==='send') {
+      if(state.settings.autoReplyMode==='send') {
         if(!isBridgeConfigured(config)) throw new Error('当前桥接仅接收消息，尚未配置发送接口。');
-        if(store.read().settings.provider==='demo') throw new Error('外部自动回复需要真实模型；规则演示只能用于本机演练。');
+        if(contactUsesDemo(state.settings,next)) throw new Error('外部自动回复需要真实模型；规则演示只能用于本机演练。');
       }
-      checkModelReady(store.read().settings);
     }
     engine.conversationChanged(cid); suggestionRequests.delete(cid);
-    store.update(s=>{Object.assign(conversationOf(s,cid),body);s.drafts=s.drafts.filter(d=>d.conversationId!==cid);addActivity(s,'info','对话设置已更新',body.autoReplyEnabled===true?'此联系人已加入自动处理范围。':body.autoReplyEnabled===false?'此联系人已暂停自动处理。':'已保存对话信息。',cid);});
+    store.update(s=>{
+      Object.assign(conversationOf(s,cid),next);
+      for(const message of s.messages.filter(m=>m.conversationId===cid&&(m.kind==='image'||m.kind==='voice'))) {
+        if(!contactAutoMediaEnabled(next,message.kind as 'image'|'voice'))message.autoMediaEligible=false;
+      }
+      s.drafts=s.drafts.filter(d=>d.conversationId!==cid);addActivity(s,'info','对话设置已更新',body.autoReplyEnabled===true?'此联系人已加入自动处理范围。':body.autoReplyEnabled===false?'此联系人已暂停自动处理。':'已保存对话信息。',cid);
+    });
+    mediaAutomation.invalidate(cid);
     return conversationOf(store.read(),cid);
   };
   app.patch('/api/conversations/:id',(req,res)=>res.json(patchConversation(param(req),req.body)));
@@ -540,7 +566,7 @@ export function createApplication(options: {
 
   app.post('/api/conversations/:id/suggest', async (req,res)=>{
     const {intent}=z.object({intent:z.string().trim().max(2000).default('')}).parse(req.body??{});
-    const cid=param(req); const before=store.read(); conversationOf(before,cid); checkModelReady(before.settings);
+    const cid=param(req); const before=store.read(); const conversation=conversationOf(before,cid); checkModelReady(effectiveContactSettings(before.settings,conversation));
     assertReplyContextReady(before,cid);
     const latest=before.messages.filter(m=>m.conversationId===cid).at(-1);
     if(!latest) throw new Error('先添加一条对话消息，再生成建议。');

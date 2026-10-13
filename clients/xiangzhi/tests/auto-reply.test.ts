@@ -29,6 +29,21 @@ function deferred<T>() {
   return {promise, resolve};
 }
 
+test('automatic sending checks the contact model list rather than another contact or global defaults', async () => {
+  const store=new MemoryStore();let sends=0,generates=0;
+  store.update(s=>{
+    s.settings.replyModels=[{id:'global-a',provider:'demo',modelName:''},{id:'global-b',provider:'demo',modelName:''}];
+    s.conversations[0].processing={replyModels:[]};
+    s.conversations[1].processing={replyModels:[{id:'b-a',provider:'demo',modelName:''},{id:'b-b',provider:'demo',modelName:''}]};
+  });
+  add(store,'a-message','peer','manual','a');add(store,'b-message','peer','manual','b');
+  const engine=new AutoReplyEngine(store,{send:async()=>{sends++;}},{generate:async(s,cid)=>{generates++;assert.deepEqual(s.settings.replyModels,[]);return generate(s,cid);}});
+  engine.enqueue('a','a-message');engine.enqueue('b','b-message');await engine.tick();
+  assert.equal(sends,1);assert.equal(generates,1);
+  assert.equal(store.read().jobs.find(j=>j.conversationId==='a')?.status,'sent');
+  assert.equal(store.read().jobs.find(j=>j.conversationId==='b')?.status,'blocked');
+});
+
 test('global switch, contact whitelist and historical imports never enter sending', async () => {
   for (const mode of ['global', 'contact', 'import', 'self'] as const) {
     const store = new MemoryStore(); let sends = 0;

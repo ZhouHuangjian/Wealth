@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AppState, Conversation, Message } from '../shared/types.js';
+import { contactAutoMediaEnabled } from '../shared/contact-processing.js';
 import { queryWechat, type WechatQuery, type WechatRecord } from './wechat-cli.js';
 
 interface StateStore { read(): AppState; update(fn: (state: AppState) => void): unknown }
@@ -155,8 +156,8 @@ export class WechatCollector {
             sequence:0,source:'wechat',externalId:record.id,aiAssisted:false,kind:record.kind,mediaStatus:record.mediaStatus,
             sourceSequence:record.sortSeq,sourceFingerprint:hash,wechatImage:record.wechatImage,
             autoMediaEligible: !historyOnly && record.role === 'peer'
-              && ((record.kind === 'image' && state.settings.autoRecognizeImages)
-                || (record.kind === 'voice' && state.settings.autoTranscribeVoice))};
+              && ((record.kind === 'image' && contactAutoMediaEnabled(target, 'image'))
+                || (record.kind === 'voice' && contactAutoMediaEnabled(target, 'voice')))};
           list.push(message); byId.set(record.id,message); newIds.add(message.id); added++; changed = true;
         }
         // Uploaded context stays near its timestamp instead of moving ahead of

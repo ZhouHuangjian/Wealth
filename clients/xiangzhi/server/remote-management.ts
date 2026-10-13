@@ -4,6 +4,7 @@ import type { Conversation, Settings } from '../shared/types.js';
 import { draftConnectionCheckUrl } from './draft-sync-check.js';
 import type { DraftSyncConfig } from './draft-sync.js';
 import type { Store } from './store.js';
+import { contactProcessingPatchSchema } from './contact-processing-schema.js';
 
 const time = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const remoteSettingsSchema = z.object({
@@ -13,7 +14,8 @@ export const remoteSettingsSchema = z.object({
   quietStart:time.optional(),quietEnd:time.optional(),autoReplyEnabled:z.boolean().optional(),syncDraftsEnabled:z.boolean().optional(),
 }).strict().refine(value=>Object.keys(value).length>0);
 export const wechatAddSchema = z.object({name:z.string().trim().min(1).max(80),externalId:z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_@.-]{0,199}$/)}).strict();
-export const conversationPatchSchema = z.object({name:z.string().trim().min(1).max(80).optional(),note:z.string().max(2000).optional(),autoReplyEnabled:z.boolean().optional()}).strict();
+const remoteConversationPatchSchema = z.object({name:z.string().trim().min(1).max(80).optional(),note:z.string().max(2000).optional(),autoReplyEnabled:z.boolean().optional()}).strict();
+export const conversationPatchSchema = remoteConversationPatchSchema.extend({processing:contactProcessingPatchSchema.optional()}).strict();
 const commandSchema = z.object({id:z.uuid(),type:z.enum(['settings.patch','contacts.search','conversation.add','conversation.patch']),payload:z.record(z.string(),z.unknown()),expires_at:z.iso.datetime({offset:true})});
 export type RemoteCommand = z.infer<typeof commandSchema>;
 export const remoteConversation = (c:Conversation) => ({id:c.id,externalId:c.externalId!,name:c.name,note:c.note,autoReplyEnabled:c.autoReplyEnabled,enabled:!!c.wechat?.enabled});
@@ -23,7 +25,7 @@ export function remoteSettings(s:Settings) {
     autoReplyEnabled:s.autoReplyEnabled,syncDraftsEnabled:!!s.syncDraftsEnabled};
 }
 export const searchCommandSchema = z.object({query:z.string().trim().min(1).max(100),limit:z.number().int().min(1).max(30).default(20)}).strict();
-export const patchCommandSchema = conversationPatchSchema.extend({id:z.uuid(),enabled:z.boolean().optional()}).strict()
+export const patchCommandSchema = remoteConversationPatchSchema.extend({id:z.uuid(),enabled:z.boolean().optional()}).strict()
   .refine(value=>Object.keys(value).length>1);
 
 type Options = {

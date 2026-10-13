@@ -39,10 +39,25 @@ async function fixture(script: string, run: (root: string, data: string) => Prom
 test('image resolver accepts scoped metadata and rejects traversal, wrong contacts, and unexpected file names', () => {
   const row = {media_type: 'image', md5, dir1: contactHash, dir2: '2026-10', file_name: md5 + '.dat'};
   assert.deepEqual(parseWechatImagePaths(JSON.stringify([row]), 'filehelper', md5), [join('msg/attach', contactHash, '2026-10/Img', md5 + '.dat')]);
+  assert.deepEqual(parseWechatImagePaths(JSON.stringify([{...row, file_name: md5 + '_M.dat'}]), 'filehelper', md5),
+    [join('msg/attach', contactHash, '2026-10/Img', md5 + '_M.dat')]);
   for (const change of [{dir1: '../elsewhere'}, {dir1: 'f'.repeat(32)}, {dir2: '2026-99'}, {dir2: '/private'},
-    {file_name: '../key.dat'}, {file_name: '/private/key.dat'}, {md5: 'b'.repeat(32)}, {media_type: 'video'}]) {
+    {file_name: '../key.dat'}, {file_name: '/private/key.dat'}, {file_name: md5 + '_unknown.dat'}, {md5: 'b'.repeat(32)}, {media_type: 'video'}]) {
     assert.throws(() => parseWechatImagePaths(JSON.stringify([{...row, ...change}]), 'filehelper', md5), /标识|账号/);
   }
+});
+
+test('Mac _M.dat images remain readable when the stale hardlink index has no entry', async () => {
+  await fixture(`if(args[1]==='resolve-path')process.exit(1);if(args[1]!=='decrypt-dat'||args.includes('--account'))process.exit(2);fs.writeFileSync(args[args.indexOf('--output')+1],Buffer.from(${JSON.stringify(png.toString('base64'))},'base64'));`, async (root, data) => {
+    const img = join(data, name, 'msg/attach', contactHash, '2026-10/Img');
+    await writeFile(join(img, md5 + '_M.dat'), 'synthetic downloaded Mac image');
+    await writeFile(join(img, md5 + '_t.dat'), 'synthetic thumbnail');
+    const result = await readWechatImage(input);
+    assert.equal(result.mimeType, 'image/png'); assert.deepEqual(result.bytes, png);
+    const calls = (await readFile(join(root, 'calls'), 'utf8')).trim().split('\n').map(row => JSON.parse(row) as string[]);
+    const decode = calls.filter(args => args[1] === 'decrypt-dat');
+    assert.equal(decode.length, 1); assert.ok(decode[0][2].endsWith(md5 + '_M.dat'));
+  });
 });
 
 test('stale hardlink cache falls back to one original image and V2 derivation omits the account override', async () => {

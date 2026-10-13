@@ -25,6 +25,12 @@ export interface AudioRecognition {
 export interface ReplyModelChoice {
   id: string; provider: Provider; modelName: string; modelPreset?: 'custom' | 'qwen'; label?: string;
 }
+export interface ContactProcessing {
+  /** Missing inherits global choices; an empty list uses the global primary model. */
+  replyModels?: ReplyModelChoice[];
+  autoRecognizeImages?: boolean;
+  autoTranscribeVoice?: boolean;
+}
 export interface Settings {
   autoReplyEnabled: boolean;
   autoReplyMode: AutoReplyMode;
@@ -52,6 +58,7 @@ export interface Conversation {
   id: string; name: string; avatar: string; color: string;
   note: string; autoReplyEnabled: boolean; channel: 'simulator' | 'webhook' | 'wechat';
   externalId: string | null; createdAt: string; updatedAt: string;
+  processing?: ContactProcessing;
   wechat?: {
     enabled: boolean; initialized: boolean; cursor: string | null; accountFingerprint: string | null;
     lastCheckedAt: string | null; status: 'paused' | 'reading' | 'ready' | 'error'; detail: string;

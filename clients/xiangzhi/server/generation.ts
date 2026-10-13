@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AppState, Draft, Message, Provider, Settings } from '../shared/types.js';
+import { effectiveContactSettings } from '../shared/contact-processing.js';
 import { KNOWLEDGE } from './knowledge.js';
 import { codexCompletion } from './codex-provider.js';
 import { assertReplyContextReady, recentConversationMessages } from './message-context.js';
@@ -90,6 +91,7 @@ function parseReplies(content: string): {text: string; label: string; reason: st
 }
 
 export async function generateDrafts(state: AppState, conversationId: string, intent = '', signal?: AbortSignal, dependencies: GenerationDependencies = {}): Promise<Draft[]> {
+  state = {...state, settings: effectiveContactSettings(state.settings, state.conversations.find(c => c.id === conversationId))};
   const choices = state.settings.replyModels;
   if (!choices?.length) return generateDraftsSingle({...state, settings: {...state.settings}}, conversationId, intent, signal, dependencies);
   if (choices.length > 4 || new Set(choices.map(choice => choice.id)).size !== choices.length

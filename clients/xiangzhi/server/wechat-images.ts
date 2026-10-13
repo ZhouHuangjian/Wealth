@@ -16,6 +16,9 @@ const MAX_SOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_DATABASE_BYTES = 256 * 1024 * 1024;
 const contactPattern = /^(?!-)[A-Za-z0-9_@.-]{1,200}$/;
 const md5Pattern = /^[a-f0-9]{32}$/;
+// macOS also keeps downloaded images as <md5>_M.dat. Keep this allowlist
+// explicit so supporting that variant does not permit arbitrary file names.
+const imageSuffixes = ['_h.dat', '.dat', '_hd.dat', '_M.dat', '_t.dat'] as const;
 const within = (root: string, path: string) => {const part = relative(root, path); return part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part);};
 
 async function safePath(path: string, root: string, file: boolean, maximum = MAX_SOURCE_BYTES): Promise<string> {
@@ -91,7 +94,7 @@ export function parseWechatImagePaths(stdout: string, contact: string, md5: stri
       const row = raw as Record<string, unknown>;
       if (row.media_type !== 'image' || row.md5 !== md5 || row.dir1 !== directory
         || typeof row.dir2 !== 'string' || !/^20[0-9]{2}-(?:0[1-9]|1[0-2])$/.test(row.dir2)
-        || typeof row.file_name !== 'string' || !new RegExp(`^${md5}(?:_h|_hd|_t)?\\.dat$`).test(row.file_name)) throw new Error();
+        || typeof row.file_name !== 'string' || !imageSuffixes.some(suffix => row.file_name === md5 + suffix)) throw new Error();
       return join('msg', 'attach', directory, row.dir2, 'Img', row.file_name);
     });
   } catch {throw new Error(INVALID);}
@@ -144,7 +147,7 @@ async function readImage(input: WechatMediaInput, signal?: AbortSignal): Promise
       const month = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + offset, 1));
       months.add(month.toISOString().slice(0, 7));
     }
-    for (const month of months) for (const suffix of ['_h.dat', '.dat', '_hd.dat', '_t.dat']) {
+    for (const month of months) for (const suffix of imageSuffixes) {
       candidates.push(join('msg', 'attach', createHash('md5').update(input.contact).digest('hex'), month, 'Img', md5 + suffix));
     }
   }

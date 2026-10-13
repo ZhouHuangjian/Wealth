@@ -35,6 +35,23 @@ function feedback(overrides: Partial<DraftFeedback> = {}): DraftFeedback {
     createdAt: '2026-10-10T01:00:00Z', profileVersion: '1.8', ...overrides};
 }
 
+test('contacts choose independent comparison models, inherit defaults or use just the primary', async t => {
+  const state=fixture(),models:string[]=[];
+  state.messages.push(message('peer-b','b','peer','你好',1));
+  state.settings.replyModels=[{id:'default',provider:'compatible',modelName:'default-model'}];
+  state.conversations[0].processing={replyModels:[
+    {id:'a-fast',provider:'compatible',modelName:'a-fast-model'},
+    {id:'a-detail',provider:'compatible',modelName:'a-detail-model'},
+  ]};
+  t.mock.method(globalThis,'fetch',async(_url:URL,init:RequestInit)=>{models.push(JSON.parse(init.body as string).model);return response();});
+  const a=await generateDrafts(state,'a');assert.equal(a.length,6);assert.deepEqual(models,['a-fast-model','a-detail-model']);
+  assert.deepEqual(new Set(a.map(d=>d.modelChoiceId)),new Set(['a-fast','a-detail']));
+  models.length=0;const b=await generateDrafts(state,'b');assert.equal(b.length,3);assert.deepEqual(models,['default-model']);
+  state.conversations[0].processing.replyModels=[];models.length=0;
+  const primary=await generateDrafts(state,'a');assert.equal(primary.length,3);assert.deepEqual(models,['test-model']);
+  assert.equal(primary[0].modelChoiceId,undefined);assert.equal(state.settings.replyModels[0].modelName,'default-model');
+});
+
 test('generation isolates conversation context, approved self claims and non-AI style samples', async t => {
   const state = fixture();
   state.messages.push(message('other', 'b', 'self', '其他联系人秘密原文', 3), message('peer-other', 'b', 'peer', '别人的私密原文', 4),

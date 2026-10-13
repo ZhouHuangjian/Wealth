@@ -88,23 +88,118 @@ test('automatic media switches are independent and process only eligible live me
   const h=await harness();
   try{
     h.store.update(s=>{
-      s.settings.autoRecognizeImages=true;s.settings.autoTranscribeVoice=false;
-      const c=s.conversations.find(x=>x.id===h.cid)!;c.channel='wechat';c.externalId='filehelper';c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};
+      const c=s.conversations.find(x=>x.id===h.cid)!;c.processing={autoRecognizeImages:true,autoTranscribeVoice:false};c.channel='wechat';c.externalId='filehelper';c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};
       s.messages.push(...(['old-image','new-image','new-voice'] as const).map((id,i)=>({id,conversationId:h.cid,role:'peer' as const,text:'媒体',sequence:i+1,sentAt:null,source:'wechat' as const,externalId:String(i+1),aiAssisted:false,kind:id==='new-voice'?'voice' as const:'image' as const,mediaStatus:'pending' as const,autoMediaEligible:id!=='old-image'})));
     });
     await h.mediaAutomation.tick();assert.equal(h.calls.image,1);assert.equal(h.calls.voice,0);
     assert.equal(h.store.read().messages.find(x=>x.id==='old-image')?.imageRecognition,undefined);
     await h.mediaAutomation.tick();assert.equal(h.calls.image,1);
-    h.store.update(s=>{s.settings.autoTranscribeVoice=true;});await h.mediaAutomation.tick();assert.equal(h.calls.voice,1);
+    h.store.update(s=>{s.conversations.find(c=>c.id===h.cid)!.processing!.autoTranscribeVoice=true;});await h.mediaAutomation.tick();assert.equal(h.calls.voice,1);
     assert.equal(h.store.read().messages.find(x=>x.id==='new-voice')?.audioRecognition?.text,'测试语音');assert.equal(h.calls.send,0);
   }finally{await h.close();}
+});
+
+test('contact media permissions isolate A from B and ignore old global automatic switches',async()=>{
+  const h=await harness();
+  try{
+    const other=await(await h.request('/conversations','POST',{name:'B'})).json();
+    h.store.update(s=>{
+      s.settings.autoRecognizeImages=true;s.settings.autoTranscribeVoice=true;
+      for(const c of s.conversations){c.channel='wechat';c.externalId=c.id;c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};}
+      s.conversations.find(c=>c.id===h.cid)!.processing={autoRecognizeImages:true};
+      for(const cid of [h.cid,other.id])for(const kind of ['image','voice'] as const)s.messages.push({
+        id:`${cid}-${kind}`,conversationId:cid,role:'peer',text:'媒体',sequence:s.messages.length+1,sentAt:null,
+        source:'wechat',externalId:String(s.messages.length+1),aiAssisted:false,kind,mediaStatus:'pending',autoMediaEligible:true,
+      });
+    });
+    await h.mediaAutomation.tick();await h.mediaAutomation.tick();
+    assert.equal(h.calls.image,1);assert.equal(h.calls.voice,0);
+    assert.ok(h.store.read().messages.find(m=>m.id===`${h.cid}-image`)?.imageRecognition);
+    assert.ok(h.store.read().messages.filter(m=>m.conversationId===other.id).every(m=>!m.imageRecognition&&!m.audioRecognition));
+  }finally{await h.close();}
+});
+
+test('contact processing updates merge, reset inherited choices, reject secrets and preserve other contacts',async()=>{
+  const h=await harness();
+  try{
+    const other=await(await h.request('/conversations','POST',{name:'B'})).json();
+    const choice={id:'a-model',provider:'demo',modelName:''};
+    assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{processing:{replyModels:[choice],autoTranscribeVoice:false}})).status,200);
+    assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{processing:{autoRecognizeImages:false}})).status,200);
+    const current=h.store.read().conversations.find(c=>c.id===h.cid)!;
+    assert.deepEqual(current.processing,{replyModels:[choice],autoTranscribeVoice:false,autoRecognizeImages:false});
+    assert.equal(h.store.read().conversations.find(c=>c.id===other.id)!.processing,undefined);
+    assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{processing:{replyModels:null}})).status,200);
+    assert.equal(h.store.read().conversations.find(c=>c.id===h.cid)!.processing!.replyModels,undefined);
+    for(const invalid of [{apiKey:'not-allowed'},{autoRecognizeImages:'true'},{replyModels:[choice,choice]},
+      {replyModels:[{...choice,id:'bad id'}]},{replyModels:Array.from({length:5},(_,i)=>({...choice,id:`m${i}`}))}]) {
+      assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{processing:invalid})).status,400);
+    }
+    assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{processing:{autoRecognizeImages:true}})).status,400);
+  }finally{await h.close();}
+});
+
+test('deprecated global media flags do not prevent disabling media providers',async()=>{
+  const h=await harness();
+  try{
+    h.store.update(s=>{s.settings.autoRecognizeImages=true;s.settings.autoTranscribeVoice=true;});
+    const disabled={provider:'disabled',modelUrl:'',modelName:'',useReplyApiKey:false,allowRemoteModel:false};
+    assert.equal((await h.request('/settings','PATCH',{vision:disabled,audio:disabled})).status,200);
+    assert.equal(h.store.read().settings.vision?.provider,'disabled');assert.equal(h.store.read().settings.audio?.provider,'disabled');
+  }finally{await h.close();}
+});
+
+test('changing voice configuration preserves an independent in-flight image recognition',async()=>{
+  let entered!:()=>void,release!:()=>void;const ready=new Promise<void>(r=>entered=r),hold=new Promise<void>(r=>release=r);
+  let imageSignal:AbortSignal|undefined;
+  const h=await harness({recognizeImage:async(_settings,_file,signal)=>{imageSignal=signal;entered();await hold;return observation;}});
+  try{
+    const message=await(await h.request(`/conversations/${h.cid}/images`,'POST',upload)).json();
+    const pending=h.request(`/messages/${message.id}/recognize-image`,'POST',{});await ready;
+    assert.equal((await h.request('/settings','PATCH',{audio:{provider:'disabled',modelUrl:'',modelName:'changed-voice-model',useReplyApiKey:false,allowRemoteModel:false}})).status,200);
+    assert.equal(imageSignal!.aborted,false);release();assert.equal((await pending).status,200);
+    assert.deepEqual(h.store.read().messages.find(m=>m.id===message.id)?.imageRecognition,observation);
+  }finally{release();await h.close();}
+});
+
+test('global automatic draft enable validates only the selected models for active contacts',async()=>{
+  const h=await harness();
+  try{
+    h.store.update(s=>{s.settings.replyModels=[{id:'unused',provider:'compatible',modelName:'unused-model'}];s.settings.modelUrl='';});
+    assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{autoReplyEnabled:true,processing:{replyModels:[{id:'chosen',provider:'demo',modelName:''}]}})).status,200);
+    assert.equal((await h.request('/settings','PATCH',{autoReplyEnabled:true})).status,200);
+    assert.equal(h.store.read().settings.autoReplyEnabled,true);
+    assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{processing:{replyModels:null}})).status,400);
+  }finally{await h.close();}
+});
+
+test('disabling only A during local extraction cancels its upload while B settings leave it running',async()=>{
+  let entered!:()=>void,release!:()=>void;const ready=new Promise<void>(r=>entered=r),hold=new Promise<void>(r=>release=r);
+  let extractionSignal:AbortSignal|undefined;
+  const h=await harness({readWechatImage:async(_input,signal)=>{extractionSignal=signal;entered();await hold;return{bytes:png,mimeType:'image/png',filename:'wechat.png'};}});
+  try{
+    const other=await(await h.request('/conversations','POST',{name:'B'})).json();
+    h.store.update(s=>{
+      const c=s.conversations.find(c=>c.id===h.cid)!;c.processing={autoRecognizeImages:true};c.channel='wechat';c.externalId='filehelper';
+      c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};
+      s.messages.push({id:'extracting-a',conversationId:h.cid,role:'peer',text:'图片',sequence:1,sentAt:null,source:'wechat',externalId:'1',aiAssisted:false,kind:'image',mediaStatus:'pending',autoMediaEligible:true});
+    });
+    const pending=h.mediaAutomation.tick();await ready;
+    assert.equal((await h.request(`/conversations/${other.id}`,'PATCH',{processing:{autoRecognizeImages:false}})).status,200);
+    assert.equal(extractionSignal!.aborted,false);
+    assert.equal((await h.request(`/conversations/${h.cid}`,'PATCH',{processing:{autoRecognizeImages:false}})).status,200);
+    assert.equal(extractionSignal!.aborted,true);
+    release();await pending;
+    assert.equal(h.calls.image,0);assert.equal(h.store.read().messages.find(m=>m.id==='extracting-a')?.imageAttachment,undefined);
+    assert.equal(h.store.read().messages.find(m=>m.id==='extracting-a')?.imageRecognition,undefined);
+  }finally{release();await h.close();}
 });
 test('automatic image completion regenerates the queued draft with its recognized context',async()=>{
   const h=await harness();
   try{
     h.store.update(s=>{
-      s.settings.autoReplyEnabled=true;s.settings.replyDelaySeconds=0;s.settings.autoRecognizeImages=true;
-      const c=s.conversations.find(x=>x.id===h.cid)!;c.autoReplyEnabled=true;c.channel='wechat';c.externalId='filehelper';c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};
+      s.settings.autoReplyEnabled=true;s.settings.replyDelaySeconds=0;
+      const c=s.conversations.find(x=>x.id===h.cid)!;c.processing={autoRecognizeImages:true};c.autoReplyEnabled=true;c.channel='wechat';c.externalId='filehelper';c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};
       s.messages.push({id:'live-image',conversationId:h.cid,role:'peer',text:'[图片，待人工查看]',sequence:1,sentAt:null,source:'wechat',externalId:'1',aiAssisted:false,kind:'image',mediaStatus:'pending',autoMediaEligible:true});
     });
     h.engine.enqueue(h.cid,'live-image');await h.engine.tick();assert.equal(h.store.read().drafts.length,0);
@@ -127,9 +222,9 @@ for(const action of ['switch','collection'] as const)test(`${action} pause cance
   let entered!:()=>void,release!:()=>void;const ready=new Promise<void>(r=>entered=r),hold=new Promise<void>(r=>release=r);
   const h=await harness({recognizeImage:async()=>{entered();await hold;return observation;}});
   try{
-    h.store.update(s=>{s.settings.autoRecognizeImages=true;const c=s.conversations.find(x=>x.id===h.cid)!;c.channel='wechat';c.externalId='filehelper';c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};s.messages.push({id:'cancel-image',conversationId:h.cid,role:'peer',text:'图片',sequence:1,sentAt:null,source:'wechat',externalId:'1',aiAssisted:false,kind:'image',mediaStatus:'pending',autoMediaEligible:true});});
+    h.store.update(s=>{const c=s.conversations.find(x=>x.id===h.cid)!;c.processing={autoRecognizeImages:true};c.channel='wechat';c.externalId='filehelper';c.wechat={enabled:true,initialized:true,cursor:'1',accountFingerprint:'account',lastCheckedAt:null,status:'ready',detail:''};s.messages.push({id:'cancel-image',conversationId:h.cid,role:'peer',text:'图片',sequence:1,sentAt:null,source:'wechat',externalId:'1',aiAssisted:false,kind:'image',mediaStatus:'pending',autoMediaEligible:true});});
     const pending=h.mediaAutomation.tick();await ready;
-    const response=action==='switch'?await h.request('/settings','PATCH',{autoRecognizeImages:false}):await h.request(`/conversations/${h.cid}/wechat`,'PATCH',{enabled:false});
+    const response=action==='switch'?await h.request(`/conversations/${h.cid}`,'PATCH',{processing:{autoRecognizeImages:false}}):await h.request(`/conversations/${h.cid}/wechat`,'PATCH',{enabled:false});
     assert.equal(response.status,200);release();await pending;
     assert.equal(h.store.read().messages.find(x=>x.id==='cancel-image')?.imageRecognition,undefined);assert.equal(h.calls.send,0);
   }finally{release();await h.close();}

@@ -302,7 +302,7 @@ test('a changed voice source invalidates its decoded audio and transcription', a
 test('only new live peer media arriving with its switch enabled becomes eligible for automatic recognition', async t => {
   let rows = [record(100, {kind: 'image', text: '[图片]', mediaStatus: 'pending'})];
   const {store, collector} = setup(t, async () => page(rows), {enabled: true});
-  store.update(state => {state.settings.autoRecognizeImages = true; state.settings.autoTranscribeVoice = true;});
+  store.update(state => {state.conversations[0].processing={autoRecognizeImages:true,autoTranscribeVoice:true};});
   await collector.poll('wechat-test');
   assert.equal(store.read().messages[0].autoMediaEligible, false);
   rows.push(record(101, {kind: 'image', text: '[图片]', mediaStatus: 'pending'}), record(102, {kind: 'voice', text: '[语音]', mediaStatus: 'pending'}), record(103));
@@ -310,12 +310,29 @@ test('only new live peer media arriving with its switch enabled becomes eligible
   assert.equal(store.read().messages[1].autoMediaEligible, true);
   assert.equal(store.read().messages[2].autoMediaEligible, true);
   assert.equal(store.read().messages[3].autoMediaEligible, false);
-  store.update(state => {state.settings.autoRecognizeImages = false;});
+  store.update(state => {state.conversations[0].processing!.autoRecognizeImages = false;});
   rows.push(record(104, {kind: 'image', text: '[图片]', mediaStatus: 'pending'}), record(105, {kind: 'voice', role: 'self', text: '[语音]', mediaStatus: 'pending'}));
   await collector.poll('wechat-test');
   assert.equal(store.read().messages[4].autoMediaEligible, false); assert.equal(store.read().messages[5].autoMediaEligible, false);
-  store.update(state => {state.settings.autoRecognizeImages = true;}); await collector.poll('wechat-test');
+  store.update(state => {state.conversations[0].processing!.autoRecognizeImages = true;}); await collector.poll('wechat-test');
   assert.equal(store.read().messages[4].autoMediaEligible, false);
+});
+
+test('new media eligibility follows only its own contact switches, even when global switches are on', async t => {
+  let rows=[record(100)];
+  const {store,collector}=setup(t,async()=>page(rows),{enabled:true});
+  store.update(s=>{
+    s.settings.autoRecognizeImages=true;s.settings.autoTranscribeVoice=true;
+    s.conversations[0].processing={autoRecognizeImages:true,autoTranscribeVoice:false};
+    s.conversations.push({...conversation({enabled:true}),id:'wechat-b',externalId:'peer-b'});
+  });
+  await collector.poll('wechat-test');await collector.poll('wechat-b');
+  rows.push(record(101,{kind:'image',text:'[图片]',mediaStatus:'pending'}),record(102,{kind:'voice',text:'[语音]',mediaStatus:'pending'}));
+  await collector.poll('wechat-test');await collector.poll('wechat-b');
+  const state=store.read();
+  assert.equal(state.messages.find(m=>m.conversationId==='wechat-test'&&m.kind==='image')?.autoMediaEligible,true);
+  assert.equal(state.messages.find(m=>m.conversationId==='wechat-test'&&m.kind==='voice')?.autoMediaEligible,false);
+  assert.ok(state.messages.filter(m=>m.conversationId==='wechat-b').every(m=>m.autoMediaEligible===false));
 });
 
 test('manually uploaded image context keeps its chronological place when new WeChat messages arrive', async t => {
