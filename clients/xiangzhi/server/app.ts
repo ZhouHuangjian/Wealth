@@ -27,6 +27,7 @@ import { RemoteManagement, remoteSettingsSchema, remoteSettings, remoteConversat
 import type { AppState, Conversation, Message, PublicState, Settings, ImageAttachment } from '../shared/types.js';
 import { contactAutoMediaEnabled, contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
 import { replyModelsSchema } from './contact-processing-schema.js';
+import { findImageRecognition, imageRecognitionIdentity, imageSha256, saveImageRecognition } from './image-recognition-cache.js';
 
 const text = z.string().trim().min(1).max(10000);
 const id = z.string().min(1).max(300);
@@ -92,7 +93,8 @@ export function createApplication(options: {
   const store = new Store(options.databasePath);
   const mediaFiles=new MediaFiles(options.databasePath);
   mediaFiles.prune(store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]));
-  const mediaRequests=new Map<string,{kind:'image'|'voice';controller:AbortController;promise:Promise<void>}>();
+  const mediaRequests=new Map<string,{kind:'image'|'voice';controller:AbortController;promise:Promise<{cached:boolean}>}>();
+  const imageModelRequests=new Set<string>();
   if (options.seed !== false && newDatabase) seedDemo(store);
   const profileManifestPath = options.profileManifestPath === undefined ? resolve('private/learning/2026-10-10-v1/current-profile.json') : options.profileManifestPath;
   let learnedProfileError: string | null = null;
@@ -231,10 +233,11 @@ export function createApplication(options: {
   });
   const publicState = (): PublicState => {
     const s = store.read();
+    const {imageTestRecognitionHistory:_testHistory,messages,...state}=s;
     const { apiKey, vision, audio, ...settings } = s.settings;
     const publicVision=vision?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(vision):undefined;
     const publicAudio=audio?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(audio):undefined;
-    return { ...s, settings:{...settings,hasApiKey:!!apiKey,...(publicVision?{vision:publicVision}:{}),...(publicAudio?{audio:publicAudio}:{})}, knowledge:KNOWLEDGE,
+    return { ...state, messages:messages.map(({imageRecognitionHistory:_history,...message})=>message), settings:{...settings,hasApiKey:!!apiKey,...(publicVision?{vision:publicVision}:{}),...(publicAudio?{audio:publicAudio}:{})}, knowledge:KNOWLEDGE,
       runtime: { channel:isBridgeReceiveConfigured(config)?'webhook':'simulator',bridgeConfigured:isBridgeConfigured(config),bridgeReceiveConfigured:isBridgeReceiveConfigured(config),bridgeSendConfigured:isBridgeConfigured(config),learnedProfileError,
         codexAvailable:codexStatus.available,codexVersion:codexStatus.version,codexStatus:codexStatus.message,
         draftSyncConfigured:isDraftSyncConfigured(syncConnection.config()),draftInboxConfigured:isDraftInboxConfigured(syncConnection.config()),draftSyncConnection:syncConnection.status(),remoteManagement:remote.status(),
@@ -341,6 +344,8 @@ export function createApplication(options: {
   });
   const uploadSchema=z.object({dataUrl:z.string().min(1).max(Math.ceil(MAX_MEDIA_BYTES*4/3)+200),filename:z.string().max(255).optional()}).strict();
   const messageOf=(mid:string)=>{const m=store.read().messages.find(m=>m.id===mid);if(!m)throw Object.assign(new Error('消息不存在。'),{status:404});return m;};
+  const cachedImageRecognition=(state:AppState,identity:ReturnType<typeof imageRecognitionIdentity>)=>
+    findImageRecognition(state.imageTestRecognitionHistory,identity)??state.messages.reduce<Message['imageRecognition']>((found,message)=>found??findImageRecognition(message.imageRecognitionHistory,identity),undefined);
   const mediaConfiguration=(s:Settings,kind:'image'|'voice')=>JSON.stringify([kind==='image'?s.vision:s.audio,s.apiKey,s.modelUrl]);
   const cancelMedia=(mid?:string,kind?:'image'|'voice')=>{for(const [key,entry] of mediaRequests)if((!mid||mid===key)&&(!kind||entry.kind===kind))entry.controller.abort();};
   const invalidateMediaContext=(cid:string)=>{engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});};
@@ -358,8 +363,10 @@ export function createApplication(options: {
     if(forceRead&&prior?.id!==attachment?.id)throw Object.assign(new Error('媒体附件已变化，请重新读取。'),{status:409});
     if(prior&&!forceRead)return mediaFiles.read(prior);
     const saved=mediaFiles.save(file,'wechat');
-    if(forceRead&&prior){cancelMedia(mid);invalidateMediaContext(current.conversationId);}
-    try{store.update(s=>{const m=s.messages.find(m=>m.id===mid)!;if(kind==='image'){m.imageAttachment=saved;if(file.wechatImage)m.wechatImage={...m.wechatImage,...file.wechatImage};if(forceRead)delete m.imageRecognition;}else{m.audioAttachment=saved;if(forceRead)delete m.audioRecognition;}if(forceRead){m.mediaStatus='pending';m.autoMediaEligible=false;}});}
+    let sameImage=false;
+    if(forceRead&&kind==='image'&&prior){try{sameImage=imageSha256(mediaFiles.read(prior).bytes)===imageSha256(file.bytes);}catch{/* Missing old files cannot establish unchanged content. */}}
+    if(forceRead&&prior){cancelMedia(mid);if(!sameImage)invalidateMediaContext(current.conversationId);}
+    try{store.update(s=>{const m=s.messages.find(m=>m.id===mid)!;if(kind==='image'){m.imageAttachment=saved;if(file.wechatImage)m.wechatImage={...m.wechatImage,...file.wechatImage};if(forceRead&&!sameImage)delete m.imageRecognition;}else{m.audioAttachment=saved;if(forceRead)delete m.audioRecognition;}if(forceRead){if(!sameImage)m.mediaStatus='pending';m.autoMediaEligible=false;}});}
     catch(error){mediaFiles.delete(saved);throw error;}
     if(forceRead)mediaFiles.delete(prior);
     return file;
@@ -370,31 +377,52 @@ export function createApplication(options: {
     const pending=(async()=>{
       const before=store.read(),message=messageOf(mid),configuration=mediaConfiguration(before.settings,kind);
       const file=await readMessageMedia(mid,kind,combined);
+      combined.throwIfAborted();
       const attachment=kind==='image'?messageOf(mid).imageAttachment:messageOf(mid).audioAttachment;
-      const result=kind==='image'?await (options.recognizeImage??recognizeImage)(before.settings,file,combined):await (options.transcribeAudio??transcribeAudio)(before.settings,file,combined);
+      const identity=kind==='image'?imageRecognitionIdentity(before.settings,file.bytes):null;
+      const savedRecognition=kind==='image'?cachedImageRecognition(store.read(),identity):undefined;
+      const requestKey=identity?JSON.stringify(identity):null;
+      if(!savedRecognition&&requestKey&&imageModelRequests.has(requestKey))throw Object.assign(new Error('这张图片与模型正在识别中，请等待结果后重试。'),{status:409});
+      if(!savedRecognition&&requestKey)imageModelRequests.add(requestKey);
+      let result:NonNullable<Message['imageRecognition']>|NonNullable<Message['audioRecognition']>;
+      try{result=savedRecognition??(kind==='image'?await (options.recognizeImage??recognizeImage)(before.settings,file,combined):await (options.transcribeAudio??transcribeAudio)(before.settings,file,combined));}
+      finally{if(!savedRecognition&&requestKey)imageModelRequests.delete(requestKey);}
       combined.throwIfAborted();
       const state=store.read(),current=messageOf(mid),currentAttachment=kind==='image'?current.imageAttachment:current.audioAttachment;
       if(closed||mediaConfiguration(state.settings,kind)!==configuration||currentAttachment?.id!==attachment?.id||current.sourceFingerprint!==message.sourceFingerprint)throw Object.assign(new Error('媒体或模型配置已变化，旧识别结果已忽略。'),{status:409});
-      invalidateMediaContext(current.conversationId);
+      const unchanged=kind==='image'&&current.mediaStatus==='recognized'&&JSON.stringify(current.imageRecognition)===JSON.stringify(result);
+      if(!unchanged)invalidateMediaContext(current.conversationId);
       store.update(s=>{
         const m=s.messages.find(m=>m.id===mid)!;m.mediaStatus='recognized';m.autoMediaEligible=false;
-        if(kind==='image')m.imageRecognition=result as Message['imageRecognition'];else m.audioRecognition=result as Message['audioRecognition'];
-        addActivity(s,'success',kind==='image'?'图片已识别':'语音已转写','识别内容已加入当前对话，可生成回复草稿。',m.conversationId);
+        if(kind==='image'){
+          m.imageRecognition=result as NonNullable<Message['imageRecognition']>;
+          if(identity)m.imageRecognitionHistory=saveImageRecognition(m.imageRecognitionHistory,identity,m.imageRecognition);
+        }else m.audioRecognition=result as Message['audioRecognition'];
+        addActivity(s,'success',savedRecognition?'已使用本地图片识别结果':kind==='image'?'图片已识别':'语音已转写',savedRecognition?'同一图片与模型的结果已保存在本机；本次没有调用模型。':'识别内容已加入当前对话，可生成回复草稿。',m.conversationId);
       });
+      return {cached:!!savedRecognition};
     })();
     mediaRequests.set(mid,{kind,controller,promise:pending});
-    try{await pending;}finally{if(mediaRequests.get(mid)?.controller===controller)mediaRequests.delete(mid);}
+    try{return await pending;}finally{if(mediaRequests.get(mid)?.controller===controller)mediaRequests.delete(mid);}
   }
   const mediaAutomation=new MediaAutomation(store,{
-    recognize:recognizeMessage,
+    recognize:async(...args)=>{await recognizeMessage(...args);},
     onComplete:cid=>{const latest=store.read().messages.filter(m=>m.conversationId===cid).at(-1);if(latest?.role==='peer')engine.enqueue(cid,latest.id,true);},
     onFailure:(cid,kind)=>store.update(s=>addActivity(s,'warning',kind==='image'?'图片自动识别未完成':'语音自动转写未完成','可在这条消息中手动重试或上传媒体文件。',cid)),
   });
   app.post('/api/images/test',async(req,res)=>{
     const before=store.read().settings,file=parseImageUpload(uploadSchema.parse(req.body));
-    const recognition=await (options.recognizeImage??recognizeImage)(before,file);
-    if(mediaConfiguration(store.read().settings,'image')!==mediaConfiguration(before,'image'))throw Object.assign(new Error('识图配置已变化，请重新测试。'),{status:409});
-    res.json(recognition);
+    const identity=imageRecognitionIdentity(before,file.bytes),cached=cachedImageRecognition(store.read(),identity);
+    if(cached){if(identity)store.update(s=>{s.imageTestRecognitionHistory=saveImageRecognition(s.imageTestRecognitionHistory,identity,cached);});return res.json({...cached,cached:true});}
+    const requestKey=identity?JSON.stringify(identity):null;
+    if(requestKey&&imageModelRequests.has(requestKey))throw Object.assign(new Error('这张图片与模型正在识别中，请等待结果。'),{status:409});
+    if(requestKey)imageModelRequests.add(requestKey);
+    try{
+      const recognition=await (options.recognizeImage??recognizeImage)(before,file);
+      if(closed||mediaConfiguration(store.read().settings,'image')!==mediaConfiguration(before,'image'))throw Object.assign(new Error('识图配置已变化，请重新测试。'),{status:409});
+      if(identity)store.update(s=>{s.imageTestRecognitionHistory=saveImageRecognition(s.imageTestRecognitionHistory,identity,recognition);});
+      res.json({...recognition,cached:false});
+    }finally{if(requestKey)imageModelRequests.delete(requestKey);}
   });
   app.post('/api/audio/test',async(req,res)=>{
     const before=store.read().settings,file=parseAudioUpload(uploadSchema.parse(req.body));
@@ -421,7 +449,7 @@ export function createApplication(options: {
   });
   for(const kind of ['image','voice'] as const){
     app.post(`/api/messages/:id/read-${kind}`,async(req,res)=>{z.object({}).strict().parse(req.body??{});await readMessageMedia(param(req),kind,undefined,true);res.json({ok:true});});
-    app.post(`/api/messages/:id/${kind==='image'?'recognize-image':'transcribe-voice'}`,async(req,res)=>{z.object({}).strict().parse(req.body??{});await recognizeMessage(param(req),kind);const message=messageOf(param(req));res.json({recognition:kind==='image'?message.imageRecognition:message.audioRecognition});});
+    app.post(`/api/messages/:id/${kind==='image'?'recognize-image':'transcribe-voice'}`,async(req,res)=>{z.object({}).strict().parse(req.body??{});const result=await recognizeMessage(param(req),kind);const message=messageOf(param(req));res.json({recognition:kind==='image'?message.imageRecognition:message.audioRecognition,...(kind==='image'?{cached:result.cached}:{})});});
     app.get(`/api/messages/:id/${kind==='image'?'image':'audio'}`,(req,res)=>{
       const message=messageOf(param(req)),attachment=kind==='image'?message.imageAttachment:message.audioAttachment;
       if(!attachment)throw Object.assign(new Error('本机媒体尚未读取。'),{status:404});

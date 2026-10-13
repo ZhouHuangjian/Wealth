@@ -124,12 +124,12 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
   const notify = useCallback((message: string, error = false) => setToast({ message, error }), []);
-  const run = async <T,>(key: string, action: () => Promise<T>, success?: string): Promise<T | undefined> => {
+  const run = async <T,>(key: string, action: () => Promise<T>, success?: string | ((result: T) => string)): Promise<T | undefined> => {
     setBusy(key);
     try {
       const result = await action();
       await refresh();
-      if (success) notify(success);
+      if (success) notify(typeof success === 'function' ? success(result) : success);
       return result;
     } catch (error) { notify(error instanceof Error ? error.message : '操作未完成，请重试', true); }
     finally { setBusy(''); }
@@ -289,7 +289,7 @@ export default function App() {
                 <div className="conversation-start"><span />{messages.length ? dateLabel(messages[0].sentAt) : '从这里开始'}<span /></div>
                 {messages.map((message, index) => <div key={message.id} className={`message-row ${message.role}`}>
                   {message.role === 'peer' && <span className="avatar message-avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</span>}
-                  <div className="message-content"><div className={`bubble ${message.mediaStatus === 'pending' ? 'media-pending' : ''}`}>{message.mediaStatus && <span className={`media-label ${message.mediaStatus}`}><FileText size={12} />{messageKindLabels[message.kind ?? 'unknown']} · {message.mediaStatus === 'pending' ? '未解析' : message.mediaStatus === 'recognized' ? '模型已识别' : '已人工查看'}</span>}{messageDisplayText(message)}{message.kind === 'image' && <ImageMessage message={message} busy={busy} run={run} visionEnabled={!!state.settings.vision && state.settings.vision.provider !== 'disabled'} />}{message.kind === 'voice' && <VoiceMessage message={message} busy={busy} run={run} audioEnabled={!!state.settings.audio && state.settings.audio.provider !== 'disabled'} />}</div>{message.mediaStatus === 'pending' && <MediaReview message={message} busy={busy} run={run} />}<div className="message-meta">{timeLabel(message.sentAt)}{message.source === 'wechat' && <span>微信读取</span>}{message.source === 'auto' && <span><Sparkles size={10} />自动回复</span>}{message.aiAssisted && message.source !== 'auto' && <span>辅助表达</span>}{message.role === 'self' && index === messages.length - 1 && <CheckCheck size={12} />}</div></div>
+                  <div className="message-content"><div className={`bubble ${message.mediaStatus === 'pending' ? 'media-pending' : ''}`}>{message.mediaStatus && <span className={`media-label ${message.mediaStatus}`}><FileText size={12} />{messageKindLabels[message.kind ?? 'unknown']} · {message.mediaStatus === 'pending' ? '未解析' : message.mediaStatus === 'recognized' ? '模型已识别' : '已人工查看'}</span>}{messageDisplayText(message)}{message.kind === 'image' && <ImageMessage vision={state.settings.vision} message={message} busy={busy} run={run} visionEnabled={!!state.settings.vision && state.settings.vision.provider !== 'disabled'} />}{message.kind === 'voice' && <VoiceMessage message={message} busy={busy} run={run} audioEnabled={!!state.settings.audio && state.settings.audio.provider !== 'disabled'} />}</div>{message.mediaStatus === 'pending' && <MediaReview message={message} busy={busy} run={run} />}<div className="message-meta">{timeLabel(message.sentAt)}{message.source === 'wechat' && <span>微信读取</span>}{message.source === 'auto' && <span><Sparkles size={10} />自动回复</span>}{message.aiAssisted && message.source !== 'auto' && <span>辅助表达</span>}{message.role === 'self' && index === messages.length - 1 && <CheckCheck size={12} />}</div></div>
                 </div>)}
                 {!messages.length && <div className="empty-chat-start"><Empty title={isWechat ? '等待读取微信消息' : '给这段对话一个开始'}>{isWechat ? '点击下方读取上下文，或在上方“信息处理”开启持续读取。' : isDemo ? '可以发送一句话，或用下方「模拟来信」体验自动回复。' : '消息通道收到来信后，会显示在这里。'}</Empty>{isWechat && <Button kind="secondary" disabled={!!busy || !state.runtime.wechatAvailable || conversation.wechat?.status === 'reading'} onClick={() => readWechatOnce(conversation)}>{busy === `wechat-poll-${conversation.id}` || conversation.wechat?.status === 'reading' ? <LoaderCircle size={14} className="spin" /> : <ArrowDownToLine size={14} />}读取微信上下文</Button>}</div>}
                 {currentJob && <div className="job-indicator"><LoaderCircle size={14} className="spin" /><span>{currentJob.status === 'generating' ? '正在组织回复…' : `${Math.max(0, Math.ceil((new Date(currentJob.dueAt).getTime() - now) / 1000))} 秒后${(currentJob.mode ?? autoMode) === 'draft' ? '生成草稿' : '自动发送'}`}</span><button onClick={pause}>暂停</button></div>}
@@ -335,7 +335,7 @@ export default function App() {
   </div>;
 }
 
-type Run = <T>(key: string, action: () => Promise<T>, success?: string) => Promise<T | undefined>;
+type Run = <T>(key: string, action: () => Promise<T>, success?: string | ((result: T) => string)) => Promise<T | undefined>;
 
 function ImageFilePicker({ image, onChange, disabled = false, label = '选择图片' }: {
   image: UploadedImage | null; onChange: (image: UploadedImage | null) => void; disabled?: boolean; label?: string;
@@ -364,13 +364,13 @@ function ImageFilePicker({ image, onChange, disabled = false, label = '选择图
   </div>;
 }
 
-function RecognitionResult({ recognition }: { recognition: ImageRecognition }) {
+function RecognitionResult({ recognition, saved = false }: { recognition: ImageRecognition; saved?: boolean }) {
   return <section className="image-recognition-result" aria-label="图片识别结果">
-    <div className="image-recognition-meta"><Sparkles size={12} /><strong>模型识别</strong><span>{recognition.provider === 'qwen' ? '千问' : recognition.provider === 'codex' ? 'Codex' : '兼容 API'} · {recognition.modelName}</span></div>
+    <div className="image-recognition-meta"><Sparkles size={12} /><strong>{saved ? '已保存的识别结果' : '模型识别'}</strong><span>{recognition.provider === 'qwen' ? '千问' : recognition.provider === 'codex' ? 'Codex' : '兼容 API'} · {recognition.modelName || '默认模型'}</span></div>
     <p>{recognition.summary}</p>
     {recognition.visibleText && <details><summary>图片中的文字<ChevronDown size={12} /></summary><pre>{recognition.visibleText}</pre></details>}
     {recognition.facts.length > 0 && <ul>{recognition.facts.map((fact, index) => <li key={index}>{fact}</li>)}</ul>}
-    <small>{checkedTimeLabel(recognition.recognizedAt)}{recognition.usage && ` · ${recognition.usage.totalTokens} tokens`}</small>
+    <small>{dateLabel(recognition.recognizedAt)} {checkedTimeLabel(recognition.recognizedAt)}{recognition.usage && ` · ${saved ? '首次识别用量：' : ''}${recognition.usage.totalTokens} tokens`}</small>
   </section>;
 }
 
@@ -414,8 +414,8 @@ function VoiceMessage({ message, busy, run, audioEnabled }: { message: Message; 
   </div>;
 }
 
-function ImageMessage({ message, busy, run, visionEnabled }: {
-  message: Message; busy: string; run: Run; visionEnabled: boolean;
+function ImageMessage({ message, busy, run, visionEnabled, vision }: {
+  message: Message; busy: string; run: Run; visionEnabled: boolean; vision?: Pick<VisionSettings, 'provider' | 'modelName'>;
 }) {
   const [replacement, setReplacement] = useState<UploadedImage | null>(null);
   const [previewError, setPreviewError] = useState(false);
@@ -426,10 +426,11 @@ function ImageMessage({ message, busy, run, visionEnabled }: {
   const canReadWechat = message.source === 'wechat' && (!message.imageAttachment || message.imageAttachment.source === 'wechat');
   return <div className="message-image">
     {message.imageAttachment && <>{previewError ? <p className="image-preview-error" role="status">图片预览未能加载，可重新读取或补充图片。</p> : <img className="message-image-preview" src={`/api/messages/${encodeURIComponent(message.id)}/image`} alt={message.imageAttachment.filename || '对话图片'} onError={() => setPreviewError(true)} />}<small className="image-source">{message.imageAttachment.source === 'wechat' ? '微信读取' : '手动上传'} · {message.imageAttachment.filename}</small></>}
-    <div className="message-image-actions">{canReadWechat && <Button kind="secondary" disabled={!!busy} onClick={() => void run(readKey, () => api(`/messages/${message.id}/read-image`, 'POST', {}), '微信图片已读取，可继续识别')}>{busy === readKey ? <LoaderCircle size={12} className="spin" /> : <ArrowDownToLine size={12} />}{message.imageAttachment ? '重新读取微信图片' : '读取微信图片'}</Button>}{message.imageAttachment && <Button kind="secondary" disabled={!!busy || !visionEnabled} onClick={() => void run(recognizeKey, () => api(`/messages/${message.id}/recognize-image`, 'POST', {}), '图片已识别，可参考识别结果生成回复草稿')}>{busy === recognizeKey ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{message.imageRecognition ? '重新识别图片' : '识别图片'}</Button>}</div>
+    <div className="message-image-actions">{canReadWechat && <Button kind="secondary" disabled={!!busy} onClick={() => void run(readKey, () => api(`/messages/${message.id}/read-image`, 'POST', {}), '微信图片已读取，可继续识别')}>{busy === readKey ? <LoaderCircle size={12} className="spin" /> : <ArrowDownToLine size={12} />}{message.imageAttachment ? '重新读取微信图片' : '读取微信图片'}</Button>}{message.imageAttachment && <Button kind="secondary" disabled={!!busy || !visionEnabled} onClick={() => void run(recognizeKey, () => api<{ recognition: ImageRecognition; cached: boolean }>(`/messages/${message.id}/recognize-image`, 'POST', {}), result => result.cached ? '已使用本地识别结果，未调用模型' : '识别结果已保存在本机，后续回复会直接参考')}>{busy === recognizeKey ? <LoaderCircle size={12} className="spin" /> : <Sparkles size={12} />}{message.imageRecognition ? '查看/更新识别结果' : '识别图片'}</Button>}</div>
     {canReadWechat && <small className="image-model-hint">原图未下载时可能读取缩略图；可先在微信打开原图，再点击重新读取。</small>}
     {message.imageAttachment && !visionEnabled && <small className="image-model-hint">先在设置中选择图片识别模型。</small>}
-    {message.imageRecognition && <RecognitionResult recognition={message.imageRecognition} />}
+    {message.imageAttachment && visionEnabled && <small className="image-cache-hint">当前识图模型：{vision?.provider === 'qwen' ? '千问' : vision?.provider === 'codex' ? 'Codex' : '兼容 API'} · {vision?.modelName || '默认模型'}。同一图片、模型和识别配置会复用本机结果；生成回复不会重复识图。</small>}
+    {message.imageRecognition && <RecognitionResult recognition={message.imageRecognition} saved /> }
     <details className="image-replacement"><summary>{message.imageAttachment ? '替换本机图片' : '手动补充这张图片'}<ChevronDown size={12} /></summary><ImageFilePicker image={replacement} onChange={setReplacement} disabled={!!busy} label="选择要补充的图片" /><Button kind="secondary" disabled={!!busy || !replacement} onClick={() => { if (replacement) void run(replaceKey, async () => { const result = await api(`/messages/${message.id}/image`, 'POST', replacement); setReplacement(null); return result; }, '图片已保存在本机，点击识别后可用于回复草稿'); }}>{busy === replaceKey ? <LoaderCircle size={12} className="spin" /> : <Check size={12} />}保存到这条消息</Button></details>
   </div>;
 }
@@ -700,7 +701,7 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
   const connection = state.runtime.draftSyncConnection;
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testImage, setTestImage] = useState<UploadedImage | null>(null);
-  const [imageResult, setImageResult] = useState<ImageRecognition | null>(null);
+  const [imageResult, setImageResult] = useState<(ImageRecognition & { cached?: boolean }) | null>(null);
   const [imageError, setImageError] = useState('');
   const [testAudio, setTestAudio] = useState<UploadedImage | null>(null);
   const [audioResult, setAudioResult] = useState<AudioRecognition | null>(null);
@@ -753,8 +754,9 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
     if (!await save()) return;
     setSaving('image-test');
     try {
-      const result = await api<ImageRecognition>('/images/test', 'POST', testImage);
+      const result = await api<ImageRecognition & { cached: boolean }>('/images/test', 'POST', testImage);
       setImageResult(result); await refresh();
+      notify(result.cached ? '已使用本地识别结果，未调用模型' : '测试识别结果已保存在本机');
     } catch (error) { setImageError(error instanceof Error ? error.message : '图片识别未完成，请重试'); }
     finally { setSaving(''); }
   }
@@ -838,7 +840,7 @@ function SettingsPage({ state, notify, refresh }: { state: PublicState; notify: 
           {form.vision.provider === 'qwen' && <label className="checkbox-label"><input type="checkbox" checked={!!form.vision.thinkingEnabled} onChange={event => changeVision('thinkingEnabled', event.target.checked)} /><span><strong>图片识别启用思考模式</strong><small>默认关闭；开启后需模型支持，可能增加耗时和 tokens。</small></span></label>}
         </>}
         <label className="checkbox-label"><input type="checkbox" checked={form.vision.allowRemoteModel} onChange={event => changeVision('allowRemoteModel', event.target.checked)} /><span><strong>允许向识别服务发送图片</strong><small>识别时会将所选图片发送给上述模型服务。</small></span></label></>}
-        <div className="image-test-panel"><h3>上传图片测试</h3><p>先选一张图片，再点击识别。此测试不加入聊天上下文。</p><ImageFilePicker image={testImage} onChange={image => { setTestImage(image); setImageResult(null); setImageError(''); }} disabled={!!saving} /><Button kind="secondary" disabled={!!saving || !testImage || form.vision.provider === 'disabled' || !form.vision.allowRemoteModel} onClick={() => void recognizeTestImage()}>{saving === 'image-test' ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}{saving === 'image-test' ? '正在识别图片…' : '保存并识别这张图片'}</Button><small className="model-test-hint">识别会发起一次模型调用，可能消耗额度。选择文件和保存设置不会调用模型。</small>{imageError && <p className="inline-error" role="alert">{imageError}</p>}{imageResult && <RecognitionResult recognition={imageResult} />}</div>
+        <div className="image-test-panel"><h3>上传图片测试</h3><p>先选一张图片，再点击识别。此测试不加入聊天上下文。</p><ImageFilePicker image={testImage} onChange={image => { setTestImage(image); setImageResult(null); setImageError(''); }} disabled={!!saving} /><Button kind="secondary" disabled={!!saving || !testImage || form.vision.provider === 'disabled' || !form.vision.allowRemoteModel} onClick={() => void recognizeTestImage()}>{saving === 'image-test' ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}{saving === 'image-test' ? '正在获取识别结果…' : imageResult ? '查看/更新测试识别结果' : '保存并识别这张图片'}</Button><small className="model-test-hint">同一图片、模型和识别配置会复用本机结果，不重复消耗识图额度；首次识别会调用模型。选择文件和保存设置不会调用模型。</small>{imageError && <p className="inline-error" role="alert">{imageError}</p>}{imageResult && <><p className="image-test-cache-status" role="status">{imageResult.cached ? '已使用本地识别结果，未调用模型。' : '识别结果已保存在本机，可再次使用。'}</p><RecognitionResult recognition={imageResult} saved /></>}</div>
       </section>
       <section className="settings-card audio-settings-card"><div className="settings-section-title"><span><Mic size={19} /></span><div><h2>语音转写模型</h2><p>将语音转成文字，再作为生成回复草稿的参考。</p></div></div>
         <p className="media-contact-note"><Users size={14} />自动语音转写按联系人设置：打开该人的对话 → 信息处理，可与识图分别开关。</p>

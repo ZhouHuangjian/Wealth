@@ -10,6 +10,12 @@ export interface ImageRecognition {
   provider: 'qwen' | 'compatible' | 'codex'; modelName: string; recognizedAt: string;
   usage?: {promptTokens: number; completionTokens: number; totalTokens: number};
 }
+export interface ImageRecognitionCacheEntry {
+  imageSha256: string;
+  /** Hash of provider, selected model, normalized endpoint and prompt version. */
+  modelIdentity: string;
+  recognition: ImageRecognition;
+}
 export interface ImageAttachment {
   id: string; filename: string; mimeType: string; source: 'upload' | 'wechat';
 }
@@ -71,6 +77,7 @@ export interface Message {
   externalId: string | null; aiAssisted: boolean;
   kind?: MessageKind; mediaStatus?: 'pending' | 'reviewed' | 'recognized'; sourceSequence?: string; sourceFingerprint?: string;
   imageAttachment?: ImageAttachment; imageRecognition?: ImageRecognition;
+  imageRecognitionHistory?: ImageRecognitionCacheEntry[];
   wechatImage?: {localId?: string; md5?: string};
   audioAttachment?: ImageAttachment;
   audioRecognition?: AudioRecognition;
@@ -138,8 +145,10 @@ export interface AppState {
   cloudDrafts?: CloudDraftBatch[];
   draftUploads?: DraftUpload[];
   sendAttempts?: {id:string; conversationId:string; fingerprint:string; status:'sending'|'sent'|'unknown'; createdAt:string}[];
+  imageTestRecognitionHistory?: ImageRecognitionCacheEntry[];
 }
-export interface PublicState extends Omit<AppState, 'settings'> {
+export interface PublicState extends Omit<AppState, 'settings' | 'messages' | 'imageTestRecognitionHistory'> {
+  messages: Omit<Message, 'imageRecognitionHistory'>[];
   settings: Omit<Settings, 'apiKey' | 'vision' | 'audio'> & { hasApiKey: boolean; vision?: Omit<VisionSettings, 'apiKey'> & {hasApiKey: boolean}; audio?: Omit<AudioSettings, 'apiKey'> & {hasApiKey: boolean} };
   knowledge: Knowledge[];
   runtime: {
