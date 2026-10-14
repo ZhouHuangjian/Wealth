@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "version": "2.14.1",
+  "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5",
+  "image_tag": "wealth:release-2.14.1-20261013-estimate",
+  "database": "wealth_estimate_v2141_test",
+  "production_database_used": false,
+  "checked_at": "2026-10-13T05:09:55.899908+00:00",
+  "source_manifest_sha256": "f200ba553470509ce051b5644d7cdde9f95f3c10626a1b6586b421099708a3e2",
+  "source_commit": "2abad9f8d26fb14607e51bcde42c016512c30770",
+  "migration": "0015_chat_remote_controls",
+  "baseline_migrations_preserved": true,
+  "migrations_unchanged": true,
+  "data_reset_performed": false,
+  "candidate_health_version_verified": "2.14.1",
+  "tests_passed": 1679,
+  "tests_skipped": 0,
+  "subtests_passed": 12,
+  "synthetic_credential_encryption_tests_included": true,
+  "scope": "full_regression",
+  "test_files": []
+}

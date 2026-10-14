@@ -1,0 +1,9 @@
+PASS: real dailyReturnDisplay called with five controlled synthetic summaries.
+partial_one_of_eight_known_zero: amount="0", rate=null, coverage=1 / 8 项有当日收益数据
+partial_two_of_eight_known_synthetic_1_23: amount="1.23", rate=null, coverage=2 / 8 项有当日收益数据
+all_unavailable_keeps_amount_missing: amount=null, rate=null, coverage=0 / 8 项有当日收益数据
+complete_estimated_uses_full_synthetic_amount: amount="1.23", rate="+1.00%", coverage=8 / 8 项有当日收益数据
+complete_confirmed_uses_full_synthetic_amount: amount="1.23", rate="+1.00%", coverage=8 / 8 项有当日收益数据
+PASS: three static privacy/missing-input boundaries. React was not mounted.
+No production response, credentials, financial values or browser session were used.
+Results: /Users/zhouhuangjian/.codex/worktrees/estimate-return-diagnosis-20261012/Wealth/.runtime/estimate-diagnosis-20261012/display-diagnosis-results.json

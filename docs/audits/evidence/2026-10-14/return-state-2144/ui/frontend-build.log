@@ -1,0 +1,38 @@
+
+> wealth-workspace@0.1.0 build
+> tsc -b && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 3708 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                  0.59 kB │ gzip:   0.42 kB
+dist/assets/ChatAssistant-CEqq1azB.css           5.36 kB │ gzip:   1.36 kB
+dist/assets/MarketValuation-CI9FkBJO.css        10.52 kB │ gzip:   2.32 kB
+dist/assets/index-D4MdqZRd.css                  65.59 kB │ gzip:  12.50 kB
+dist/assets/ellipsis-COyzpYK5.js                 0.40 kB │ gzip:   0.27 kB
+dist/assets/download-CDB4YpGS.js                 0.43 kB │ gzip:   0.32 kB
+dist/assets/trash-2-CYCs1oo8.js                  0.53 kB │ gzip:   0.35 kB
+dist/assets/WorkspaceIdentity-CdgKhvlY.js        2.65 kB │ gzip:   1.33 kB
+dist/assets/fund-reconciliation-Ct1iZCxi.js      3.05 kB │ gzip:   1.40 kB
+dist/assets/Notebook-D9RY_eG7.js                 5.22 kB │ gzip:   2.50 kB
+dist/assets/ProfitCalendar-Bc9SpG96.js           7.43 kB │ gzip:   3.22 kB
+dist/assets/Analytics-Dl3gk6HF.js                9.94 kB │ gzip:   4.10 kB
+dist/assets/index-DX8xsg5E.js                   10.67 kB │ gzip:   3.92 kB
+dist/assets/Settings-SNpGP6UI.js                11.79 kB │ gzip:   5.08 kB
+dist/assets/Assets-By49tpnU.js                  12.98 kB │ gzip:   5.34 kB
+dist/assets/Planning-J5kJMRQm.js                17.74 kB │ gzip:   6.06 kB
+dist/assets/AdminDataManagement-BUfKyiZ7.js     25.93 kB │ gzip:  10.32 kB
+dist/assets/ChatAssistant-dF1oAF7F.js           33.01 kB │ gzip:  11.29 kB
+dist/assets/AdminConsole-CeCtIucf.js            40.19 kB │ gzip:  13.54 kB
+dist/assets/Cashbook-agkmZ7i_.js               118.11 kB │ gzip:  37.17 kB
+dist/assets/MarketValuation-_4EXYyod.js        188.50 kB │ gzip:  58.58 kB
+dist/assets/Home-Bm4QHhLH.js                   545.73 kB │ gzip: 185.22 kB
+dist/assets/index-WCkL16jG.js                1,313.18 kB │ gzip: 417.05 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.51s

@@ -44,7 +44,7 @@ def test_legacy_policy_adds_fallback_without_reordering_or_reenabling_sources(ve
         "priority": {"stock": ["yahoo", "tencent"], "future": ["sina"], "fund": []},
     }
     upgraded = policy.validate_provider_config(old)
-    assert upgraded["schema_version"] == 3
+    assert upgraded["schema_version"] == 4
     assert upgraded["priority"]["stock"] == ["yahoo", "tencent", "akshare"]
     assert upgraded["priority"]["future"] == ["sina"]
     assert upgraded["priority"]["fund"] == []

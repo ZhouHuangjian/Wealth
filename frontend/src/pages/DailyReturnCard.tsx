@@ -1,22 +1,28 @@
 import { useState } from "react";
 import { Button, Drawer, Table, Tag } from "antd";
 import { ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
 import { dateToday } from "../api";
 import { Blank, Money } from "../components";
 import {
   dailyReturnDisplay,
-  dailyReturnLabels,
+  dailyReturnItemLabel,
+  dailyReturnIssues,
+  closedReturnPlaceholder,
   returnDateDisplay,
 } from "../daily-return";
+import { dailyReturnNextAction } from "../business-action";
 import { HelpText } from "../help";
 import { profitTone } from "../investment";
 import { useWorkspace } from "../state";
+import LatestFundUpdates from "./LatestFundUpdates";
 
 const sourceLabels: Record<string, string> = {
   institution_snapshot: "机构账户权益",
   option_position_reference: "期权持仓参考",
   ledger: "已记录交易",
   manual: "手工录入",
+  cash_only_carry_forward: "无已记录持仓，按资金流水推算",
 };
 
 export default function DailyReturnCard({
@@ -28,12 +34,13 @@ export default function DailyReturnCard({
   asOf: string;
   currency: string;
 }) {
-  const { hidden } = useWorkspace();
+  const { hidden, space } = useWorkspace();
   const [open, setOpen] = useState(false);
   const view = dailyReturnDisplay(data);
   const displayCurrency = data?.currency || currency;
   const title = asOf === dateToday() ? "今日估算收益" : "当日估算收益";
   const rows = data?.items || [];
+  const issues = dailyReturnIssues(data);
   return (
     <>
       <article className="net-worth-card daily-return-card">
@@ -54,22 +61,41 @@ export default function DailyReturnCard({
           </Tag>
         </div>
         <strong className={hidden ? "" : profitTone(view.amount)}>
-          <Money value={view.amount} currency={displayCurrency} sign />
+          {closedReturnPlaceholder(view.status, hidden) ?? (
+            <Money value={view.amount} currency={displayCurrency} sign />
+          )}
         </strong>
         <div className="daily-return-secondary">
-          {view.rate && !hidden ? (
+          {view.rate && !hidden && !view.cashOnly ? (
             <span className={profitTone(data?.return_rate)}>{view.rate}</span>
           ) : view.partial ? (
-            <span>已知部分</span>
+            <span>已计算部分，非全部收益</span>
           ) : (
             <span>
               {view.status === "no_position"
                 ? "暂无投资持仓"
-                : "按实际收益日统计"}
+                : view.status === "market_closed"
+                  ? "休市，无当日收益观测"
+                  : view.cashOnly
+                    ? "无已记录持仓，按资金流水推算"
+                    : "按实际收益日统计"}
             </span>
           )}
           <time>{data?.date || asOf}</time>
         </div>
+        {!hidden &&
+          view.missing > 0 &&
+          ["partial", "unavailable"].includes(view.status) && (
+            <p className="daily-return-gaps">
+              {issues.length
+                ? issues
+                    .slice(0, 2)
+                    .map((issue) => `${issue.count} 项${issue.label}`)
+                    .join("；") + (issues.length > 2 ? "等" : "")
+                : "缺少对应日期的行情或计算依据"}
+              。缺少部分保留空缺。
+            </p>
+          )}
         <div className="daily-return-bottom">
           <small>{hidden ? "金额已隐藏" : view.coverage}</small>
           <Button
@@ -78,9 +104,12 @@ export default function DailyReturnCard({
             onClick={() => setOpen(true)}
             icon={<ChevronRight size={14} />}
           >
-            收益明细
+            {issues.length || view.status === "unavailable"
+              ? "查看明细与原因"
+              : "收益明细"}
           </Button>
         </div>
+        <LatestFundUpdates data={data?.latest_fund_updates} />
       </article>
       <Drawer
         title={`${title} · ${data?.date || asOf}`}
@@ -98,9 +127,17 @@ export default function DailyReturnCard({
           <>
             <div className="daily-return-detail-summary">
               <div>
-                <small>{view.partial ? "已知部分收益" : title}</small>
+                <small>
+                  {view.partial ? "已计算部分收益（非全部）" : title}
+                </small>
                 <strong className={profitTone(view.amount)}>
-                  <Money value={view.amount} currency={displayCurrency} sign />
+                  {closedReturnPlaceholder(view.status, hidden) ?? (
+                    <Money
+                      value={view.amount}
+                      currency={displayCurrency}
+                      sign
+                    />
+                  )}
                 </strong>
               </div>
               <div>
@@ -145,11 +182,13 @@ export default function DailyReturnCard({
                   width: 165,
                   render: (_, row) => (
                     <div className={`cell-name ${profitTone(row.base_amount)}`}>
-                      <Money
-                        value={row.base_amount}
-                        currency={displayCurrency}
-                        sign
-                      />
+                      {closedReturnPlaceholder(row.status, hidden) ?? (
+                        <Money
+                          value={row.base_amount}
+                          currency={displayCurrency}
+                          sign
+                        />
+                      )}
                       {row.base_amount == null &&
                         row.latest_formal_return?.base_amount != null && (
                           <small>
@@ -169,11 +208,13 @@ export default function DailyReturnCard({
                       {row.currency && row.currency !== displayCurrency && (
                         <small>
                           原币{" "}
-                          <Money
-                            value={row.amount}
-                            currency={row.currency}
-                            sign
-                          />
+                          {closedReturnPlaceholder(row.status, hidden) ?? (
+                            <Money
+                              value={row.amount}
+                              currency={row.currency}
+                              sign
+                            />
+                          )}
                         </small>
                       )}
                     </div>
@@ -184,16 +225,32 @@ export default function DailyReturnCard({
                   render: (_, row) => (
                     <div className="cell-name">
                       <span>
-                        {dailyReturnLabels[row.status] ||
-                          row.status ||
-                          "待更新"}
+                        {dailyReturnItemLabel(row)}
                         {returnDateDisplay(row).returnDate
-                          ? ` · 收益归属 ${returnDateDisplay(row).returnDate}`
+                          ? ` · ${row.status === "market_closed" ? "休市日期" : "收益归属"} ${returnDateDisplay(row).returnDate}`
                           : ""}
                       </span>
                       {returnDateDisplay(row).navDate && (
                         <small>
                           净值 / 价格归属 {returnDateDisplay(row).navDate}
+                        </small>
+                      )}
+                      {returnDateDisplay(row).publishedAt && (
+                        <small>
+                          报价公布 {returnDateDisplay(row).publishedAt}
+                          （北京时间）
+                        </small>
+                      )}
+                      {returnDateDisplay(row).fetchedAt && (
+                        <small>
+                          系统获取 {returnDateDisplay(row).fetchedAt}
+                          （北京时间）
+                        </small>
+                      )}
+                      {returnDateDisplay(row).observedAt && (
+                        <small>
+                          记录时间 {returnDateDisplay(row).observedAt}
+                          （北京时间）
                         </small>
                       )}
                       {row.interval_start && (
@@ -203,6 +260,17 @@ export default function DailyReturnCard({
                         <small>{sourceLabels[row.source] || row.source}</small>
                       )}
                       {row.message && <small>{row.message}</small>}
+                      {dailyReturnNextAction(space.id, row) && (
+                        <Link
+                          to={dailyReturnNextAction(space.id, row)!.to}
+                          onClick={() => setOpen(false)}
+                          title={
+                            dailyReturnNextAction(space.id, row)!.description
+                          }
+                        >
+                          {dailyReturnNextAction(space.id, row)!.label}
+                        </Link>
+                      )}
                     </div>
                   ),
                 },

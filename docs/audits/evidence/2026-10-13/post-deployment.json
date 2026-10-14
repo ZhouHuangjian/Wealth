@@ -1,0 +1,38 @@
+{
+  "version": "2.14.1",
+  "checked_at": "2026-10-13T05:13:15.401898+00:00",
+  "containers": [
+    {
+      "service": "web",
+      "healthy": true,
+      "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5"
+    },
+    {
+      "service": "worker",
+      "healthy": true,
+      "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5"
+    },
+    {
+      "service": "beat",
+      "healthy": true,
+      "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5"
+    },
+    {
+      "service": "db",
+      "healthy": true,
+      "image_id": "sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650"
+    },
+    {
+      "service": "rabbitmq",
+      "healthy": true,
+      "image_id": "sha256:2531fe16e1cb4ec4086d3eaa63118c8f074dd98620d55f022f453a397b18f037"
+    }
+  ],
+  "timers": {
+    "wealth-backup.timer": "active",
+    "wealth-certbot.timer": "active"
+  },
+  "disposable_test_database_retained": true,
+  "production_database_reset": false,
+  "production_migrations_run": false
+}

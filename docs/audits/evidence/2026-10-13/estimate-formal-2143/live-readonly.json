@@ -1,0 +1,172 @@
+{
+  "checked_at": "2026-10-13T12:06:29.815641+00:00",
+  "version": "2.14.3",
+  "enforced_read_only": true,
+  "session_created": false,
+  "login_performed": false,
+  "manual_refresh_triggered": false,
+  "financial_values_omitted": true,
+  "spaces": [
+    {
+      "api_status": 200,
+      "date": "2026-10-13",
+      "status": "partial",
+      "known_count": 3,
+      "total_count": 8,
+      "missing_count": 5,
+      "amount_available": false,
+      "known_amount_available": true,
+      "reason_counts": {
+        "no_estimate": 5,
+        "available_or_legacy": 3
+      },
+      "latest_fund_updates": {
+        "total_count": 7,
+        "known_count": 7,
+        "items": [
+          {
+            "code": "017641",
+            "status": "formal",
+            "native_status": "formal",
+            "return_date": "2026-10-12",
+            "base_nav_date": "2026-10-09",
+            "quoted_at": null,
+            "amount_available": true,
+            "reason": null,
+            "reference_unavailable_reason": "reference_baseline",
+            "quantity_source": "automatic_estimate",
+            "formal_updated_at": "2026-10-13 11:17:51.846468+00:00"
+          },
+          {
+            "code": "019305",
+            "status": "formal",
+            "native_status": "formal",
+            "return_date": "2026-10-12",
+            "base_nav_date": "2026-10-09",
+            "quoted_at": null,
+            "amount_available": true,
+            "reason": null,
+            "reference_unavailable_reason": "reference_baseline",
+            "quantity_source": "automatic_estimate",
+            "formal_updated_at": "2026-10-13 11:17:49.203000+00:00"
+          },
+          {
+            "code": "019172",
+            "status": "formal",
+            "native_status": "formal",
+            "return_date": "2026-10-12",
+            "base_nav_date": "2026-10-09",
+            "quoted_at": null,
+            "amount_available": true,
+            "reason": null,
+            "reference_unavailable_reason": "reference_baseline",
+            "quantity_source": "automatic_estimate",
+            "formal_updated_at": "2026-10-13 11:17:46.401066+00:00"
+          },
+          {
+            "code": "021778",
+            "status": "formal",
+            "native_status": "formal",
+            "return_date": "2026-10-12",
+            "base_nav_date": "2026-10-09",
+            "quoted_at": null,
+            "amount_available": true,
+            "reason": null,
+            "reference_unavailable_reason": "reference_baseline",
+            "quantity_source": "recorded",
+            "formal_updated_at": "2026-10-13 11:11:37.722923+00:00"
+          },
+          {
+            "code": "270042",
+            "status": "formal",
+            "native_status": "formal",
+            "return_date": "2026-10-12",
+            "base_nav_date": "2026-10-09",
+            "quoted_at": null,
+            "amount_available": true,
+            "reason": null,
+            "reference_unavailable_reason": "reference_baseline",
+            "quantity_source": "recorded",
+            "formal_updated_at": "2026-10-13 11:11:38.619747+00:00"
+          },
+          {
+            "code": "000307",
+            "status": "formal",
+            "native_status": "formal",
+            "return_date": "2026-10-13",
+            "base_nav_date": "2026-10-12",
+            "quoted_at": null,
+            "amount_available": true,
+            "reason": null,
+            "reference_unavailable_reason": null,
+            "quantity_source": "recorded",
+            "formal_updated_at": "2026-10-13 11:53:12.002440+00:00"
+          },
+          {
+            "code": "020602",
+            "status": "formal",
+            "native_status": "formal",
+            "return_date": "2026-10-13",
+            "base_nav_date": "2026-10-12",
+            "quoted_at": null,
+            "amount_available": true,
+            "reason": null,
+            "reference_unavailable_reason": "reference_baseline",
+            "quantity_source": "automatic_estimate",
+            "formal_updated_at": "2026-10-13 11:17:47.348917+00:00"
+          }
+        ]
+      },
+      "reference_sources": [
+        {
+          "code": "021778",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T12:05:50.565095+00:00"
+        },
+        {
+          "code": "270042",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T12:05:51.719865+00:00"
+        },
+        {
+          "code": "019172",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T12:05:59.082892+00:00"
+        },
+        {
+          "code": "019305",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T12:05:59.195431+00:00"
+        },
+        {
+          "code": "017641",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T12:06:01.638151+00:00"
+        }
+      ],
+      "top_up_configured_plan_count": 0
+    }
+  ],
+  "target_reference_codes": [
+    "017641",
+    "019305",
+    "019172",
+    "021778",
+    "270042"
+  ]
+}

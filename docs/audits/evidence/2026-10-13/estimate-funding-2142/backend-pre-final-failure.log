@@ -1,0 +1,117 @@
+Operations to perform:
+  Apply all migrations: auth, contenttypes, sessions, wealth
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0001_initial... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying sessions.0001_initial... OK
+  Applying wealth.0001_initial... OK
+  Applying wealth.0002_tenant_and_ledger_guards... OK
+  Applying wealth.0003_close_posted_facts... OK
+  Applying wealth.0004_transaction_epoch... OK
+  Applying wealth.0005_outbox_lease... OK
+  Applying wealth.0006_immutable_audit_history... OK
+  Applying wealth.0007_market_symbol... OK
+  Applying wealth.0008_platform_controls... OK
+  Applying wealth.0009_workspace_management_templates... OK
+  Applying wealth.0010_independent_administration... OK
+  Applying wealth.0011_scoped_business_erasure... OK
+  Applying wealth.0012_workspace_admin_access... OK
+  Applying wealth.0013_chat_assistant... OK
+  Applying wealth.0014_chat_device_credentials... OK
+  Applying wealth.0015_chat_remote_controls... OK
+........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+.............................................F.......................... [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 56%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 68%]
+........................................................................ [ 72%]
+........................................................................ [ 76%]
+.................................................................... [ 80%]
+................................................................ [ 84%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+..............................................................           [100%]
+=================================== FAILURES ===================================
+_____________ test_fresh_fetch_does_not_relabel_old_provider_quote _____________
+tests/test_estimate_refresh_cadence.py:463: in test_fresh_fetch_does_not_relabel_old_provider_quote
+    assert market_sync.refresh_due()["scheduled"] == 1
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+wealth/market_sync.py:660: in refresh_due
+    _publish(sid, iid, token)
+tests/test_estimate_refresh_cadence.py:373: in launch_worker
+    assert result["status"] == ("failed" if clock["failed"] else "ready")
+E   AssertionError: assert 'failed' == 'ready'
+E
+E     - ready
+E     + failed
+=============================== warnings summary ===============================
+tests/test_account_balances.py: 1 warning
+tests/test_account_opening_v24.py: 5 warnings
+tests/test_admin_access_consent.py: 34 warnings
+tests/test_admin_data_v260.py: 21 warnings
+tests/test_admin_edit_v261.py: 8 warnings
+tests/test_admin_holding_corrections_v261.py: 8 warnings
+tests/test_admin_purge_v261.py: 20 warnings
+tests/test_administration_v25.py: 12 warnings
+tests/test_api.py: 19 warnings
+tests/test_audit_repairs_20261009.py: 1 warning
+tests/test_catalog_delete_v255.py: 1 warning
+tests/test_catalog_integration_v255.py: 10 warnings
+tests/test_chat_assistant.py: 48 warnings
+tests/test_chat_remote.py: 47 warnings
+tests/test_dca_automation_v264.py: 2 warnings
+tests/test_dca_entry_basis_v254.py: 2 warnings
+tests/test_dca_history_v252.py: 3 warnings
+tests/test_dca_import_v253.py: 2 warnings
+tests/test_display_ordering.py: 13 warnings
+tests/test_dividends_v24.py: 3 warnings
+tests/test_fund_orders_v270.py: 2 warnings
+tests/test_fund_reconciliation_v210.py: 3 warnings
+tests/test_fund_return_updates_v2142.py: 1 warning
+tests/test_glossary_v25.py: 1 warning
+tests/test_holding_corrections_v251.py: 3 warnings
+tests/test_insights_v22.py: 15 warnings
+tests/test_institution_funding_v25.py: 1 warning
+tests/test_management_v24.py: 20 warnings
+tests/test_market_integration.py: 6 warnings
+tests/test_metadata_api_v23.py: 8 warnings
+tests/test_occurrence_navigation.py: 4 warnings
+tests/test_option_positions_v251.py: 5 warnings
+tests/test_overview_projection_version.py: 7 warnings
+tests/test_pending_purchases_v265.py: 1 warning
+tests/test_platform_v23.py: 15 warnings
+tests/test_provider_credentials_v210.py: 17 warnings
+tests/test_valuation_basis_v25.py: 2 warnings
+tests/test_workspace_usability_v262.py: 2 warnings
+  /Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/core/handlers/base.py:61: UserWarning: No directory at: /Users/zhouhuangjian/.codex/worktrees/estimate-return-diagnosis-20261012/Wealth/backend/staticfiles/
+    mw_instance = middleware(adapted_handler)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_estimate_refresh_cadence.py::test_fresh_fetch_does_not_relabel_old_provider_quote
+1 failed, 1777 passed, 373 warnings, 12 subtests passed in 232.65s (0:03:52)

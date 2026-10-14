@@ -2123,6 +2123,12 @@ h3 {
 .daily-return-secondary > span {
   font-variant-numeric: tabular-nums;
 }
+.daily-return-gaps {
+  margin: 12px 0 0;
+  color: var(--theme-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
 .daily-return-bottom {
   padding-top: 16px;
   margin-top: auto;

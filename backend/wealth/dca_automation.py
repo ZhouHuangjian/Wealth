@@ -33,6 +33,8 @@ FIELDS = {
     "excluded_dates",
     "pause_ranges",
     "funding_source",
+    "top_up_account_id",
+    "top_up_start_date",
 }
 ZERO = Decimal(0)
 STATES = {
@@ -113,7 +115,8 @@ def occurrence_processing(occurrence):
             "action_label": "完善定投设置",
             "requires_confirmation": False,
         }
-    status = (occurrence.details.get("automation") or {}).get("status")
+    saved_state = occurrence.details.get("automation") or {}
+    status = saved_state.get("status")
     if not config.get("enabled"):
         status = "disabled"
     elif (
@@ -129,7 +132,11 @@ def occurrence_processing(occurrence):
     return {
         **(occurrence.details.get("automation") or {}),
         "status": status,
-        "message": STATES.get(status, "系统正在自动处理"),
+        "message": (
+            saved_state.get("message") or STATES.get(status, "系统正在自动处理")
+            if status == saved_state.get("status")
+            else STATES.get(status, "系统正在自动处理")
+        ),
         **processing_state(status),
     }
 
@@ -196,8 +203,42 @@ def initialize_configuration(space, data, *, existing=False):
         data["account_id"] = str(holding.pk)
 
 
-def validate_configuration(space, data):
-    """Called by the existing versioned plan write command, not a new write path."""
+def _top_up_account(space, identifier, source):
+    from .institution_funding import CASH_ACCOUNT_KINDS
+
+    try:
+        account = get_obj(Account, space, identifier)
+    except DomainError as error:
+        raise DomainError(
+            "补足资金账户不可用，请在计划中重新选择。" + error.message,
+            "dca_top_up_account_invalid",
+            error.status,
+        ) from error
+    if account.pk == source.pk:
+        raise DomainError("补足资金账户须与付款账户不同", "dca_top_up_account_invalid")
+    if (
+        account.kind not in CASH_ACCOUNT_KINDS
+        or account.valuation_mode != "detailed"
+        or account.archived
+    ):
+        raise DomainError(
+            "补足资金账户须为未归档的现金余额账户；基金份额不能直接补足现金",
+            "dca_top_up_account_invalid",
+        )
+    if account.currency != source.currency:
+        raise DomainError(
+            "补足资金账户与付款账户须使用相同币种，请先记录实际换汇",
+            "dca_top_up_account_invalid",
+        )
+    return account
+
+
+def validate_configuration(space, data, *, check_top_up_account=True):
+    """Validate versioned plan writes; check a source again only when using it.
+
+    Later archival of a backup account must not strand an already-funded period.
+    The worker checks its current identity and cash before any new top-up.
+    """
     raw = data.get("automation")
     if raw is None:
         return
@@ -248,6 +289,18 @@ def validate_configuration(space, data):
         or holding.currency != instrument.currency
     ):
         raise DomainError("付款账户、持仓账户和基金须使用相同币种")
+    top_up_id = raw.get("top_up_account_id") or None
+    top_up_start = None
+    if top_up_id:
+        if funding_source != "account":
+            raise DomainError("账外资金不扣账户现金，请清除补足资金账户")
+        if check_top_up_account:
+            top_up_id = str(_top_up_account(space, top_up_id, source).pk)
+        if not raw.get("top_up_start_date"):
+            raise DomainError("请选择补足资金生效日；不会默认补足历史期次")
+        top_up_start = day(raw["top_up_start_date"])
+        if top_up_start < start:
+            raise DomainError("补足资金生效日不能早于自动记账生效日")
     fee_mode = raw.get("fee_mode", "unknown")
     if fee_mode not in {"unknown", "zero", "fixed", "rate"}:
         raise DomainError("费用请选择未知、零费用、每期固定费用或申购费率")
@@ -294,6 +347,8 @@ def validate_configuration(space, data):
         "excluded_dates": excluded,
         "pause_ranges": ranges,
         "funding_source": funding_source,
+        "top_up_account_id": top_up_id,
+        "top_up_start_date": str(top_up_start) if top_up_start else None,
     }
 
 
@@ -337,6 +392,15 @@ def _state(space, user, occurrence, status, message=None, **fields):
         occurrence.save(update_fields=["details", "version"])
         bump(space, user, invalidate_reconciliations=False)
     return values
+
+
+def _top_up_details(debit):
+    """Keep the funding fact attached to its debit, independent of later settings."""
+    return {
+        key: debit.payload[key]
+        for key in ("top_up_event_id", "top_up_account_id", "top_up_amount")
+        if debit.payload.get(key) is not None
+    }
 
 
 def automation_status(space, plan_id):
@@ -472,6 +536,7 @@ def _write_period(
         "confirmation_entry_basis": "preview_confirmed" if confirmation else None,
         "automatic_estimate": True,
         "automation_plan_version": plan.version,
+        **_top_up_details(debit),
         **extra,
     }
     return _save_period(
@@ -573,6 +638,9 @@ def _process(space, user, plan, occurrence, now):
     stage_confirmation = Event.objects.filter(
         tenant=space, stage_key=prefix + ":confirm"
     ).first()
+    stage_top_up = Event.objects.filter(
+        tenant=space, stage_key=prefix + ":top-up"
+    ).first()
     from .fund_reconciliation import event_evidence, resolved_event
 
     debit = resolved_event(space, debit)
@@ -580,7 +648,7 @@ def _process(space, user, plan, occurrence, now):
     stage_confirmation = resolved_event(space, stage_confirmation)
     if any(
         event and not _active(event)
-        for event in (debit, stage_debit, stage_confirmation)
+        for event in (debit, stage_debit, stage_confirmation, stage_top_up)
     ):
         return _state(
             space,
@@ -631,6 +699,19 @@ def _process(space, user, plan, occurrence, now):
             occurrence,
             "needs_review",
             "原扣款与待办关联不一致，未再次扣款",
+        )
+    if stage_top_up and (
+        not debit
+        or debit.payload.get("top_up_event_id") != str(stage_top_up.pk)
+        or stage_top_up.kind != "transfer"
+        or not stage_top_up.payload.get("dca_top_up_transfer")
+    ):
+        return _state(
+            space,
+            user,
+            occurrence,
+            "needs_review",
+            "该期补足资金与扣款关联不完整，请核对原记录；不会重复补款",
         )
     if debit:
         confirmations = list(
@@ -691,6 +772,7 @@ def _process(space, user, plan, occurrence, now):
                 nav=confirmation.payload.get("price"),
                 nav_date=confirmation.payload.get("nav_date"),
                 confirmation_date=str(confirmation.economic_date),
+                **_top_up_details(debit),
             )
     availability = subscription_day(occurrence.due_date, instrument)
     if availability["is_open"] is not True:
@@ -740,11 +822,76 @@ def _process(space, user, plan, occurrence, now):
                 "已登记的阶段记录不完整，请核对",
             )
         _baseline(space, source, occurrence.due_date)
-        if config.get("funding_source") != "untracked" and (
-            available_funding_cash(space, source, occurrence.due_date)
-            < occurrence.amount
-        ):
-            return _state(space, user, occurrence, "waiting_cash")
+        top_up = None
+        if config.get("funding_source") != "untracked":
+            available = available_funding_cash(space, source, occurrence.due_date)
+            shortfall = max(ZERO, occurrence.amount - available)
+            if shortfall:
+                waiting = {
+                    "funding_account_id": str(source.pk),
+                    "required": occurrence.amount,
+                    "available": available,
+                    "shortfall": shortfall,
+                }
+                if not config.get("top_up_account_id"):
+                    return _state(
+                        space,
+                        user,
+                        occurrence,
+                        "waiting_cash",
+                        "付款账户可用现金不足；请核对余额，或在计划中选择补足资金账户。资金到齐后会自动重试。",
+                        **waiting,
+                    )
+                if occurrence.due_date < day(config["top_up_start_date"]):
+                    return _state(
+                        space,
+                        user,
+                        occurrence,
+                        "waiting_cash",
+                        "本期早于补足资金生效日；请核对付款账户余额，或明确调整计划的补足生效日期。",
+                        top_up_start_date=config["top_up_start_date"],
+                        **waiting,
+                    )
+                top_up_source = _top_up_account(
+                    space, config["top_up_account_id"], source
+                )
+                _baseline(space, top_up_source, occurrence.due_date)
+                top_up_available = available_funding_cash(
+                    space, top_up_source, occurrence.due_date
+                )
+                if top_up_available < shortfall:
+                    return _state(
+                        space,
+                        user,
+                        occurrence,
+                        "waiting_cash",
+                        "所选补足账户可用现金也不足，尚未转入或扣款；请核对该账户余额。资金到齐后会自动重试。",
+                        top_up_account_id=str(top_up_source.pk),
+                        top_up_available=top_up_available,
+                        **waiting,
+                    )
+                # The per-period savepoint and workspace row lock cover both
+                # this transfer and its debit. Never leave a partial top-up.
+                top_up = post_event(
+                    space,
+                    user,
+                    {
+                        "kind": "transfer",
+                        "account_id": str(top_up_source.pk),
+                        "target_account_id": str(source.pk),
+                        "economic_date": str(occurrence.due_date),
+                        "amount": str(shortfall),
+                        "fee": "0",
+                        "dca_top_up_transfer": True,
+                        "dca_import_plan_id": str(plan.pk),
+                        "dca_import_date": str(anchor),
+                        "entry_basis": "preview_confirmed",
+                        "automatic_estimate": True,
+                        "automation_plan_version": plan.version,
+                        "description": "按定投计划推算补足资金（仅记账，不发起银行转账）",
+                    },
+                    stage_key=prefix + ":top-up",
+                )
         debit = post_event(
             space,
             user,
@@ -762,6 +909,16 @@ def _process(space, user, plan, occurrence, now):
                 "automatic_estimate": True,
                 "automation_plan_version": plan.version,
                 "description": "按定投计划自动记账（计划推算来源）",
+                **(
+                    {
+                        "related_event_id": str(top_up.pk),
+                        "top_up_event_id": str(top_up.pk),
+                        "top_up_account_id": top_up.payload["account_id"],
+                        "top_up_amount": top_up.payload["amount"],
+                    }
+                    if top_up
+                    else {}
+                ),
             },
             stage_key=prefix + ":debit",
             _untracked_funding=config.get("funding_source") == "untracked",
@@ -772,7 +929,7 @@ def _process(space, user, plan, occurrence, now):
         period = _write_period(
             space, user, plan, instrument, holding, occurrence, debit
         )
-    details = {"debit_event_id": str(debit.pk)}
+    details = {"debit_event_id": str(debit.pk), **_top_up_details(debit)}
     metadata = preview_trade_dates(
         {
             "instrument": {
@@ -974,7 +1131,7 @@ def run_plan(space, user, plan_id, *, expected_plan_version=None):
         "completed",
     }:
         return {**automation_status(space, plan.pk), "processed": 0}
-    validate_configuration(space, plan.data)
+    validate_configuration(space, plan.data, check_top_up_account=False)
     now = today(space)
     if plan.data.get("status") == "active":
         generate_schedule(space, user, plan, now)
@@ -1017,6 +1174,7 @@ def run_plan(space, user, plan_id, *, expected_plan_version=None):
                 in {"negative_funding_balance", "insufficient_source_cash"}
                 else "needs_review",
                 error.message,
+                reason_code=error.code,
             )
         processed += 1
     if selected:
