@@ -460,7 +460,7 @@ def test_permanent_account_cleanup_function_also_removes_command_rows(actors):
 def test_poll_limits_and_receipt_validation_do_not_update_heartbeat(actors):
     info, ident = ready(actors)
     for data, content_type, expected in [
-        (b"x" * (256 * 1024 + 1), "application/json", 413),
+        (b"x" * (1024 * 1024 + 1), "application/json", 413),
         (b"not-json", "application/json", 400),
         (b"{}", "text/plain", 400),
     ]:

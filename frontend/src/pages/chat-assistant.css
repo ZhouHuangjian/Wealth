@@ -351,3 +351,96 @@ body:has(.chat-topbar) .theme-floating {
     padding: 18px 14px;
   }
 }
+.chat-remote-contact-name,
+.chat-remote-inline-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+}
+.chat-remote-contact-name {
+  justify-content: flex-start;
+}
+.chat-remote-contact-name .ant-tag {
+  margin: 0;
+}
+.chat-remote-contact-actions {
+  flex-shrink: 0;
+}
+.chat-remote-models,
+.chat-remote-profile-list {
+  display: grid;
+  gap: 12px;
+}
+.chat-remote-model-choice {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.chat-remote-models > .ant-select,
+.chat-remote-model-choice > .ant-select {
+  width: 100%;
+  min-width: 0;
+}
+.chat-remote-model-row,
+.chat-remote-model-section,
+.chat-remote-profile-item {
+  border: 1px solid var(--theme-border);
+  border-radius: 9px;
+  padding: 14px;
+  min-width: 0;
+}
+.chat-remote-model-row {
+  display: grid;
+  gap: 10px;
+}
+.chat-remote-models .chat-remote-note {
+  margin: 0;
+}
+.chat-remote-model-section {
+  margin-bottom: 14px;
+}
+.chat-remote-model-section h4 {
+  margin: 0 0 16px;
+}
+.chat-remote-model-section .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+.chat-remote-profile-toolbar {
+  margin-bottom: 18px;
+}
+.chat-remote-profile-modal .ant-alert {
+  margin-bottom: 16px;
+}
+.chat-remote-inline-heading h3 {
+  margin: 22px 0 16px;
+}
+.chat-remote-profile-item p {
+  margin: 10px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.chat-remote-profile-item small {
+  display: block;
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--theme-text-secondary);
+}
+.chat-remote-profile-item li {
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+@media (max-width: 600px) {
+  .chat-remote-model-choice {
+    grid-template-columns: 1fr;
+  }
+  .chat-remote-contact-actions {
+    width: 100%;
+  }
+  .chat-remote-profile-modal .ant-modal-content {
+    padding: 18px 14px;
+  }
+}

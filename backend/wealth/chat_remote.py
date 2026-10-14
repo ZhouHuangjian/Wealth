@@ -36,6 +36,26 @@ SETTINGS_FIELDS = {
     "quietStart",
     "quietEnd",
 }
+SETTINGS_V2_FIELDS = SETTINGS_FIELDS | {
+    "replyModels",
+    "modelPreset",
+    "vision",
+    "audio",
+    "analysis",
+    "memory",
+}
+PROCESSING_FIELDS = {
+    "replyModels",
+    "autoRecognizeImages",
+    "autoTranscribeVoice",
+    "intentEnabled",
+    "affinityEnabled",
+    "memoryEnabled",
+    "autoAnalyzeMessages",
+    "autoCompressMemory",
+    "analysisModel",
+    "memoryModel",
+}
 CONVERSATION_FIELDS = {
     "id",
     "externalId",
@@ -50,9 +70,33 @@ COMMAND_TYPES = {
     "conversation.add",
     "conversation.patch",
 }
+V2_COMMAND_TYPES = {
+    "conversation.profile.get",
+    "conversation.basis.add",
+    "conversation.basis.patch",
+    "conversation.basis.delete",
+    "conversation.basis.generate",
+    "conversation.memory.patch",
+    "conversation.memory.entry.add",
+    "conversation.memory.entry.patch",
+    "conversation.memory.entry.delete",
+    "conversation.memory.compress",
+}
+ALL_COMMAND_TYPES = COMMAND_TYPES | V2_COMMAND_TYPES
+BASIS_CATEGORIES = {
+    "current_status",
+    "interest",
+    "preference",
+    "fact",
+    "boundary",
+    "plan",
+}
+MEMORY_KINDS = {"fact", "event", "preference", "openTopic"}
 ACTIVE_STATUSES = {"pending", "delivered"}
-MAX_POLL_BYTES = 256 * 1024
+MAX_POLL_BYTES = 1024 * 1024
 MAX_COMMAND_BYTES = 8 * 1024
+MAX_COMMAND_V2_BYTES = 32 * 1024
+MAX_PROFILE_BYTES = 768 * 1024
 MAX_QUEUED_COMMANDS = 50
 COMMAND_TTL = timedelta(minutes=15)
 FAILURE_MESSAGE = "本地执行失败，请在 Mac 查看详情。"
@@ -93,13 +137,113 @@ def optional_text(value, maximum):
     return value
 
 
-def validate_settings(body, *, full=False):
-    fields(body, SETTINGS_FIELDS, SETTINGS_FIELDS if full else ())
+def safe_text(value, maximum, *, blank=True):
+    """Profile metadata never carries recognizable credentials or media payloads."""
+    optional_text(value, maximum)
+    if not blank and not value.strip():
+        invalid()
+    if re.search(
+        r"(?:\bsk-[A-Za-z0-9._-]{10,}|\bBearer\s+\S+|data:(?:image|audio)/)",
+        value,
+        re.I,
+    ):
+        invalid()
+    return value
+
+
+def choice(body, *, contact=False):
+    fields(
+        body,
+        {"id", "provider", "modelName", "modelPreset", "label"},
+        {"id", "provider", "modelName"},
+    )
+    if not isinstance(body["id"], str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}", body["id"]
+    ):
+        invalid()
+    providers = (
+        {"compatible", "codex"}
+        if contact
+        else {"demo", "ollama", "compatible", "codex"}
+    )
+    if not isinstance(body["provider"], str) or body["provider"] not in providers:
+        invalid()
+    safe_text(body["modelName"], 200)
+    if "modelPreset" in body:
+        if not isinstance(body["modelPreset"], str) or body["modelPreset"] not in {
+            "custom",
+            "qwen",
+        }:
+            invalid()
+    if "label" in body:
+        safe_text(body["label"], 80)
+
+
+def model_choices(value):
+    if not isinstance(value, list) or len(value) > 4:
+        invalid()
+    for item in value:
+        choice(item)
+    if len({item["id"] for item in value}) != len(value):
+        invalid()
+
+
+def model_selection(value, *, audio=False):
+    fields(
+        value, {"provider", "modelName", "thinkingEnabled"}, {"provider", "modelName"}
+    )
+    providers = {"qwen", "compatible", "disabled"} | (set() if audio else {"codex"})
+    if not isinstance(value["provider"], str) or value["provider"] not in providers:
+        invalid()
+    safe_text(value["modelName"], 200)
+    if "thinkingEnabled" in value:
+        boolean(value["thinkingEnabled"])
+
+
+def validate_processing(body, *, patch=False):
+    fields(body, PROCESSING_FIELDS)
+    if patch and not body:
+        invalid()
+    for key, value in body.items():
+        if key == "replyModels":
+            if value is not None:
+                model_choices(value)
+        elif key in {"analysisModel", "memoryModel"}:
+            if value is not None:
+                choice(value, contact=True)
+        else:
+            boolean(value)
+    return body
+
+
+def validate_settings(body, *, full=False, version=1):
+    allowed = SETTINGS_V2_FIELDS if version == 2 else SETTINGS_FIELDS
+    required = SETTINGS_FIELDS if full else set()
+    if version == 2:
+        allowed = allowed | ({"revision"} if full else {"expectedRevision"})
+        if full:
+            required = required | {"revision"}
+    fields(body, allowed, required)
     if not body:
         invalid()
     for key, value in body.items():
-        if key in {"autoReplyEnabled", "syncDraftsEnabled", "quietHoursEnabled"}:
+        if key in {
+            "autoReplyEnabled",
+            "syncDraftsEnabled",
+            "quietHoursEnabled",
+            "autoRecognizeImages",
+            "autoTranscribeVoice",
+        }:
             boolean(value)
+        elif key == "replyModels":
+            model_choices(value)
+        elif key in {"vision", "audio", "analysis", "memory"}:
+            model_selection(value, audio=key == "audio")
+        elif key in {"revision", "expectedRevision"}:
+            revision(value)
+        elif key == "modelPreset":
+            if not isinstance(value, str) or value not in {"custom", "qwen"}:
+                invalid()
         elif key == "provider":
             if not isinstance(value, str) or value not in {
                 "demo",
@@ -109,7 +253,7 @@ def validate_settings(body, *, full=False):
             }:
                 invalid()
         elif key == "modelName":
-            optional_text(value, 200)
+            (safe_text if version == 2 else optional_text)(value, 200)
         elif key == "replyDelaySeconds":
             integer(value, 1, 300)
         elif key == "cooldownSeconds":
@@ -120,17 +264,51 @@ def validate_settings(body, *, full=False):
             r"(?:[01]\d|2[0-3]):[0-5]\d", value
         ):
             invalid()
+    if not full and (
+        set(body) <= {"expectedRevision"}
+        or (
+            set(body) - SETTINGS_FIELDS - {"expectedRevision"}
+            and "expectedRevision" not in body
+        )
+    ):
+        invalid()
     return body
 
 
-def validate_conversation(body):
-    exact_fields(body, CONVERSATION_FIELDS)
+def validate_conversation(body, *, version=1):
+    extra = (
+        {
+            "processing",
+            "revision",
+            "affinity",
+            "affinityUpdatedAt",
+            "basisCount",
+            "memoryCount",
+        }
+        if version == 2
+        else set()
+    )
+    fields(
+        body,
+        CONVERSATION_FIELDS | extra,
+        CONVERSATION_FIELDS | ({"revision"} if version == 2 else set()),
+    )
     for key in ("id", "externalId"):
         text_field(body[key], 300, identifier=True)
     text_field(body["name"], 80)
     optional_text(body["note"], 2000)
     boolean(body["autoReplyEnabled"])
     boolean(body["enabled"])
+    if "processing" in body:
+        validate_processing(body["processing"])
+    if "affinity" in body and body["affinity"] is not None:
+        integer(body["affinity"], 0, 100)
+    if "revision" in body:
+        revision(body["revision"])
+    if "affinityUpdatedAt" in body and body["affinityUpdatedAt"] is not None:
+        timestamp(body["affinityUpdatedAt"])
+    for key in {"basisCount", "memoryCount"} & set(body):
+        integer(body[key], 0, 132 if key == "memoryCount" else 100)
     return body
 
 
@@ -138,17 +316,56 @@ def validate_snapshot(body):
     exact_fields(
         body, {"version", "remoteEnabled", "settings", "conversations", "capabilities"}
     )
-    integer(body["version"], 1, 1)
+    integer(body["version"], 1, 2)
+    version = body["version"]
     boolean(body["remoteEnabled"])
-    validate_settings(body["settings"], full=True)
-    exact_fields(body["capabilities"], {"wechatAvailable", "codexAvailable"})
-    for value in body["capabilities"].values():
-        boolean(value)
+    validate_settings(body["settings"], full=True, version=version)
+    capability_fields = {"wechatAvailable", "codexAvailable"} | (
+        {"commandTypes"} if version == 2 else set()
+    )
+    fields(
+        body["capabilities"],
+        capability_fields | ({"codexModels"} if version == 2 else set()),
+        capability_fields,
+    )
+    for key in ("wechatAvailable", "codexAvailable"):
+        boolean(body["capabilities"][key])
+    if version == 2:
+        types = body["capabilities"]["commandTypes"]
+        if (
+            not isinstance(types, list)
+            or len(types) > len(ALL_COMMAND_TYPES)
+            or any(
+                not isinstance(item, str) or item not in ALL_COMMAND_TYPES
+                for item in types
+            )
+        ):
+            invalid()
+        if len(set(types)) != len(types):
+            invalid()
+        if "codexModels" in body["capabilities"]:
+            models = body["capabilities"]["codexModels"]
+            if not isinstance(models, list) or len(models) > 100:
+                invalid()
+            for model in models:
+                exact_fields(model, {"id", "label", "inputModalities"})
+                safe_text(model["id"], 200, blank=False)
+                safe_text(model["label"], 200, blank=False)
+                modalities = model["inputModalities"]
+                if (
+                    not isinstance(modalities, list)
+                    or not 1 <= len(modalities) <= 2
+                    or any(item not in ("text", "image") for item in modalities)
+                    or len(set(modalities)) != len(modalities)
+                ):
+                    invalid()
+            if len({model["id"] for model in models}) != len(models):
+                invalid()
     conversations = body["conversations"]
     if not isinstance(conversations, list) or len(conversations) > 100:
         invalid()
     for item in conversations:
-        validate_conversation(item)
+        validate_conversation(item, version=version)
     if len({item["id"] for item in conversations}) != len(conversations):
         invalid()
     if len({item["externalId"] for item in conversations}) != len(conversations):
@@ -156,11 +373,13 @@ def validate_snapshot(body):
     return body
 
 
-def validate_payload(kind, body):
-    if not isinstance(kind, str) or kind not in COMMAND_TYPES:
+def validate_payload(kind, body, *, version=2):
+    if not isinstance(kind, str) or kind not in (
+        ALL_COMMAND_TYPES if version == 2 else COMMAND_TYPES
+    ):
         invalid()
     if kind == "settings.patch":
-        return validate_settings(body)
+        return validate_settings(body, version=version)
     if kind == "contacts.search":
         fields(body, {"query", "limit"}, {"query"})
         text_field(body["query"], 100)
@@ -169,9 +388,14 @@ def validate_payload(kind, body):
         exact_fields(body, {"externalId", "name"})
         text_field(body["externalId"], 300, identifier=True)
         text_field(body["name"], 80)
-    else:
-        fields(body, {"id", "name", "note", "autoReplyEnabled", "enabled"}, {"id"})
-        if len(body) < 2:
+    elif kind == "conversation.patch":
+        fields(
+            body,
+            {"id", "name", "note", "autoReplyEnabled", "enabled"}
+            | ({"processing", "expectedRevision"} if version == 2 else set()),
+            {"id"},
+        )
+        if not set(body) - {"id", "expectedRevision"}:
             invalid()
         text_field(body["id"], 300, identifier=True)
         if "name" in body:
@@ -181,6 +405,251 @@ def validate_payload(kind, body):
         for key in ("autoReplyEnabled", "enabled"):
             if key in body:
                 boolean(body[key])
+        if "processing" in body:
+            validate_processing(body["processing"], patch=True)
+            if "expectedRevision" not in body:
+                invalid()
+        if "expectedRevision" in body:
+            revision(body["expectedRevision"])
+    else:
+        validate_profile_payload(kind, body)
+    return body
+
+
+def identifier(value):
+    text_field(value, 300, identifier=True)
+
+
+def revision(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+        invalid()
+
+
+def timestamp(value):
+    from datetime import datetime
+
+    if not isinstance(value, str) or len(value) > 50:
+        invalid()
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.utcoffset() is None:
+            invalid()
+    except ValueError:
+        invalid()
+
+
+def basis_values(body, *, patch=False):
+    fields(
+        body,
+        {"category", "content", "sourceNote"},
+        () if patch else {"category", "content"},
+    )
+    if not body:
+        invalid()
+    if "category" in body and (
+        not isinstance(body["category"], str)
+        or body["category"] not in BASIS_CATEGORIES
+    ):
+        invalid()
+    if "content" in body:
+        safe_text(body["content"], 1000, blank=False)
+    if "sourceNote" in body:
+        safe_text(body["sourceNote"], 500)
+
+
+def memory_values(body):
+    fields(body, {"summary", "openTopics"})
+    if not body:
+        invalid()
+    if "summary" in body:
+        safe_text(body["summary"], 1600)
+    if "openTopics" in body:
+        topics = body["openTopics"]
+        if not isinstance(topics, list) or len(topics) > 10:
+            invalid()
+        for item in topics:
+            safe_text(item, 200, blank=False)
+
+
+def memory_entry_values(body, *, patch=False):
+    fields(
+        body,
+        {"kind", "text"} | ({"status"} if patch else set()),
+        () if patch else {"kind", "text"},
+    )
+    if not body:
+        invalid()
+    if "kind" in body and (
+        not isinstance(body["kind"], str) or body["kind"] not in MEMORY_KINDS
+    ):
+        invalid()
+    if "text" in body:
+        safe_text(body["text"], 600, blank=False)
+    if "status" in body and (
+        not isinstance(body["status"], str)
+        or body["status"] not in {"pending", "approved", "rejected"}
+    ):
+        invalid()
+
+
+def validate_profile_payload(kind, body):
+    id_only = {
+        "conversation.profile.get",
+        "conversation.basis.generate",
+        "conversation.memory.compress",
+    }
+    allowed = {"id"}
+    required = {"id"}
+    values = None
+    if kind in {"conversation.basis.add", "conversation.basis.patch"}:
+        allowed |= {"category", "content", "sourceNote"}
+        values = basis_values
+        if kind.endswith("patch"):
+            allowed.add("factId")
+            required.add("factId")
+    elif kind == "conversation.basis.delete":
+        allowed.add("factId")
+        required.add("factId")
+    elif kind == "conversation.memory.patch":
+        allowed |= {"summary", "openTopics"}
+        values = memory_values
+    elif kind in {"conversation.memory.entry.add", "conversation.memory.entry.patch"}:
+        allowed |= {"kind", "text"}
+        values = memory_entry_values
+        if kind.endswith("patch"):
+            allowed |= {"entryId", "status"}
+            required.add("entryId")
+    elif kind == "conversation.memory.entry.delete":
+        allowed.add("entryId")
+        required.add("entryId")
+    elif kind not in id_only:
+        invalid()
+    if kind not in id_only:
+        allowed.add("expectedRevision")
+        required.add("expectedRevision")
+    fields(body, allowed, required)
+    for key in {"id", "factId", "entryId"} & set(body):
+        identifier(body[key])
+    if "expectedRevision" in body:
+        revision(body["expectedRevision"])
+    if values:
+        attributes = {
+            key: value
+            for key, value in body.items()
+            if key not in {"id", "factId", "entryId", "expectedRevision"}
+        }
+        if values in {basis_values, memory_entry_values}:
+            values(attributes, patch=kind.endswith("patch"))
+        else:
+            values(attributes)
+
+
+def requires_v2(kind, body):
+    return (
+        kind in V2_COMMAND_TYPES
+        or (kind == "settings.patch" and bool(set(body) - SETTINGS_FIELDS))
+        or (
+            kind == "conversation.patch"
+            and bool(set(body) - {"id", "name", "note", "autoReplyEnabled", "enabled"})
+        )
+    )
+
+
+def supports_command(snapshot, kind, body):
+    if not requires_v2(kind, body):
+        return True
+    return snapshot.get("version") == 2 and kind in snapshot.get(
+        "capabilities", {}
+    ).get("commandTypes", [])
+
+
+def validate_profile(body):
+    import json
+
+    if (
+        len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        > MAX_PROFILE_BYTES
+    ):
+        invalid()
+    exact_fields(body, {"id", "revision", "basisFacts", "memory"})
+    identifier(body["id"])
+    revision(body["revision"])
+    facts = body["basisFacts"]
+    if not isinstance(facts, list) or len(facts) > 100:
+        invalid()
+    for fact in facts:
+        exact_fields(
+            fact,
+            {
+                "id",
+                "category",
+                "content",
+                "sourceNote",
+                "origin",
+                "createdAt",
+                "updatedAt",
+            },
+        )
+        identifier(fact["id"])
+        basis_values({key: fact[key] for key in {"category", "content", "sourceNote"}})
+        if fact["origin"] not in ("manual", "model"):
+            invalid()
+        timestamp(fact["createdAt"])
+        timestamp(fact["updatedAt"])
+    if len({fact["id"] for fact in facts}) != len(facts):
+        invalid()
+    memory = body["memory"]
+    if memory is None:
+        return body
+    fields(
+        memory,
+        {
+            "summary",
+            "openTopics",
+            "entries",
+            "provider",
+            "modelName",
+            "updatedAt",
+            "summaryOrigin",
+            "openTopicsOrigin",
+        },
+        {"summary", "openTopics", "entries", "provider", "modelName", "updatedAt"},
+    )
+    memory_values({"summary": memory["summary"], "openTopics": memory["openTopics"]})
+    if not isinstance(memory["provider"], str) or memory["provider"] not in {
+        "qwen",
+        "compatible",
+        "codex",
+        "manual",
+    }:
+        invalid()
+    safe_text(memory["modelName"], 200)
+    timestamp(memory["updatedAt"])
+    for key in {"summaryOrigin", "openTopicsOrigin"} & set(memory):
+        if memory[key] not in ("manual", "model"):
+            invalid()
+    entries = memory["entries"]
+    if not isinstance(entries, list) or len(entries) > 132:
+        invalid()
+    for entry in entries:
+        fields(
+            entry,
+            {"id", "kind", "text", "status", "origin", "createdAt", "updatedAt"},
+            {"id", "kind", "text", "status", "origin", "createdAt"},
+        )
+        identifier(entry["id"])
+        memory_entry_values(
+            {key: entry[key] for key in {"kind", "text", "status"}}, patch=True
+        )
+        if entry["status"] == "rejected":
+            invalid()
+        if entry["origin"] not in ("manual", "model"):
+            invalid()
+        timestamp(entry["createdAt"])
+        if "updatedAt" in entry:
+            timestamp(entry["updatedAt"])
+    if len({entry["id"] for entry in entries}) != len(entries):
+        invalid()
     return body
 
 
@@ -218,10 +687,15 @@ def dispatch_remote(request, device_id, action, body):
         raise DomainError("不支持此方法", "method_not_allowed", 405)
     ident = uuid_value(device_id)
     if action == "commands":
-        if len(request.body) > MAX_COMMAND_BYTES:
+        if len(request.body) > MAX_COMMAND_V2_BYTES:
             raise DomainError("请求内容超过大小限制", "payload_too_large", 413)
         exact_fields(body, {"type", "payload"})
         validate_payload(body["type"], body["payload"])
+        if (
+            not requires_v2(body["type"], body["payload"])
+            and len(request.body) > MAX_COMMAND_BYTES
+        ):
+            raise DomainError("请求内容超过大小限制", "payload_too_large", 413)
         try:
             request_id = uuid.UUID(request.headers.get("Idempotency-Key", ""))
         except (ValueError, TypeError, AttributeError):
@@ -257,6 +731,12 @@ def dispatch_remote(request, device_id, action, body):
         if not device.remote_snapshot.get("remoteEnabled"):
             raise DomainError(
                 "请先在 Mac 开启远程管理并等待连接", "remote_unavailable", 409
+            )
+        if not supports_command(device.remote_snapshot, body["type"], body["payload"]):
+            raise DomainError(
+                "请先更新并连接 Mac，当前版本不支持此配置。",
+                "remote_capability_required",
+                409,
             )
         if (
             device.commands.filter(status__in=ACTIVE_STATUSES).count()
@@ -319,9 +799,20 @@ def receipt_result(command, body):
             invalid()
     elif command.type in {"conversation.add", "conversation.patch"}:
         exact_fields(result, {"conversation"})
-        validate_conversation(result["conversation"])
+        validate_conversation(
+            result["conversation"],
+            version=2
+            if isinstance(result["conversation"], dict)
+            and "revision" in result["conversation"]
+            else 1,
+        )
         key = "externalId" if command.type == "conversation.add" else "id"
         if result["conversation"][key] != command.payload[key]:
+            invalid()
+    elif command.type in V2_COMMAND_TYPES:
+        exact_fields(result, {"profile"})
+        validate_profile(result["profile"])
+        if result["profile"]["id"] != command.payload["id"]:
             invalid()
     else:
         exact_fields(result, set())
@@ -383,6 +874,14 @@ def device_poll(request):
             )
             if not snapshot["remoteEnabled"]:
                 cancel_commands(device)
+            else:
+                # A downgraded/reconfigured client must not receive requests that
+                # were queued while it advertised additional capabilities.
+                for queued in device.commands.filter(status__in=ACTIVE_STATUSES):
+                    if not supports_command(snapshot, queued.type, queued.payload):
+                        queued.status, queued.completed_at = "cancelled", now
+                        queued.error = "Mac 版本或功能已变化，此请求已取消。"
+                        queued.save(update_fields=["status", "completed_at", "error"])
             command = (
                 device.commands.filter(status__in=ACTIVE_STATUSES)
                 .order_by("created_at", "id")

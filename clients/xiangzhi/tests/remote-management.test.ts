@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createApplication } from '../server/app.js';
-import { RemoteManagement, type RemoteCommand } from '../server/remote-management.js';
+import { RemoteManagement,remoteCommandTimeout, type RemoteCommand } from '../server/remote-management.js';
+import {remoteSnapshotV2,remoteProfile,MAX_REMOTE_POLL_BYTES} from '../server/remote-protocol.js';
+import type {Conversation} from '../shared/types.js';
 import { Store } from '../server/store.js';
 
 const config={url:'http://127.0.0.1:9876/api/v1/chat/ingest',token:'synthetic-token-'.repeat(3),inboxToken:''};
@@ -96,4 +98,58 @@ test('local switch requires session and CSRF; remote settings preserve draft-onl
   await app.remote.tick(); // Persistent disabled barrier.
   next=command('settings.patch',{autoReplyEnabled:true});await app.remote.tick();
   assert.equal(app.store.read().settings.autoReplyMode,'draft');assert.equal(app.store.read().settings.autoReplyEnabled,false);
+});
+
+const largeProfileConversation=():Conversation=>{
+  const at=new Date().toISOString(),cid=randomUUID();
+  return {id:cid,name:'大档案测试',avatar:'测',color:'green',note:'',autoReplyEnabled:false,channel:'wechat',externalId:`wxid_${cid}`,createdAt:at,updatedAt:at,
+    basisFacts:Array.from({length:100},()=>({id:randomUUID(),category:'fact' as const,content:'记'.repeat(1000),sourceNote:'注'.repeat(500),createdAt:at,updatedAt:at,origin:'manual' as const})),
+    memory:{summary:'本地测试',openTopics:[],entries:Array.from({length:132},()=>({id:randomUUID(),kind:'fact' as const,text:'忆'.repeat(600),status:'approved' as const,origin:'manual' as const,createdAt:at,sourceMessageIds:[]})),
+      throughSequence:0,sourceDigest:'',provider:'manual',modelName:'',updatedAt:at}};
+};
+
+test('large profile receipts are byte-batched and unsent results survive process restart without dropping entries',async t=>{
+  const directory=mkdtempSync(join(tmpdir(),'xiangzhi-remote-batch-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const path=join(directory,'state.sqlite'),scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex');
+  const profiles=[remoteProfile(largeProfileConversation()),remoteProfile(largeProfileConversation())];
+  let store=new Store(path),worker:RemoteManagement;const requests:any[]=[];
+  for(const profile of profiles){const cmd=command('conversation.profile.get',{id:profile.id});store.remoteClaim(scope,cmd.id,Date.parse(cmd.expires_at));store.remoteFinish(scope,{id:cmd.id,status:'succeeded',result:{profile},error:''});}
+  const options={config:()=>config,enabled:()=>true,snapshot:()=>remoteSnapshotV2(store.read().settings,[],[],{wechatAvailable:true,codexAvailable:false}),execute:async()=>({}),fetch:async(_input:unknown,init?:RequestInit)=>{const body=String(init?.body);assert.ok(Buffer.byteLength(body)<=MAX_REMOTE_POLL_BYTES);requests.push(JSON.parse(body));return response();}};
+  worker=new RemoteManagement(store,options);await worker.tick();assert.equal(requests[0].completed.length,1);assert.equal(requests[0].completed[0].result.profile.memory.entries.length,132);assert.equal(store.remoteReceipts(scope).length,1);
+  worker.stop();store.close();store=new Store(path);worker=new RemoteManagement(store,options);await worker.tick();assert.equal(requests[1].completed.length,1);assert.equal(requests[1].completed[0].result.profile.memory.entries.length,132);assert.equal(store.remoteReceipts(scope).length,0);
+  assert.notEqual(requests[0].completed[0].id,requests[1].completed[0].id);worker.stop();store.close();
+});
+
+test('old server falls back to v1 without losing new receipts and re-probes after upgrade',async t=>{
+  const store=new Store(':memory:'),scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex');let now=Date.now(),updated=false;const requests:any[]=[];
+  const cmd=command('conversation.profile.get',{id:randomUUID()},now+900_000),profile=remoteProfile({...largeProfileConversation(),basisFacts:[],memory:undefined});
+  store.remoteClaim(scope,cmd.id,Date.parse(cmd.expires_at));store.remoteFinish(scope,{id:cmd.id,status:'succeeded',result:{profile},error:''});
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,now:()=>now,snapshot:()=>remoteSnapshotV2(store.read().settings,[],[],{wechatAvailable:true,codexAvailable:false}),execute:async()=>({}),fetch:async(_input,init)=>{const body=JSON.parse(String(init?.body));requests.push(body);return !updated&&body.snapshot.version===2?new Response('{}',{status:422,headers:{'Content-Type':'application/json'}}):response();}});
+  t.after(()=>{worker.stop();store.close();});
+  await worker.tick();assert.deepEqual(requests.map(body=>body.snapshot.version),[2,1]);assert.equal(requests[1].completed.length,0);assert.equal(store.remoteReceipts(scope).length,1);assert.ok(!('analysis'in requests[1].snapshot.settings));
+  await worker.tick();assert.equal(requests.at(-1).snapshot.version,1);assert.equal(store.remoteReceipts(scope).length,1);
+  now+=60_001;updated=true;await worker.tick();assert.equal(requests.at(-1).snapshot.version,2);assert.equal(requests.at(-1).completed.length,1);assert.equal(store.remoteReceipts(scope).length,0);
+});
+
+test('legacy fallback never executes newly queued profile work from a reverted server',async t=>{
+  const store=new Store(':memory:');let executions=0,calls=0;
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,snapshot:()=>remoteSnapshotV2(store.read().settings,[],[],{wechatAvailable:true,codexAvailable:false}),execute:async()=>{executions++;return {};},fetch:async()=>++calls===1?new Response('{}',{status:422}):response([command('conversation.profile.get',{id:randomUUID()})])});
+  t.after(()=>{worker.stop();store.close();});await worker.tick();assert.equal(executions,0);
+  const scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex');assert.equal(store.remoteReceipts(scope)[0].status,'failed');
+});
+
+test('model operations receive longer timeouts while respecting client and server expiry',()=>{
+  const now=Date.now(),model=command('conversation.basis.generate',{id:randomUUID()},now+900_000);
+  assert.equal(remoteCommandTimeout(model,now,now),120_000);
+  assert.equal(remoteCommandTimeout(command('settings.patch',{},now+900_000),now,now),30_000);
+  const short=command('conversation.memory.compress',{id:randomUUID()},now+50_000);
+  assert.equal(remoteCommandTimeout(short,now,now+10_000),40_000);
+});
+
+test('an executor that ignores its timeout cannot acknowledge a successful result',async t=>{
+  const store=new Store(':memory:'),expires=Date.now()+90_000,queued=command('conversation.profile.get',{id:randomUUID()},expires);let executions=0;
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,now:()=>expires-20,snapshot:()=>({}),execute:async()=>{executions++;await new Promise(resolve=>setTimeout(resolve,80));return {ignored_timeout:true};},fetch:async()=>response([queued])});
+  t.after(()=>{worker.stop();store.close();});await worker.tick();assert.equal(executions,1);
+  const scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex'),stored=store.remoteReceipts(scope,expires-20)[0];
+  assert.equal(stored.status,'failed');assert.deepEqual(stored.result,{});
 });

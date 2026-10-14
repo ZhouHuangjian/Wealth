@@ -23,7 +23,11 @@ import { readWechatImage, readWechatVoice } from './wechat-images.js';
 import { MediaFiles, parseImageUpload, parseAudioUpload, MAX_MEDIA_BYTES } from './media-files.js';
 import { MediaAutomation } from './media-automation.js';
 import { bridgeConfig, createSender, isBridgeConfigured, isBridgeReceiveConfigured, secureEqual, validateEndpoint, type BridgeConfig } from './bridge.js';
-import { RemoteManagement, remoteSettingsSchema, remoteSettings, remoteConversation, wechatAddSchema, conversationPatchSchema, searchCommandSchema, patchCommandSchema } from './remote-management.js';
+import {RemoteManagement,wechatAddSchema,conversationPatchSchema,searchCommandSchema} from './remote-management.js';
+import {remoteSnapshotV2} from './remote-protocol.js';
+import {executeRemoteEdit} from './remote-actions.js';
+import {readModelCatalog} from './model-catalog.js';
+import {unavailableModelCatalog} from '../shared/model-catalog.js';
 import type { AppState, Conversation, Message, PublicState, Settings, ImageAttachment } from '../shared/types.js';
 import { contactAutoMediaEnabled, contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
 import { replyModelsSchema } from './contact-processing-schema.js';
@@ -62,6 +66,7 @@ export function checkModelReady(settings: Settings): void {
   if(settings.replyModels?.length){for(const model of settings.replyModels)checkModelReady({...settings,...model,replyModels:[]});return;}
   if (settings.provider === 'demo') return;
   if (settings.provider === 'codex') {
+    if(/^qwen/i.test(settings.modelName))throw new Error('Codex 请选择本机可用的 OpenAI 模型。');
     if (!settings.allowRemoteModel) throw new Error('Codex 会调用模型服务，请先允许发送必要的对话片段。');
     return;
   }
@@ -90,6 +95,7 @@ export function createApplication(options: {
   uploadDrafts?: typeof uploadDraftBatch;
   checkDraftConnection?: typeof checkDraftConnection;
   remoteFetch?: typeof fetch;
+  readModelCatalog?: typeof readModelCatalog;
   recognizeImage?:typeof recognizeImage;transcribeAudio?:typeof transcribeAudio;
   readWechatImage?:typeof readWechatImage;readWechatVoice?:typeof readWechatVoice;
   generate?: typeof generateDrafts; send?: ReturnType<typeof createSender>;
@@ -126,6 +132,9 @@ export function createApplication(options: {
     catch { codexStatus = {available:false,version:null,message:'无法检查 Codex CLI，请检查服务端配置。'}; }
   };
   void checkCodex();
+  let modelCatalog=unavailableModelCatalog();
+  const updateModelCatalog=async()=>{modelCatalog=await (options.readModelCatalog??readModelCatalog)();return modelCatalog;};
+  void updateModelCatalog().catch(()=>{});
   const rawSend = options.send ?? createSender(config);
   const activeSends = new Map<string,string>();
   const send: ReturnType<typeof createSender> = async (conversation, text, key, signal) => {
@@ -261,6 +270,7 @@ export function createApplication(options: {
         autoRunning:settings.autoReplyEnabled,modelLabel:settings.provider==='demo'?'本机规则演示':settings.provider==='codex'?`Codex · ${settings.modelName||'默认模型'}`:settings.modelName||'尚未设置模型' } };
   };
   app.get('/api/state', (_req,res)=>res.json(publicState()));
+  app.get('/api/model-catalog',async(_req,res)=>res.json(await updateModelCatalog()));
   app.get('/api/draft-sync/connection', (_req,res)=>res.json(syncConnection.status()));
   const verifySyncConnection = async () => {
     const configuration = syncConnection.config();
@@ -504,6 +514,10 @@ export function createApplication(options: {
     const next = { ...old, ...patch,
       ...(patch.vision?{vision:{...old.vision,...patch.vision}}:{}),...(patch.audio?{audio:{...old.audio,...patch.audio}}:{}),
       ...(patch.analysis?{analysis:{...old.analysis,...patch.analysis}}:{}),...(patch.memory?{memory:{...old.memory,...patch.memory}}:{}) };
+    const changedModels=[...(patch.provider!==undefined||patch.modelName!==undefined?[next]:[]),...(patch.replyModels??[]),patch.vision,patch.analysis,patch.memory];
+    for(const item of changedModels){
+      if(item?.provider==='codex'&&/^qwen/i.test(item.modelName))throw new Error('Codex 请选择本机可用的 OpenAI 模型。');
+    }
     // Existing remote controls choose one primary model; honor that selection.
     if(patch.replyModels===undefined&&((patch.provider!==undefined&&patch.provider!==old.provider)||(patch.modelName!==undefined&&patch.modelName!==old.modelName)))next.replyModels=[];
     if((next.replyModels?.length??0)>1&&next.autoReplyMode==='send'){next.autoReplyMode='draft';next.autoReplyEnabled=false;}
@@ -568,6 +582,9 @@ export function createApplication(options: {
       if(memoryModel===null)delete next.processing.memoryModel;else if(memoryModel!==undefined)next.processing.memoryModel=memoryModel;
       if(!next.processing.intentEnabled&&!next.processing.affinityEnabled&&(processing.intentEnabled===false||processing.affinityEnabled===false))next.processing.autoAnalyzeMessages=false;
       if(processing.memoryEnabled===false)next.processing.autoCompressMemory=false;
+    }
+    for(const choice of [...(processing?.replyModels??[]),processing?.analysisModel,processing?.memoryModel]){
+      if(choice?.provider==='codex'&&/^qwen/i.test(choice.modelName))throw new Error('Codex 请选择本机可用的 OpenAI 模型。');
     }
     validateContactFeatures(state.settings,next,{
       analysis:processing?.intentEnabled===true||processing?.affinityEnabled===true||processing?.autoAnalyzeMessages===true||!!processing?.analysisModel,
@@ -766,15 +783,10 @@ export function createApplication(options: {
       const safe=/^[\u4e00-\u9fff]/.test(message)&&message.length<240&&!message.includes(syncConnection.config().token||'\0');
       store.update(s=>addActivity(s,'warning','网页远程操作未完成',safe?message:'请检查远程操作的输入格式与本机配置后重试。'));
     },
-    snapshot:()=>{const state=store.read();return {version:1,remoteEnabled:true,settings:remoteSettings(state.settings),
-      conversations:state.conversations.filter(c=>c.channel==='wechat').slice(0,8).map(remoteConversation),
-      capabilities:{wechatAvailable:wechatInspection().available,codexAvailable:codexStatus.available}};},
+    snapshot:()=>{const state=store.read();return remoteSnapshotV2(state.settings,state.conversations.filter(c=>c.channel==='wechat').slice(0,8),state.messages,
+      {wechatAvailable:wechatInspection().available,codexAvailable:codexStatus.available,codexModels:modelCatalog.codex.models},[syncConnection.config().token??'']);},
     execute:async(command,signal)=>{
-      if(signal.aborted)throw new Error('远程操作已取消。');
-      if(command.type==='settings.patch') {
-        const patch=remoteSettingsSchema.parse(command.payload);
-        patchSettings({...patch,autoReplyMode:'draft'});return {};
-      }
+      signal.throwIfAborted();
       if(command.type==='contacts.search') {
         if(!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');
         const {query,limit}=searchCommandSchema.parse(command.payload);
@@ -784,14 +796,8 @@ export function createApplication(options: {
         const contacts=page.contacts.slice(0,limit).map(({externalId,name})=>wechatAddSchema.parse({externalId,name}));
         return {contacts,hasMore:page.hasMore||page.contacts.length>limit};
       }
-      if(command.type==='conversation.add')return {conversation:remoteConversation(addWechatConversation(command.payload))};
-      const {id:cid,enabled,...patch}=patchCommandSchema.parse(command.payload);
-      const target=conversationOf(store.read(),cid);
-      if(target.channel!=='wechat')throw new Error('远程管理只支持微信会话。');
-      if(enabled&&!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');
-      if(Object.keys(patch).length)patchConversation(cid,patch);
-      if(enabled!==undefined)setWechatEnabled(cid,enabled);
-      return {conversation:remoteConversation(conversationOf(store.read(),cid))};
+      return executeRemoteEdit(command,signal,{store,insights,patchSettings,patchConversation,setWechatEnabled,addWechatConversation,
+        wechatAvailable:()=>wechatInspection().available,secrets:()=>[syncConnection.config().token??'']});
     },
   });
   return {app,store,engine,collector,remote,mediaAutomation,insights,publicState,close:()=>{insights.stop();mediaAutomation.stop();cancelMedia();remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
