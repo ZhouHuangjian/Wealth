@@ -41,7 +41,7 @@ function addRecipientContext(state: AppState, conversationId = 'a') {
 }
 
 test('same-contact foundation, reviewed memory and memory switch changes invalidate an in-flight draft', async () => {
-  for (const change of ['basis', 'approved-memory', 'summary', 'disable-memory', 'clear-memory', 'account'] as const) {
+  for (const change of ['basis', 'basis-origin', 'approved-memory', 'manual-memory', 'summary', 'manual-summary', 'disable-memory', 'clear-memory', 'account'] as const) {
     const store = new MemoryStore(); add(store, 'm1');
     store.update(state => {state.settings.autoReplyMode = 'draft'; addRecipientContext(state); state.conversations[0].wechat = {
       enabled: true, initialized: true, cursor: null, accountFingerprint: 'account-before', lastCheckedAt: null, status: 'ready', detail: ''};});
@@ -51,8 +51,12 @@ test('same-contact foundation, reviewed memory and memory switch changes invalid
     store.update(state => {
       const conversation = state.conversations[0];
       if (change === 'basis') conversation.basisFacts![0].content = '对方最近学习烹饪';
+      if (change === 'basis-origin') Object.assign(conversation.basisFacts![0], {origin: 'model', sourceMessageIds: ['m1'],
+        sourceMessageHashes: {m1: messageEvidenceHash(state.messages.find(message => message.id === 'm1')!)}});
       if (change === 'approved-memory') conversation.memory!.entries[0].text = '用户修订了摄影话题';
+      if (change === 'manual-memory') Object.assign(conversation.memory!.entries[0], {origin: 'manual', sourceMessageIds: [], sourceMessageHashes: undefined});
       if (change === 'summary') conversation.memory!.summary = '更新的未确认回顾';
+      if (change === 'manual-summary') conversation.memory!.summaryOrigin = 'manual';
       if (change === 'disable-memory') conversation.processing!.memoryEnabled = false;
       if (change === 'clear-memory') delete conversation.memory;
       if (change === 'account') {conversation.wechat!.accountFingerprint = 'account-after'; delete conversation.memory;}

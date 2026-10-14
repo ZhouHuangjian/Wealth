@@ -5,9 +5,13 @@ import type {AppState,ContactInsights,ContactMemory,Conversation,Settings} from 
 import {analyzeContactMessage,insightsInputDigest} from './contact-insights.js';
 import {compressContactMemory,memoryInputDigest,memoryRemainingCount} from './contact-memory.js';
 import {effectiveContactModelSettings} from './contact-model.js';
+import {basisInputDigest,generateContactBasis} from './contact-basis.js';
 import type {Store} from './store.js';
 
 const basisSchema=z.object({category:z.enum(['current_status','interest','preference','fact','boundary','plan']),content:z.string().trim().min(1).max(1000),sourceNote:z.string().trim().max(500).default('')}).strict();
+const basisPatchSchema=basisSchema.omit({sourceNote:true}).partial().extend({sourceNote:z.string().trim().max(500).optional()}).strict().refine(v=>Object.keys(v).length>0);
+const memoryKind=z.enum(['fact','event','preference','openTopic']);
+const memoryEntrySchema=z.object({kind:memoryKind,text:z.string().trim().min(1).max(600)}).strict();
 const cid=(req:Request)=>String(req.params.id);
 const missing=()=>Object.assign(new Error('找不到这段对话。'),{status:404});
 function conversation(state:AppState,id:string):Conversation {const c=state.conversations.find(c=>c.id===id);if(!c)throw missing();return c;}
@@ -37,6 +41,7 @@ export class ContactInsightService {
   private running:Promise<void>|null=null;
   constructor(private readonly store:Store,private readonly options:{
     analyze?:typeof analyzeContactMessage;compress?:typeof compressContactMemory;
+    generateBasis?:typeof generateContactBasis;
     onContextChanged:(conversationId:string)=>void;
   }){}
   private record(id:string,title:string,detail:string,kind:'info'|'success'|'warning'='success'){
@@ -135,6 +140,43 @@ export class ContactInsightService {
       return {memory:result,cached:false,remaining:memoryRemainingCount(this.store.read(),id)};
     }finally{if(this.active.get(key)?.controller===controller)this.active.delete(key);}
   }
+  async generateBasis(id:string){
+    if(this.closed)throw new Error('档案整理服务已停止。');
+    const before=this.store.read(),c=conversation(before,id),inputDigest=basisInputDigest(before,id);
+    if(c.basisGeneration?.sourceDigest===inputDigest)return {facts:c.basisFacts??[],cached:true};
+    const manual=(c.basisFacts??[]).filter(f=>f.origin!=='model');
+    if(manual.length>=100)throw new Error('基础资料已达到上限，请先整理已有内容。');
+    const key=`${id}:basis`;
+    if(this.active.has(key))throw Object.assign(new Error('此人的档案正在整理，请等待结果。'),{status:409});
+    const controller=new AbortController(),configuration=modelConfiguration(before,id,'memory');
+    this.active.set(key,{cid:id,kind:'memory',controller});
+    try{
+      const result=await (this.options.generateBasis??generateContactBasis)(before,id,controller.signal);
+      controller.signal.throwIfAborted();
+      const now=this.store.read();
+      if(this.closed||modelConfiguration(now,id,'memory')!==configuration||basisInputDigest(now,id)!==inputDigest||result.sourceDigest!==inputDigest)
+        throw Object.assign(new Error('聊天或档案配置已变化，旧整理结果未保存。'),{status:409});
+      const {facts,usage:_usage,...metadata}=result;
+      this.changed(id);this.options.onContextChanged(id);
+      this.store.update(s=>{
+        const current=conversation(s,id),preserved=(current.basisFacts??[]).filter(f=>f.origin!=='model');
+        current.basisFacts=[...preserved,...facts.slice(0,100-preserved.length)];current.basisGeneration=metadata;
+        for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;
+      });
+      this.record(id,'模型已整理对方档案','基础资料已保存在本机，可逐条修改或补充；个人填写的信息已保留。');
+      return {facts:conversation(this.store.read(),id).basisFacts??[],cached:false};
+    }finally{if(this.active.get(key)?.controller===controller)this.active.delete(key);}
+  }
+  private ensureMemory(s:AppState,id:string):ContactMemory{
+    const c=conversation(s,id),at=new Date().toISOString();
+    return c.memory??=( {summary:'',entries:[],openTopics:[],throughSequence:s.messages.reduce((max,m)=>m.conversationId===id?Math.max(max,m.sequence):max,0),
+      sourceDigest:'manual',compressedMessageHashes:{},provider:'manual',modelName:'手动补充',updatedAt:at} );
+  }
+  private memoryChanged(id:string,mutate:(memory:ContactMemory,state:AppState)=>void){
+    conversation(this.store.read(),id);this.changed(id);this.options.onContextChanged(id);
+    this.store.update(s=>{const memory=this.ensureMemory(s,id);mutate(memory,s);memory.modelRecapInvalidated=true;memory.updatedAt=new Date().toISOString();for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;});
+    return conversation(this.store.read(),id).memory!;
+  }
   register(app:Express){
     app.post('/api/conversations/:id/analyze',async(req,res)=>{
       const input=z.object({messageId:z.string().min(1).max(300).optional()}).strict().parse(req.body??{});
@@ -144,15 +186,18 @@ export class ContactInsightService {
       const id=cid(req),input=basisSchema.parse(req.body);conversation(this.store.read(),id);
       if((conversation(this.store.read(),id).basisFacts?.length??0)>=100)throw new Error('此人的基础资料已达到上限，请先整理已有内容。');
       this.changed(id);this.options.onContextChanged(id);
-      const at=new Date().toISOString(),fact={id:randomUUID(),...input,createdAt:at,updatedAt:at};
+      const at=new Date().toISOString(),fact={id:randomUUID(),...input,origin:'manual' as const,createdAt:at,updatedAt:at};
       this.store.update(s=>{const c=conversation(s,id);(c.basisFacts??=[]).push(fact);for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;});
       this.record(id,'已更新联系人基础资料','已保存本人填写的信息。');res.status(201).json(fact);
     });
     app.patch('/api/conversations/:id/basis/:factId',(req,res)=>{
-      const id=cid(req),factId=String(req.params.factId),input=basisSchema.partial().strict().parse(req.body);
+      const id=cid(req),factId=String(req.params.factId),input=basisPatchSchema.parse(req.body);
       if(!conversation(this.store.read(),id).basisFacts?.some(f=>f.id===factId))throw Object.assign(new Error('找不到这条基础资料。'),{status:404});
       this.changed(id);this.options.onContextChanged(id);
-      this.store.update(s=>{Object.assign(conversation(s,id).basisFacts!.find(f=>f.id===factId)!,input,{updatedAt:new Date().toISOString()});for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;});
+      this.store.update(s=>{const fact=conversation(s,id).basisFacts!.find(f=>f.id===factId)!;
+        Object.assign(fact,input,{origin:'manual',updatedAt:new Date().toISOString()});
+        delete fact.provider;delete fact.modelName;delete fact.sourceMessageIds;delete fact.sourceMessageHashes;
+        for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;});
       res.json(conversation(this.store.read(),id).basisFacts!.find(f=>f.id===factId));
     });
     app.delete('/api/conversations/:id/basis/:factId',(req,res)=>{
@@ -160,12 +205,34 @@ export class ContactInsightService {
       this.changed(id);this.options.onContextChanged(id);
       this.store.update(s=>{const c=conversation(s,id);c.basisFacts=(c.basisFacts??[]).filter(f=>f.id!==factId);for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;});res.json({ok:true});
     });
+    app.post('/api/conversations/:id/basis/generate',async(req,res)=>{z.object({}).strict().parse(req.body??{});res.json(await this.generateBasis(cid(req)));});
     app.post('/api/conversations/:id/memory/compress',async(req,res)=>{z.object({}).strict().parse(req.body??{});res.json(await this.compress(cid(req)));});
+    app.post('/api/conversations/:id/memory/entries',(req,res)=>{
+      const id=cid(req),input=memoryEntrySchema.parse(req.body),c=conversation(this.store.read(),id);
+      if((c.memory?.entries.filter(e=>e.status!=='rejected').length??0)>=100)throw new Error('记忆条目已达到上限，请先整理已有内容。');
+      const at=new Date().toISOString();res.status(201).json(this.memoryChanged(id,memory=>memory.entries.push({id:randomUUID(),...input,origin:'manual',status:'approved',sourceMessageIds:[],sourceMessageHashes:{},createdAt:at,updatedAt:at})));
+    });
+    app.patch('/api/conversations/:id/memory',(req,res)=>{
+      const id=cid(req),input=z.object({summary:z.string().trim().max(1600).optional(),openTopics:z.array(z.string().trim().min(1).max(200)).max(10).optional()}).strict().refine(v=>Object.keys(v).length>0).parse(req.body);
+      res.json(this.memoryChanged(id,(memory,state)=>{
+        const at=new Date().toISOString();
+        if(input.summary!==undefined){memory.summary=input.summary;memory.summaryOrigin='manual';memory.summaryUpdatedAt=at;}
+        if(input.openTopics!==undefined){memory.openTopics=input.openTopics;memory.openTopicsOrigin='manual';memory.openTopicsUpdatedAt=at;}
+        memory.throughSequence=state.messages.reduce((max,m)=>m.conversationId===id?Math.max(max,m.sequence):max,memory.throughSequence);
+      }));
+    });
     app.patch('/api/conversations/:id/memory/entries/:entryId',(req,res)=>{
-      const id=cid(req),entryId=String(req.params.entryId),{status}=z.object({status:z.enum(['pending','approved','rejected'])}).strict().parse(req.body);
+      const id=cid(req),entryId=String(req.params.entryId),input=memoryEntrySchema.partial().extend({status:z.enum(['pending','approved','rejected']).optional()}).strict().refine(v=>Object.keys(v).length>0).parse(req.body);
       if(!conversation(this.store.read(),id).memory?.entries.some(e=>e.id===entryId))throw Object.assign(new Error('找不到这条记忆。'),{status:404});
-      this.changed(id);this.options.onContextChanged(id);
-      this.store.update(s=>{conversation(s,id).memory!.entries.find(e=>e.id===entryId)!.status=status;for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;});res.json(conversation(this.store.read(),id).memory);
+      res.json(this.memoryChanged(id,memory=>{
+        const entry=memory.entries.find(e=>e.id===entryId)!;Object.assign(entry,input,{updatedAt:new Date().toISOString()});
+        if(input.text!==undefined||input.kind!==undefined){entry.origin='manual';entry.status=input.status??'approved';entry.sourceMessageIds=[];entry.sourceMessageHashes={};}
+      }));
+    });
+    app.delete('/api/conversations/:id/memory/entries/:entryId',(req,res)=>{
+      const id=cid(req),entryId=String(req.params.entryId);
+      if(!conversation(this.store.read(),id).memory?.entries.some(e=>e.id===entryId))throw Object.assign(new Error('找不到这条记忆。'),{status:404});
+      res.json(this.memoryChanged(id,memory=>{memory.entries=memory.entries.filter(e=>e.id!==entryId);}));
     });
     app.delete('/api/conversations/:id/memory',(req,res)=>{
       const id=cid(req);conversation(this.store.read(),id);this.changed(id);this.options.onContextChanged(id);

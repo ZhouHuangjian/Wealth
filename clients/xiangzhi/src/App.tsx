@@ -5,7 +5,7 @@ import {
   Image as ImageIcon, Leaf, LoaderCircle, MessageCircle, Mic, MoreHorizontal, Pause, Plus, Search, Send,
   Settings2, ShieldCheck, Sparkles, Trash2, UserRound, Users, X, Zap,
 } from 'lucide-react';
-import type { AudioRecognition, AudioSettings, ContactBasisFact, ContactInsights, ContactModelSettings, Conversation, Draft, DraftSyncConnectionStatus, ImageRecognition, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, ReplyModelChoice, Settings, VisionSettings } from '../shared/types';
+import type { AudioRecognition, AudioSettings, ContactBasisFact, ContactInsights, ContactMemoryEntry, ContactModelSettings, Conversation, Draft, DraftSyncConnectionStatus, ImageRecognition, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, ReplyModelChoice, Settings, VisionSettings } from '../shared/types';
 import { api } from './api';
 import { effectiveContactSettings } from '../shared/contact-processing';
 import { InsightModelFields } from './insight-model-fields';
@@ -270,7 +270,7 @@ export default function App() {
             <div className="contact-list">{state.conversations.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => {
               const last = state.messages.filter(m => m.conversationId === c.id).at(-1);
               return <button key={c.id} className={`contact ${selectedId === c.id ? 'selected' : ''}`} onClick={() => { setSelectedId(c.id); setMobileConversation(true); setRole('self'); setIntent(''); }}>
-                <span className="avatar" style={{ background: c.color || '#e9e6dc' }}>{c.avatar || c.name.slice(0, 1)}</span><span className="contact-copy"><span className="contact-title"><strong>{c.name}</strong><small>{timeLabel(last?.sentAt || c.updatedAt)}</small></span>
+                <span className="avatar" style={{ background: c.color || '#e9e6dc' }}>{c.avatar || c.name.slice(0, 1)}</span><span className="contact-copy"><span className="contact-title"><span className="contact-name-with-affinity"><strong>{c.name}</strong><ContactAffinity conversation={c} messages={state.messages} /></span><small>{timeLabel(last?.sentAt || c.updatedAt)}</small></span>
                   <span className="contact-preview">{last?.text || (c.channel === 'wechat' ? '等待读取微信消息' : '从一句问候开始')}</span><span className="contact-meta"><span className={`tiny-dot ${c.autoReplyEnabled && globalOn ? 'on' : ''}`} />{c.channel === 'wechat' ? `微信 · ${c.wechat?.enabled ? '读取已开启' : '读取已暂停'}` : c.autoReplyEnabled && globalOn ? `${autoLabel}中` : c.channel === 'simulator' ? '本机演练' : '手动回复'}</span></span>
               </button>;
             })}{state.conversations.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).length === 0 && <div className="empty-conversation-list"><Empty title={search ? '没有匹配的对话' : '还没有对话'}>{search ? '换个关键词，或添加新的联系人。' : '添加微信联系人，也可以先创建本机演练。'}</Empty><Button kind="secondary" onClick={() => setShowNew(true)}><Plus size={14} />添加联系人</Button></div>}</div>
@@ -280,7 +280,7 @@ export default function App() {
           <section className="chat-panel" aria-label="聊天区">
             {conversation ? <>
               <div className="chat-header"><button className="icon-button mobile-back" onClick={() => setMobileConversation(false)} aria-label="返回联系人"><ArrowLeft size={18} /></button>
-                <div className="avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</div><div className="chat-person"><h2>{conversation.name}</h2><span>{isDemo ? '本机演练 · 不会发送到微信' : isWechat ? '微信仅读取 · 回复需复制到微信发送' : canSend ? '已连接消息通道 · 发送后会实际送出' : '消息桥仅接收 · 回复需复制到微信发送'}</span></div>
+                <div className="avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</div><div className="chat-person"><h2>{conversation.name}<ContactAffinity conversation={conversation} messages={messages} /></h2><span>{isDemo ? '本机演练 · 不会发送到微信' : isWechat ? '微信仅读取 · 回复需复制到微信发送' : canSend ? '已连接消息通道 · 发送后会实际送出' : '消息桥仅接收 · 回复需复制到微信发送'}</span></div>
                 <button className="icon-button" onClick={() => setShowDetails(true)} aria-label="对话详情"><MoreHorizontal size={21} /></button>
               </div>
               <ConversationProcessing key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onRead={() => readWechatOnce(conversation)} onOpenContext={() => setShowContactContext(true)} />
@@ -325,7 +325,7 @@ export default function App() {
       </> : <div className="other-page">
         {page === 'profile' && <ProfilePage state={state} selectedId={selectedId} busy={busy} run={run} />}
         {page === 'knowledge' && <KnowledgePage state={state} />}
-        {page === 'settings' && <SettingsPage state={state} notify={notify} refresh={refresh} busy={busy} run={run} />}
+        {page === 'settings' && <SettingsPage state={state} notify={notify} refresh={refresh} busy={busy} run={run} onOpenConversation={id => { setSelectedId(id); setPage('conversations'); setMobileConversation(true); }} />}
         {page === 'drafts' && <CloudDraftsPage state={state} busy={busy} run={run} copyReply={copyReply} />}
         {page === 'activity' && <ActivityPage state={state} now={now} />}
       </div>}
@@ -361,11 +361,20 @@ function contactInsightReady(state: PublicState, conversation: Conversation | un
       : config.allowRemoteModel && url.protocol === 'https:';
   } catch { return false; }
 }
+function ContactAffinity({ conversation, messages }: { conversation: Conversation; messages: Message[] }) {
+  if (!conversation.processing?.affinityEnabled) return null;
+  const latest = messages.filter(message => message.conversationId === conversation.id && message.role === 'peer'
+    && message.insights?.conversationId === conversation.id && message.insights.messageId === message.id
+    && message.insights.affinity).sort((a, b) => a.sequence - b.sequence).at(-1)?.insights;
+  const score = latest?.affinity?.score;
+  if (score === undefined || score === null) return null;
+  return <span className="contact-affinity-badge" aria-label={`${conversation.name}的好感度估计 ${score}%`} title="根据互动估计"><HeartHandshake size={10} /><span>{score}%</span></span>;
+}
 function NumericInsights({ insights, conversation }: { insights: ContactInsights; conversation: Conversation }) {
+  if (!conversation.processing?.intentEnabled || !insights.intents.length) return null;
   const percentages = insights.intents.slice().sort((a, b) => b.percentage - a.percentage).map(item => item.percentage);
   return <div className="numeric-insights" aria-label="对话分析百分比">
     {conversation.processing?.intentEnabled && percentages.length > 0 && <span className="intent-percentages"><span>意图倾向</span><strong>{percentages.map(value => `${value}%`).join(' · ')}</strong></span>}
-    {conversation.processing?.affinityEnabled && <span className="affinity-percentage"><span>好感度估计</span><strong>{insights.affinity?.score === null || !insights.affinity ? '待观察' : `${insights.affinity.score}%`}</strong></span>}
   </div>;
 }
 
@@ -444,36 +453,74 @@ function ContactContextDialog({ conversation, state, busy, run, onClose }: { con
   const [category, setCategory] = useState<ContactBasisFact['category']>('current_status');
   const [content, setContent] = useState('');
   const [sourceNote, setSourceNote] = useState('');
+  const [entryEditingId, setEntryEditingId] = useState<string | null>(null);
+  const [entryKind, setEntryKind] = useState<ContactMemoryEntry['kind']>('fact');
+  const [entryText, setEntryText] = useState('');
+  const entryInput = useRef<HTMLTextAreaElement>(null);
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [summaryText, setSummaryText] = useState('');
+  const [editingTopics, setEditingTopics] = useState(false);
+  const [topicsText, setTopicsText] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   const memory = conversation.memory;
   const memoryReady = contactInsightReady(state, conversation, 'memory');
   const facts = conversation.basisFacts || [];
   const messages = new Map(state.messages.map(message => [message.id, message]));
   const resetFact = () => { setEditingId(null); setContent(''); setSourceNote(''); };
+  const resetEntry = () => { setEntryEditingId(null); setEntryText(''); };
+  const topics = topicsText.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+  const topicsValid = topics.length <= 10 && topics.every(item => item.length <= 200);
+  const memoryEntry = (entry: ContactMemoryEntry) => <article key={entry.id} className={entry.status}>
+    <div className="contact-fact-top"><span>{memoryKindLabels[entry.kind]}</span><span>{entry.origin === 'manual' ? '个人补充' : entry.status === 'approved' ? '已确认' : entry.status === 'rejected' ? '已忽略' : '待确认'}</span></div>
+    <p>{entry.text}</p>
+    {entry.origin !== 'manual' && entry.sourceMessageIds.length > 0 && <details className="memory-source"><summary>查看来源 <ChevronDown size={11} /></summary>{entry.sourceMessageIds.map(id => <blockquote key={id}>{messages.get(id)?.text || '来源消息已不可用'}</blockquote>)}</details>}
+    <div className="contact-fact-actions">
+      <button disabled={!!busy} type="button" onClick={() => { setEntryEditingId(entry.id); setEntryKind(entry.kind); setEntryText(entry.text); entryInput.current?.focus(); }}>修改</button>
+      {entry.status !== 'approved' && <button disabled={!!busy} type="button" onClick={() => void run(`memory-approve-${entry.id}`, () => api(`/conversations/${conversation.id}/memory/entries/${entry.id}`, 'PATCH', { status: 'approved' }), '这条记忆已确认')}><Check size={12} />{entry.status === 'rejected' ? '恢复采用' : '确认记住'}</button>}
+      {entry.status !== 'rejected' && <button disabled={!!busy} type="button" onClick={() => void run(`memory-reject-${entry.id}`, () => api(`/conversations/${conversation.id}/memory/entries/${entry.id}`, 'PATCH', { status: 'rejected' }), '这条线索已忽略')}>不采用</button>}
+      <button disabled={!!busy} type="button" onClick={() => void run(`memory-delete-${entry.id}`, async () => { const result = await api(`/conversations/${conversation.id}/memory/entries/${entry.id}`, 'DELETE'); if (entryEditingId === entry.id) resetEntry(); return result; }, '这条记忆已删除')}><Trash2 size={12} />删除</button>
+    </div>
+  </article>;
   return <Modal title={`${conversation.name} · 档案与记忆`} description="保存真实背景，让每次回复接得上前面的对话。" onClose={onClose} wide>
     <div className="contact-context-tabs"><button type="button" className={tab === 'basis' ? 'active' : ''} onClick={() => setTab('basis')}><UserRound size={14} />基础库 <span>{facts.length}</span></button><button type="button" className={tab === 'memory' ? 'active' : ''} onClick={() => setTab('memory')}><BookOpen size={14} />对话记忆 <span>{memory?.entries.filter(entry => entry.status !== 'rejected').length || 0}</span></button></div>
     {tab === 'basis' ? <>
+      <div className="contact-memory-toolbar basis-generate-toolbar"><div><h3>从对话整理基础库</h3><p>使用此人的记忆模型，整理已聊到的状况、爱好与计划。</p></div><Button kind="secondary" disabled={!!busy || !memoryReady} onClick={() => void run(`basis-generate-${conversation.id}`, () => api<{facts: ContactBasisFact[]; cached: boolean}>(`/conversations/${conversation.id}/basis/generate`, 'POST', {}), result => result.cached ? '已使用本地生成结果，未调用模型' : result.facts.length ? `已整理 ${result.facts.length} 条基础信息，可逐条修改` : '暂未发现可以整理的明确基础信息')}>{busy === `basis-generate-${conversation.id}` ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}{busy === `basis-generate-${conversation.id}` ? '正在整理…' : '生成基础库'}</Button></div>
+      {!memoryReady && <p className="processing-model-hint">先在设置中配置记忆模型，也可在此人的信息处理中单独选择型号。</p>}
+      {conversation.basisGeneration && <p className="basis-generation-status">上次生成：{conversation.basisGeneration.modelName || 'Codex 默认模型'} · {dateLabel(conversation.basisGeneration.generatedAt)} {timeLabel(conversation.basisGeneration.generatedAt)}</p>}
       <form className="contact-fact-editor" onSubmit={event => { event.preventDefault(); void run(`basis-save-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/basis${editingId ? `/${editingId}` : ''}`, editingId ? 'PATCH' : 'POST', { category, content: content.trim(), sourceNote: sourceNote.trim() }); resetFact(); return result; }, '基础信息已保存在本机'); }}>
         <div className="form-grid"><label className="field-label">信息类型<select disabled={!!busy} value={category} onChange={event => setCategory(event.target.value as ContactBasisFact['category'])}>{Object.entries(contactBasisLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="field-label">来源备注（可选）<input maxLength={500} disabled={!!busy} value={sourceNote} onChange={event => setSourceNote(event.target.value)} placeholder="例如：本人告诉我的，10 月更新" /></label></div>
-        <label className="field-label">{editingId ? '修改这条信息' : '补充一条基础信息'}<textarea rows={3} maxLength={2000} required disabled={!!busy} value={content} onChange={event => setContent(event.target.value)} placeholder="例如：最近在准备考试；喜欢羽毛球；周末通常有空。" /></label>
+        <label className="field-label">{editingId ? '修改这条信息' : '补充一条基础信息'}<textarea rows={3} maxLength={1000} required disabled={!!busy} value={content} onChange={event => setContent(event.target.value)} placeholder="例如：最近在准备考试；喜欢羽毛球；周末通常有空。" /></label>
         <div className="contact-fact-editor-actions">{editingId && <Button kind="ghost" disabled={!!busy} onClick={resetFact}>取消修改</Button>}<Button type="submit" disabled={!!busy || !content.trim()}>{busy === `basis-save-${conversation.id}` ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{editingId ? '保存修改' : '加入基础库'}</Button></div>
       </form>
-      <div className="contact-fact-list">{facts.map(fact => <article key={fact.id}><div className="contact-fact-top"><span>{contactBasisLabels[fact.category]}</span><time>{dateLabel(fact.updatedAt)}</time></div><p>{fact.content}</p>{fact.sourceNote && <small>来源：{fact.sourceNote}</small>}<div className="contact-fact-actions"><button type="button" disabled={!!busy} onClick={() => { setEditingId(fact.id); setCategory(fact.category); setContent(fact.content); setSourceNote(fact.sourceNote); }}>修改</button><button type="button" disabled={!!busy} onClick={() => void run(`basis-delete-${fact.id}`, async () => { const result = await api(`/conversations/${conversation.id}/basis/${fact.id}`, 'DELETE'); if (editingId === fact.id) resetFact(); return result; }, '这条基础信息已删除')}><Trash2 size={12} />删除</button></div></article>)}</div>
-      {!facts.length && <p className="contact-context-empty">从一条你已经知道的真实信息开始。</p>}
+      <div className="contact-fact-list">{facts.map(fact => <article key={fact.id}><div className="contact-fact-top"><span>{contactBasisLabels[fact.category]}</span><time>{fact.origin === 'model' ? '模型整理 · ' : '个人补充 · '}{dateLabel(fact.updatedAt)}</time></div><p>{fact.content}</p>{fact.sourceNote && <small>来源：{fact.sourceNote}</small>}{fact.origin === 'model' && !!fact.sourceMessageIds?.length && <details className="memory-source"><summary>查看对话来源 <ChevronDown size={11} /></summary>{fact.sourceMessageIds.map(id => <blockquote key={id}>{messages.get(id)?.text || '来源消息已不可用'}</blockquote>)}</details>}<div className="contact-fact-actions"><button type="button" disabled={!!busy} onClick={() => { setEditingId(fact.id); setCategory(fact.category); setContent(fact.content); setSourceNote(fact.sourceNote); }}>修改</button><button type="button" disabled={!!busy} onClick={() => void run(`basis-delete-${fact.id}`, async () => { const result = await api(`/conversations/${conversation.id}/basis/${fact.id}`, 'DELETE'); if (editingId === fact.id) resetFact(); return result; }, '这条基础信息已删除')}><Trash2 size={12} />删除</button></div></article>)}</div>
+      {!facts.length && <p className="contact-context-empty">可以从对话生成，也可以直接补充你知道的真实信息。</p>}
     </> : <>
       <div className="contact-memory-toolbar"><div><h3>压缩对话关键信息</h3><p>整理摘要、事件与未完话题，保存在本机。</p></div><Button kind="secondary" disabled={!!busy || !memoryReady || !conversation.processing?.memoryEnabled} onClick={() => void run(`memory-compress-${conversation.id}`, () => api<{cached: boolean; remaining: number}>(`/conversations/${conversation.id}/memory/compress`, 'POST', {}), result => result.cached ? '已使用本地记忆，没有重复调用模型' : result.remaining ? '已整理一段关键记忆，还有对话可继续整理' : '关键记忆已保存在本机，请确认线索')}>{busy === `memory-compress-${conversation.id}` ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}整理关键记忆</Button></div>
-      {(!memoryReady || !conversation.processing?.memoryEnabled) && <p className="processing-model-hint">{!memoryReady ? '先在设置中配置独立的记忆模型。' : '先在此人的“信息处理”中开启对话记忆。'}</p>}
-      {memory ? <>
-        <section className="contact-memory-summary"><h3>对话摘要</h3><p>{memory.summary || '尚未形成摘要。'}</p><small>{memory.modelName || 'Codex 默认模型'} · {dateLabel(memory.updatedAt)} {timeLabel(memory.updatedAt)} · 本地保存</small>{memory.openTopics.length > 0 && <div className="memory-open-topics"><strong>未完话题</strong>{memory.openTopics.map((topic, index) => <p key={index}>{topic}</p>)}</div>}</section>
-        <p className="memory-candidate-note">模型整理的线索先待你确认；已确认内容才用于长期背景。</p>
-        <div className="contact-memory-entries">{memory.entries.filter(entry => entry.status !== 'rejected').map(entry => <article key={entry.id} className={entry.status}><div className="contact-fact-top"><span>{memoryKindLabels[entry.kind]}</span><span>{entry.status === 'approved' ? '已确认' : '待确认'}</span></div><p>{entry.text}</p>{entry.sourceMessageIds.length > 0 && <details className="memory-source"><summary>查看来源 <ChevronDown size={11} /></summary>{entry.sourceMessageIds.map(id => <blockquote key={id}>{messages.get(id)?.text || '来源消息已不可用'}</blockquote>)}</details>}<div className="contact-fact-actions">{entry.status !== 'approved' && <button disabled={!!busy} type="button" onClick={() => void run(`memory-approve-${entry.id}`, () => api(`/conversations/${conversation.id}/memory/entries/${entry.id}`, 'PATCH', { status: 'approved' }), '这条记忆已确认')}><Check size={12} />确认记住</button>}<button disabled={!!busy} type="button" onClick={() => void run(`memory-reject-${entry.id}`, () => api(`/conversations/${conversation.id}/memory/entries/${entry.id}`, 'PATCH', { status: 'rejected' }), '这条线索已忽略')}>不采用</button></div></article>)}</div>
-        <div className="contact-memory-clear">{!confirmClear ? <Button kind="ghost" disabled={!!busy} onClick={() => setConfirmClear(true)}><Trash2 size={12} />清除这份记忆</Button> : <div className="delete-confirm"><p>清除本机摘要和全部记忆线索？基础库和原始消息仍保留。</p><Button kind="danger" disabled={!!busy} onClick={() => void run(`memory-clear-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/memory`, 'DELETE', {}); setConfirmClear(false); return result; }, '这份本地记忆已清除')}>确认清除</Button><Button kind="ghost" onClick={() => setConfirmClear(false)}>保留</Button></div>}</div>
-      </> : <p className="contact-context-empty">还没有记忆。整理一次后，重启也能接着使用。</p>}
+      {(!memoryReady || !conversation.processing?.memoryEnabled) && <p className="processing-model-hint">{!memoryReady ? '先在设置中配置独立的记忆模型。' : '先在此人的“信息处理”中开启对话记忆。'}也可以直接手动补充。</p>}
+      <section className="contact-memory-summary">
+        <div className="memory-editable-heading"><h3>对话摘要</h3><button type="button" disabled={!!busy} onClick={() => { setSummaryText(memory?.summary || ''); setEditingSummary(true); }}>{memory?.summary ? '修改摘要' : '补充摘要'}</button></div>
+        {editingSummary ? <form className="memory-inline-editor" onSubmit={event => { event.preventDefault(); void run(`memory-summary-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/memory`, 'PATCH', { summary: summaryText.trim() }); setEditingSummary(false); return result; }, '对话摘要已由你补充并保存在本机'); }}><label className="field-label">我的对话摘要<textarea rows={4} maxLength={1600} disabled={!!busy} value={summaryText} onChange={event => setSummaryText(event.target.value)} /></label><div className="contact-fact-editor-actions"><Button kind="ghost" disabled={!!busy} onClick={() => setEditingSummary(false)}>取消</Button><Button type="submit" disabled={!!busy}>保存摘要</Button></div></form> : <p>{memory?.summary || '还没有摘要，可以模型整理或手动补充。'}</p>}
+        {memory && <small>{memory.summaryOrigin === 'manual' ? '摘要由你补充' : memory.provider === 'manual' ? '个人补充' : memory.modelName || 'Codex 默认模型'} · {dateLabel(memory.summaryUpdatedAt || memory.updatedAt)} {timeLabel(memory.summaryUpdatedAt || memory.updatedAt)} · 本地保存</small>}
+        <div className="memory-open-topics"><div className="memory-editable-heading"><strong>未完话题</strong><button type="button" disabled={!!busy} onClick={() => { setTopicsText(memory?.openTopics.join('\n') || ''); setEditingTopics(true); }}>{memory?.openTopics.length ? '修改话题' : '补充话题'}</button></div>
+          {editingTopics ? <form className="memory-inline-editor" onSubmit={event => { event.preventDefault(); void run(`memory-topics-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/memory`, 'PATCH', { openTopics: topics }); setEditingTopics(false); return result; }, '未完话题已由你补充并保存在本机'); }}><label className="field-label">我的未完话题<textarea rows={3} maxLength={2100} disabled={!!busy} value={topicsText} onChange={event => setTopicsText(event.target.value)} placeholder="每行一个话题，最多 10 条" /><small>每行一个，单条不超过 200 字；留空可清除话题。</small></label>{!topicsValid && <p className="inline-error">最多 10 条话题，每条不超过 200 字。</p>}<div className="contact-fact-editor-actions"><Button kind="ghost" disabled={!!busy} onClick={() => setEditingTopics(false)}>取消</Button><Button type="submit" disabled={!!busy || !topicsValid}>保存话题</Button></div></form> : memory?.openTopics.length ? memory.openTopics.map((topic, index) => <p key={index}>{topic}</p>) : <p className="memory-empty-topics">还没有未完话题。</p>}
+          {memory?.openTopicsOrigin === 'manual' && !editingTopics && <small className="memory-manual-note">话题由你补充</small>}
+        </div>
+      </section>
+      <form className="contact-fact-editor memory-entry-editor" onSubmit={event => { event.preventDefault(); void run(`memory-entry-save-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/memory/entries${entryEditingId ? `/${entryEditingId}` : ''}`, entryEditingId ? 'PATCH' : 'POST', { kind: entryKind, text: entryText.trim() }); resetEntry(); return result; }, entryEditingId ? '记忆已修改为个人补充' : '这条个人记忆已保存在本机'); }}>
+        <label className="field-label">记忆类型<select disabled={!!busy} value={entryKind} onChange={event => setEntryKind(event.target.value as ContactMemoryEntry['kind'])}>{Object.entries(memoryKindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label className="field-label">{entryEditingId ? '修改这条记忆' : '补充一条记忆'}<textarea ref={entryInput} rows={3} required maxLength={600} disabled={!!busy} value={entryText} onChange={event => setEntryText(event.target.value)} placeholder="写下你希望保留的事实、约定或话题。" /></label>
+        <div className="contact-fact-editor-actions">{entryEditingId && <Button kind="ghost" disabled={!!busy} onClick={resetEntry}>取消修改</Button>}<Button type="submit" disabled={!!busy || !entryText.trim()}>{busy === `memory-entry-save-${conversation.id}` ? <LoaderCircle size={13} className="spin" /> : <Check size={13} />}{entryEditingId ? '保存记忆修改' : '加入记忆'}</Button></div>
+      </form>
+      <p className="memory-candidate-note">个人补充直接保存；模型整理的线索由你确认后用于长期背景。</p>
+      <div className="contact-memory-entries">{memory?.entries.filter(entry => entry.status !== 'rejected').map(memoryEntry)}</div>
+      {!!memory?.entries.some(entry => entry.status === 'rejected') && <details className="memory-rejected-list"><summary>已忽略的记忆 <span>{memory.entries.filter(entry => entry.status === 'rejected').length}</span><ChevronDown size={12} /></summary><div className="contact-memory-entries">{memory.entries.filter(entry => entry.status === 'rejected').map(memoryEntry)}</div></details>}
+      {!memory?.entries.length && <p className="contact-context-empty">还没有记忆条目，可以在上方直接补充。</p>}
+      {memory && <div className="contact-memory-clear">{!confirmClear ? <Button kind="ghost" disabled={!!busy} onClick={() => setConfirmClear(true)}><Trash2 size={12} />清除这份记忆</Button> : <div className="delete-confirm"><p>清除本机摘要和全部记忆线索？基础库和原始消息仍保留。</p><Button kind="danger" disabled={!!busy} onClick={() => void run(`memory-clear-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/memory`, 'DELETE', {}); setConfirmClear(false); setEditingSummary(false); setEditingTopics(false); resetEntry(); return result; }, '这份本地记忆已清除')}>确认清除</Button><Button kind="ghost" onClick={() => setConfirmClear(false)}>保留</Button></div>}</div>}
     </>}
   </Modal>;
 }
 
-function InsightSettingsDetails({ state, busy, run }: { state: PublicState; busy: string; run: Run }) {
+function InsightSettingsDetails({ state, busy, run, onOpenConversation }: { state: PublicState; busy: string; run: Run; onOpenConversation: (id: string) => void }) {
   const [contactId, setContactId] = useState(state.conversations[0]?.id || '');
   const [messageId, setMessageId] = useState('');
   const [showContext, setShowContext] = useState(false);
@@ -485,10 +532,10 @@ function InsightSettingsDetails({ state, busy, run }: { state: PublicState; busy
   const enabled = conversation?.processing?.intentEnabled || conversation?.processing?.affinityEnabled;
   const key = `analyze-${selected?.id}`;
   return <section className="settings-card insight-detail-settings" aria-label="联系人分析详情">
-    <div className="settings-section-title"><span><Users size={19} /></span><div><h2>联系人开关与分析详情</h2><p>在此查看完整意图、依据，或调整单个人的处理设置。</p></div></div>
+    <div className="settings-section-title"><span><Users size={19} /></span><div><h2>联系人分析详情</h2><p>在此查看完整意图与依据，开关在此人的对话内调整。</p></div></div>
     {!conversation ? <p className="contact-context-empty">先添加一位联系人，再开启分析或记忆。</p> : <>
       <label className="field-label">选择联系人<select value={conversation.id} disabled={!!busy} onChange={event => { setContactId(event.target.value); setMessageId(''); }} aria-label="选择分析详情的联系人">{state.conversations.map(contact => <option value={contact.id} key={contact.id}>{contact.name}</option>)}</select></label>
-      <ContactInsightControls key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} />
+      <div className="insight-readonly-controls"><p>意图分析{conversation.processing?.intentEnabled ? '已开启' : '已关闭'} · 好感度估计{conversation.processing?.affinityEnabled ? '已开启' : '已关闭'}</p><Button kind="secondary" disabled={!!busy} onClick={() => onOpenConversation(conversation.id)}>{enabled ? '去此人的对话调整开关' : '去此人的对话开启分析'}<ArrowRight size={12} /></Button></div>
       <div className="insight-detail-message"><label className="field-label">查看哪句话<select value={selected?.id || ''} disabled={!!busy || !messages.length} onChange={event => setMessageId(event.target.value)} aria-label="选择分析详情的消息">{!messages.length && <option value="">尚无可分析的来信</option>}{messages.map(message => <option value={message.id} key={message.id}>{timeLabel(message.sentAt)} · {(message.audioRecognition?.text || message.text).slice(0, 80)}</option>)}</select></label>{selected && <blockquote>{selected.audioRecognition?.text || selected.text}</blockquote>}
         <Button kind="secondary" disabled={!!busy || !selected || !ready || !enabled} onClick={() => selected && void run(key, () => api<{insights: ContactInsights; cached: boolean}>(`/conversations/${conversation.id}/analyze`, 'POST', { messageId: selected.id }), result => result.cached ? '已使用本地分析结果，未调用模型' : '分析结果已保存在本机')}>{busy === key ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}{insights ? '查看/更新这句分析' : '分析这句话'}</Button>
       </div>
@@ -858,7 +905,7 @@ function AddConversationDialog({ state, notify, onClose, onAdded }: {
   </Modal>;
 }
 
-function SettingsPage({ state, notify, refresh, busy, run }: { state: PublicState; notify: (message: string, error?: boolean) => void; refresh: () => Promise<void>; busy: string; run: Run }) {
+function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }: { state: PublicState; notify: (message: string, error?: boolean) => void; refresh: () => Promise<void>; busy: string; run: Run; onOpenConversation: (id: string) => void }) {
   const [form, setForm] = useState<Settings & { hasApiKey: boolean; vision: VisionSettings & {hasApiKey?: boolean}; audio: AudioSettings & {hasApiKey?: boolean}; analysis: ContactModelSettings & {hasApiKey?: boolean}; memory: ContactModelSettings & {hasApiKey?: boolean} }>(() => ({
     ...state.settings, autoReplyMode: state.settings.autoReplyMode ?? 'draft', apiKey: '',
     vision: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.vision, apiKey: '' },
@@ -1053,7 +1100,7 @@ function SettingsPage({ state, notify, refresh, busy, run }: { state: PublicStat
       <section className="settings-card channel-setting"><div className="settings-section-title"><span><ShieldCheck size={19} /></span><div><h2>消息通道</h2><p>{state.runtime.bridgeSendConfigured ? '外部发送通道已配置；手动发送或自动发送模式会通过该通道送出回复。' : state.runtime.bridgeReceiveConfigured ? '当前仅接收外部来信。可生成草稿和保存反馈，回复需复制到微信手动发送。' : state.conversations.some(item => item.channel === 'wechat') ? '微信会话仅读取消息，读取与自动草稿在各自对话内控制。回复需复制到微信手动发送。' : '当前使用本机演练。接入外部消息桥需要在服务端配置。'}</p></div></div><span className="runtime-badge"><span className="status-dot" />{state.runtime.bridgeSendConfigured ? '消息桥 · 可发送' : state.runtime.bridgeReceiveConfigured ? '消息桥 · 仅接收' : state.conversations.some(item => item.channel === 'wechat') ? '微信 · 仅读取' : '不会发送到微信'}</span></section>
       <div className="settings-save"><span>设置仅保存在此工作空间。</span><Button type="submit" disabled={!!saving}>{saving === 'save' ? <LoaderCircle size={15} className="spin" /> : <Check size={15} />}保存设置</Button></div>
     </form>
-    <InsightSettingsDetails state={state} busy={saving || busy} run={run} />
+    <InsightSettingsDetails state={state} busy={saving || busy} run={run} onOpenConversation={onOpenConversation} />
   </>;
 }
 

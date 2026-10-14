@@ -39,17 +39,33 @@ export interface ContactModelSettings {
 export interface ContactBasisFact {
   id: string; category: 'current_status' | 'interest' | 'preference' | 'fact' | 'boundary' | 'plan';
   content: string; sourceNote: string; createdAt: string; updatedAt: string;
+  /** Older records without origin are treated as manually maintained. */
+  origin?: 'manual' | 'model';
+  provider?: 'qwen' | 'compatible' | 'codex'; modelName?: string;
+  sourceMessageIds?: string[]; sourceMessageHashes?: Record<string,string>;
 }
+export interface ContactBasisGeneration {
+  facts: ContactBasisFact[]; sourceDigest: string; modelIdentity: string;
+  provider: 'qwen' | 'compatible' | 'codex'; modelName: string; generatedAt: string;
+  sourceMessageCount: number;
+  usage?: {promptTokens:number;completionTokens:number;totalTokens:number};
+}
+export type ContactBasisGenerationMetadata = Omit<ContactBasisGeneration,'facts'|'usage'>;
 export interface ContactMemoryEntry {
   id: string; kind: 'fact' | 'event' | 'preference' | 'openTopic'; text: string;
   sourceMessageIds: string[]; status: 'pending' | 'approved' | 'rejected'; createdAt: string;
   sourceMessageHashes?: Record<string,string>;
+  /** Manual notes need no message provenance; model notes do. */
+  origin?: 'manual' | 'model'; updatedAt?: string;
 }
 export interface ContactMemory {
   summary: string; entries: ContactMemoryEntry[]; openTopics: string[];
+  modelRecapInvalidated?: boolean;
+  summaryOrigin?: 'manual' | 'model'; summaryUpdatedAt?: string;
+  openTopicsOrigin?: 'manual' | 'model'; openTopicsUpdatedAt?: string;
   throughSequence: number; sourceDigest: string;
   compressedMessageHashes?: Record<string,string>;
-  provider: 'qwen' | 'compatible' | 'codex'; modelName: string; updatedAt: string;
+  provider: 'qwen' | 'compatible' | 'codex' | 'manual'; modelName: string; updatedAt: string;
 }
 export interface ContactInsights {
   conversationId: string; messageId: string;
@@ -98,6 +114,7 @@ export interface Conversation {
   externalId: string | null; createdAt: string; updatedAt: string;
   processing?: ContactProcessing;
   basisFacts?: ContactBasisFact[];
+  basisGeneration?: ContactBasisGenerationMetadata;
   memory?: ContactMemory;
   wechat?: {
     enabled: boolean; initialized: boolean; cursor: string | null; accountFingerprint: string | null;

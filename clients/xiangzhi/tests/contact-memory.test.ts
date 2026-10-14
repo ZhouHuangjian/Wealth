@@ -196,3 +196,39 @@ test('full prior memory, evidence IDs and manual basis fit a dynamic input budge
   assert.equal(compressed.throughSequence,384+sentIds.length);
   for(const source of fresh)assert.equal(Object.hasOwn(compressed.compressedMessageHashes!,source.id),sentIds.includes(source.id));
 });
+
+test('compression preserves manually edited notes, summary and topics without demanding chat evidence',async()=>{
+  const app=state();
+  const manual={id:'manual-note',kind:'fact' as const,text:'我补充的真实背景',sourceMessageIds:[],status:'approved' as const,origin:'manual' as const,createdAt:'manual-date',updatedAt:'manual-updated'};
+  app.conversations[0].memory={summary:'这是我亲自改写的摘要',summaryOrigin:'manual',summaryUpdatedAt:'summary-date',entries:[manual],
+    openTopics:['我手动补充的下一件事'],openTopicsOrigin:'manual',openTopicsUpdatedAt:'topics-date',throughSequence:0,compressedMessageHashes:{},
+    sourceDigest:'manual',provider:'manual',modelName:'手动补充',updatedAt:'manual-date'};
+  const compressed=await compressContactMemory(app,'A',undefined,{fetch:async(_url,init)=>{
+    const context=JSON.parse(JSON.parse(String(init!.body)).messages[1].content);assert.equal(context.manualNotes[0].text,manual.text);
+    assert.match(context.manualNotes[0].source,/手动/);
+    return response({summary:'模型的新摘要不能覆盖手动摘要',entries:[{kind:'fact',text:manual.text,sourceMessageIds:['a1']}],openTopics:['模型的新话题']});
+  }});
+  assert.deepEqual(compressed.entries,[manual]);assert.equal(compressed.summary,'这是我亲自改写的摘要');assert.deepEqual(compressed.openTopics,['我手动补充的下一件事']);
+  assert.equal(compressed.summaryOrigin,'manual');assert.equal(compressed.summaryUpdatedAt,'summary-date');assert.equal(compressed.openTopicsOrigin,'manual');assert.equal(compressed.openTopicsUpdatedAt,'topics-date');
+});
+
+test('protected manual notes do not use the thirty-two model-item capacity or lose source-free additions',async()=>{
+  const app=state();const notes=Array.from({length:40},(_,index)=>({id:`manual-${index}`,kind:'fact' as const,text:`手动背景 ${index}`,sourceMessageIds:[],
+    status:'approved' as const,origin:'manual' as const,createdAt:''}));
+  app.conversations[0].memory={summary:'',entries:notes,openTopics:[],throughSequence:0,compressedMessageHashes:{},sourceDigest:'old',provider:'manual',modelName:'手动补充',updatedAt:''};
+  const compressed=await compressContactMemory(app,'A',undefined,{fetch:async()=>response(result)});
+  assert.deepEqual(compressed.entries.filter(entry=>entry.origin==='manual'),notes);assert.equal(compressed.entries.filter(entry=>entry.origin==='model').length,2);
+});
+
+test('editing an older manual note keeps it in the bounded prompt without changing stored note order',async()=>{
+  const app=state();const notes=Array.from({length:45},(_,index)=>({id:`manual-${index}`,kind:'fact' as const,text:`手动背景 ${index}`,sourceMessageIds:[],
+    status:'approved' as const,origin:'manual' as const,createdAt:'2026-10-13T00:00:00Z',updatedAt:'2026-10-13T00:00:00Z'}));
+  notes[0].text='刚刚修改的较早手动记忆';notes[0].updatedAt='2026-10-14T00:00:00Z';
+  app.conversations[0].memory={summary:'',entries:notes,openTopics:[],throughSequence:0,compressedMessageHashes:{},sourceDigest:'old',provider:'manual',modelName:'手动补充',updatedAt:''};
+  const compressed=await compressContactMemory(app,'A',undefined,{fetch:async(_url,init)=>{
+    const context=JSON.parse(JSON.parse(String(init!.body)).messages[1].content);
+    assert.ok(context.manualNotes.some((entry:any)=>entry.text===notes[0].text));assert.equal(context.manualNotes.at(-1).text,notes[0].text);
+    assert.ok(context.manualNotes.length<=32);return response(result);
+  }});
+  assert.deepEqual(compressed.entries.filter(entry=>entry.origin==='manual'),notes);
+});

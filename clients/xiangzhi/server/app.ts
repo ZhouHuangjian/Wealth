@@ -28,6 +28,7 @@ import type { AppState, Conversation, Message, PublicState, Settings, ImageAttac
 import { contactAutoMediaEnabled, contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
 import { replyModelsSchema } from './contact-processing-schema.js';
 import { ContactInsightService, validateContactFeatures } from './contact-insight-service.js';
+import {generateContactBasis} from './contact-basis.js';
 import { analyzeContactMessage } from './contact-insights.js';
 import { compressContactMemory } from './contact-memory.js';
 import { findImageRecognition, imageRecognitionIdentity, imageSha256, saveImageRecognition } from './image-recognition-cache.js';
@@ -93,6 +94,7 @@ export function createApplication(options: {
   readWechatImage?:typeof readWechatImage;readWechatVoice?:typeof readWechatVoice;
   generate?: typeof generateDrafts; send?: ReturnType<typeof createSender>;
   analyzeContactMessage?:typeof analyzeContactMessage;compressContactMemory?:typeof compressContactMemory;
+  generateContactBasis?:typeof generateContactBasis;
 }) {
   const app = express();
   const newDatabase = options.databasePath === ':memory:' || !existsSync(options.databasePath);
@@ -239,7 +241,7 @@ export function createApplication(options: {
     if (!['GET','HEAD'].includes(req.method) && !secureEqual(String(req.headers['x-csrf-token'] ?? ''), session)) return res.status(403).json({error:'请求校验失败，请刷新页面。'});
     next();
   });
-  insights=new ContactInsightService(store,{analyze:options.analyzeContactMessage,compress:options.compressContactMemory,onContextChanged:cid=>{
+  insights=new ContactInsightService(store,{analyze:options.analyzeContactMessage,compress:options.compressContactMemory,generateBasis:options.generateContactBasis,onContextChanged:cid=>{
     engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);});
   }});
   insights.register(app);

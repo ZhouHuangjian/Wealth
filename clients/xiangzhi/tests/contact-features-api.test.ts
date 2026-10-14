@@ -4,11 +4,12 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import type {AddressInfo} from 'node:net';
-import type {AppState,ContactInsights,ContactMemory,Draft} from '../shared/types.js';
+import type {AppState,ContactBasisGeneration,ContactInsights,ContactMemory,Draft} from '../shared/types.js';
 import {createApplication} from '../server/app.js';
 import {messageEvidenceHash} from '../server/contact-evidence.js';
 import {memoryInputDigest} from '../server/contact-memory.js';
-import {effectiveContactModelSettings} from '../server/contact-model.js';
+import {contactModelIdentity,effectiveContactModelSettings} from '../server/contact-model.js';
+import {basisInputDigest} from '../server/contact-basis.js';
 
 type Options=Parameters<typeof createApplication>[0];
 const model={provider:'compatible' as const,modelUrl:'http://127.0.0.1:11435/v1',modelName:'analysis-default',
@@ -24,16 +25,24 @@ function memoryResult(state:AppState,cid:string):ContactMemory {
     sourceMessageHashes:{[source.id]:messageEvidenceHash(source)},status:'pending',createdAt:new Date().toISOString()}],openTopics:['合成待确认事项'],
     throughSequence:source.sequence,sourceDigest:memoryInputDigest(state,cid),provider:'compatible',modelName:'memory-default',updatedAt:new Date().toISOString()};
 }
+function basisResult(state:AppState,cid:string):ContactBasisGeneration {
+  const source=state.messages.filter(m=>m.conversationId===cid&&m.role==='peer').at(-1)!;
+  const selected=effectiveContactModelSettings(state.settings,state.conversations.find(c=>c.id===cid)!,'memory')!;
+  return {facts:[{id:`basis-${source.id}`,category:'interest',content:'对方提到喜欢散步',sourceNote:'合成模型资料，待核对',origin:'model',
+    sourceMessageIds:[source.id],sourceMessageHashes:{[source.id]:messageEvidenceHash(source)},createdAt:'now',updatedAt:'now',provider:'compatible',modelName:selected.modelName}],
+    sourceDigest:basisInputDigest(state,cid),modelIdentity:contactModelIdentity(selected),provider:'compatible',modelName:selected.modelName,generatedAt:'now',sourceMessageCount:1};
+}
 function gate(){let entered!:()=>void,release!:()=>void;return {ready:new Promise<void>(r=>entered=r),wait:new Promise<void>(r=>release=r),enter:()=>entered(),release:()=>release()};}
 
 async function harness(overrides:Partial<Options>={}) {
   const dir=mkdtempSync(join(tmpdir(),'xiangzhi-contact-api-'));
-  const calls={analysis:0,memory:0,send:0};
+  const calls={analysis:0,memory:0,basis:0,send:0};
   const instance=createApplication({databasePath:join(dir,'test.sqlite'),seed:false,profileManifestPath:null,
     inspectCodex:async()=>({available:false,version:null,message:'合成测试'}),inspectWechat:()=>({available:true,message:'合成测试'}),
     queryWechat:async()=>{throw new Error('本测试不读取微信');},
     analyzeContactMessage:async(state,cid,mid)=>{calls.analysis++;return analysisResult(state,cid,mid);},
     compressContactMemory:async(state,cid)=>{calls.memory++;return memoryResult(state,cid);},
+    generateContactBasis:async(state,cid)=>{calls.basis++;return basisResult(state,cid);},
     send:async()=>{calls.send++;},...overrides});
   instance.store.update(s=>{s.settings.analysis=model;s.settings.memory={...model,modelName:'memory-default',apiKey:'PRIVATE-MEMORY-KEY'};});
   const server=instance.app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
@@ -278,4 +287,86 @@ test('full settings saves with only independent analysis changes preserve curren
     assert.equal(payload.drafts[0].id,'new-manual-draft');assert.equal(generationCalls,1);
     assert.equal(h.store.read().drafts[0].id,'new-manual-draft');assert.equal(h.calls.send,0);
   }finally{delayed.release();await h.close();}
+});
+
+test('model foundation generation uses the contact memory model, caches locally and preserves personally edited facts',async()=>{
+  const h=await harness();
+  try{
+    await h.add(h.a,'我喜欢散步');await h.add(h.b,'另一人的资料');
+    await h.request(`/conversations/${h.a}/basis`,'POST',{category:'current_status',content:'本人补充的目前状况'});
+    await h.request(`/conversations/${h.a}`,'PATCH',{processing:{memoryModel:{id:'basis-model',provider:'compatible',modelName:'selected-memory'}}});
+    assert.equal((await h.request(`/conversations/${h.a}/basis/generate`,'POST',{}, {'X-CSRF-Token':''})).status,403);
+    const first=await(await h.request(`/conversations/${h.a}/basis/generate`,'POST',{})).json();
+    assert.equal(first.cached,false);assert.equal(first.facts.length,2);assert.equal(first.facts[1].modelName,'selected-memory');
+    assert.equal(h.store.read().conversations.find(c=>c.id===h.a)!.processing?.memoryEnabled,undefined);
+    const repeated=await(await h.request(`/conversations/${h.a}/basis/generate`,'POST',{})).json();assert.equal(repeated.cached,true);assert.equal(h.calls.basis,1);
+    const modelFact=first.facts.find((f:any)=>f.origin==='model');
+    assert.equal((await h.request(`/conversations/${h.a}/basis/${modelFact.id}`,'PATCH',{})).status,400);
+    assert.equal(h.store.read().conversations.find(c=>c.id===h.a)!.basisFacts!.find(f=>f.id===modelFact.id)!.origin,'model');
+    await h.request(`/conversations/${h.a}/basis/${modelFact.id}`,'PATCH',{content:'个人修正：更喜欢骑车'});
+    const corrected=h.store.read().conversations.find(c=>c.id===h.a)!.basisFacts!.find(f=>f.id===modelFact.id)!;
+    assert.equal(corrected.origin,'manual');assert.equal(corrected.sourceMessageIds,undefined);assert.equal(corrected.modelName,undefined);
+    await h.add(h.a,'我最近开始跑步');
+    assert.equal((await h.request(`/conversations/${h.a}/basis/generate`,'POST',{})).status,200);
+    assert.ok(h.store.read().conversations.find(c=>c.id===h.a)!.basisFacts!.some(f=>f.id===modelFact.id&&f.content==='个人修正：更喜欢骑车'));
+    assert.equal(h.store.read().conversations.find(c=>c.id===h.b)!.basisFacts,undefined);assert.equal(h.calls.send,0);
+  }finally{await h.close();}
+});
+
+test('foundation changes cancel a delayed model result without overwriting personal input',async()=>{
+  const delayed=gate();let signal:AbortSignal|undefined;
+  const h=await harness({generateContactBasis:async(s,cid,chosen)=>{signal=chosen;delayed.enter();await delayed.wait;return basisResult(s,cid);}});
+  try{
+    await h.add(h.a);const pending=h.request(`/conversations/${h.a}/basis/generate`,'POST',{});await delayed.ready;
+    await h.request(`/conversations/${h.a}/basis`,'POST',{category:'fact',content:'生成期间个人补充'});assert.equal(signal!.aborted,true);
+    delayed.release();assert.notEqual((await pending).status,200);
+    assert.deepEqual(h.store.read().conversations.find(c=>c.id===h.a)!.basisFacts!.map(f=>f.content),['生成期间个人补充']);
+  }finally{delayed.release();await h.close();}
+});
+
+test('manual memory notes work without a model, remain scoped and can be supplemented, corrected and deleted',async()=>{
+  const h=await harness();
+  try{
+    h.store.update(s=>{s.settings.memory={...model,provider:'disabled'};});
+    const path=`/conversations/${h.a}/memory/entries`;
+    assert.equal((await h.request(path,'POST',{kind:'fact',text:'个人记住的重要事项'}, {'X-CSRF-Token':''})).status,403);
+    const added=await h.request(path,'POST',{kind:'fact',text:'个人记住的重要事项'});assert.equal(added.status,201);
+    const memory=await added.json(),entry=memory.entries[0];assert.equal(memory.provider,'manual');assert.equal(entry.origin,'manual');
+    assert.equal(entry.status,'approved');assert.deepEqual(entry.sourceMessageIds,[]);
+    assert.equal((await h.request(`/conversations/${h.b}/memory/entries/${entry.id}`,'PATCH',{text:'跨人修改'})).status,404);
+    const edited=await(await h.request(path+`/${entry.id}`,'PATCH',{kind:'openTopic',text:'个人修正后的计划'})).json();
+    assert.equal(edited.entries[0].text,'个人修正后的计划');assert.equal(edited.modelRecapInvalidated,true);
+    assert.equal((await h.request(path,'POST',{kind:'personality',text:'无效类别'})).status,400);
+    assert.equal((await h.request(path+`/${entry.id}`,'PATCH',{sourceMessageIds:['fake']})).status,400);
+    assert.equal((await h.request(path+`/${entry.id}`,'DELETE')).status,200);
+    assert.equal(h.store.read().conversations.find(c=>c.id===h.a)!.memory!.entries.length,0);
+    assert.equal(h.store.read().conversations.find(c=>c.id===h.b)!.memory,undefined);assert.equal(h.calls.memory,0);assert.equal(h.calls.send,0);
+  }finally{await h.close();}
+});
+
+test('editing a model memory replaces its machine provenance and invalidates the old recap',async()=>{
+  const h=await harness();
+  try{
+    await h.add(h.a);await h.request(`/conversations/${h.a}`,'PATCH',{processing:{memoryEnabled:true}});
+    const generated=await(await h.request(`/conversations/${h.a}/memory/compress`,'POST',{})).json();
+    const eid=generated.memory.entries[0].id;
+    const edited=await(await h.request(`/conversations/${h.a}/memory/entries/${eid}`,'PATCH',{text:'本人修正后的内容'})).json();
+    const entry=edited.entries[0];assert.equal(entry.origin,'manual');assert.equal(entry.status,'approved');assert.deepEqual(entry.sourceMessageIds,[]);assert.deepEqual(entry.sourceMessageHashes,{});
+    assert.equal(edited.modelRecapInvalidated,true);assert.equal(h.calls.memory,1);
+  }finally{await h.close();}
+});
+
+test('manual summary and open topics can be edited independently and persist after restart',async()=>{
+  const h=await harness();let closed=false,reopened:Awaited<ReturnType<typeof harness>>|undefined;
+  try{
+    await h.add(h.a);const path=`/conversations/${h.a}/memory`;
+    assert.equal((await h.request(path,'PATCH',{summary:'个人补充的回顾',openTopics:['下次继续聊行程']})).status,200);
+    await h.request(path,'PATCH',{openTopics:['已修改的未完话题']});
+    const memory=h.store.read().conversations.find(c=>c.id===h.a)!.memory!;
+    assert.equal(memory.summary,'个人补充的回顾');assert.equal(memory.summaryOrigin,'manual');assert.equal(memory.openTopicsOrigin,'manual');
+    assert.equal((await h.request(path,'PATCH',{})).status,400);assert.equal((await h.request(path,'PATCH',{openTopics:[' ']})).status,400);
+    await h.close(false);closed=true;reopened=await harness({databasePath:h.databasePath});
+    const restored=reopened.store.read().conversations.find(c=>c.id===h.a)!.memory!;
+    assert.equal(restored.summary,memory.summary);assert.deepEqual(restored.openTopics,['已修改的未完话题']);assert.equal(reopened.calls.memory,0);
+  }finally{if(reopened)await reopened.close();if(!closed)await h.close();else rmSync(h.dir,{recursive:true,force:true});}
 });

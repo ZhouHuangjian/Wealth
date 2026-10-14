@@ -173,6 +173,67 @@ test('compressed recap is omitted after any compressed source changes, even when
   assert.deepEqual(context.reviewedConversationMemory.confirmedEntries, []);
 });
 
+test('model-extracted contact background stays uncertain and requires current scoped evidence until manually edited', async t => {
+  const state = fixture(); state.learnedProfile = learnedProfile();
+  const source = state.messages.find(message => message.id === 'peer-a')!;
+  state.messages.push(message('foreign-source', 'b', 'peer', '其他人的资料不能混入', 1));
+  const modelFact: ContactBasisFact = {...basisFact('模型提取对方最近工作忙', 'model-fact'), origin: 'model',
+    sourceMessageIds: [source.id], sourceMessageHashes: {[source.id]: messageEvidenceHash(source)}, provider: 'qwen' as const, modelName: 'basis-model'};
+  state.conversations[0].basisFacts = [basisFact('用户补充对方爱好摄影'), modelFact,
+    {...modelFact, id: 'foreign-fact', content: '其他人模型资料不可出现', sourceMessageIds: ['foreign-source'],
+      sourceMessageHashes: {'foreign-source': messageEvidenceHash(state.messages.at(-1)!)}},
+    {...modelFact, id: 'stale-fact', content: '失效的模型资料不可出现', sourceMessageHashes: {[source.id]: 'outdated-hash'}}];
+  let body: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {body = JSON.parse(init.body as string); return response();});
+  await generateDrafts(state, 'a'); let context = JSON.parse(body.messages[1].content);
+  assert.deepEqual(context.confirmedContactFacts.map((fact: any) => fact.content), ['用户补充对方爱好摄影']);
+  assert.deepEqual(context.unconfirmedContactFacts.map((fact: any) => fact.content), ['模型提取对方最近工作忙']);
+  assert.equal(context.unconfirmedContactFacts[0].uncertain, true); assert.equal(context.unconfirmedContactFacts[0].source, 'model-extracted');
+  assert.doesNotMatch(JSON.stringify(body), /其他人模型资料不可出现|失效的模型资料不可出现/);
+  assert.deepEqual(context.approvedSelfClaims, []); assert.deepEqual(context.selfStyleSamples, ['本人A表达样本']);
+  assert.equal(context.learnedStyleProfile.version, '1.8'); assert.match(body.messages[0].content, /不是用户手动提供的资料/);
+  modelFact.origin = 'manual'; modelFact.content = '用户修正的当前现状';
+  await generateDrafts(state, 'a'); context = JSON.parse(body.messages[1].content);
+  assert.deepEqual(context.unconfirmedContactFacts, []);
+  assert.deepEqual(context.confirmedContactFacts.map((fact: any) => fact.content), ['用户补充对方爱好摄影', '用户修正的当前现状']);
+});
+
+test('approved manual memory and edited recap remain user-provided context without fabricated chat evidence or stale model recap', async t => {
+  const state = fixture(); state.settings.modelUrl = 'https://model.example/v1'; state.settings.allowRemoteModel = true;
+  const contact = state.conversations[0]; contact.processing = {memoryEnabled: true};
+  contact.memory = {...memory([{...memoryEntry('用户补充的安排 note@example.com 13812345678', []), origin: 'manual'},
+    {...memoryEntry('失效的旧模型事项不可出现', ['peer-a']), sourceMessageHashes: {'peer-a': 'outdated-hash'}},
+    {...memoryEntry('用户拒绝的补充不可出现', [], 'rejected'), origin: 'manual'}]),
+    summary: '用户整理的回顾 recap@example.com 13912345678', summaryOrigin: 'manual',
+    openTopics: ['用户补充待讨论 topic@example.com 13712345678'], openTopicsOrigin: 'manual'};
+  let body: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {body = JSON.parse(init.body as string); return response();});
+  await generateDrafts(state, 'a'); const context = JSON.parse(body.messages[1].content), remembered = context.reviewedConversationMemory;
+  assert.equal(remembered.confirmedEntries.length, 1); assert.equal(remembered.confirmedEntries[0].origin, 'manual');
+  assert.deepEqual(remembered.confirmedEntries[0].sourceMessageIds, []);
+  assert.match(remembered.confirmedEntries[0].text, /用户补充的安排/); assert.equal(remembered.unconfirmedModelRecap, null);
+  assert.match(remembered.userProvidedRecap.summary, /用户整理的回顾/);
+  assert.match(remembered.userProvidedRecap.openTopics[0], /用户补充待讨论/);
+  assert.deepEqual(context.approvedSelfClaims, []); assert.deepEqual(context.selfStyleSamples, ['本人A表达样本']);
+  assert.doesNotMatch(JSON.stringify(body), /失效的旧模型事项不可出现|用户拒绝的补充不可出现|note@example.com|13812345678|recap@example.com|13912345678|topic@example.com|13712345678/);
+  assert.match(body.messages[0].content, /不能伪称来自原聊天记录/);
+});
+
+test('manual note edits do not promote an old model recap and independently tagged manual topics stay separate', async t => {
+  const state = fixture(), contact = state.conversations[0]; contact.processing = {memoryEnabled: true};
+  contact.memory = {...memory([{...memoryEntry('用户修正的事项', []), origin: 'manual'}]), summary: '旧模型回顾不可恢复',
+    openTopics: ['用户补充的未完话题'], openTopicsOrigin: 'manual'};
+  let context: any;
+  t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {context = JSON.parse(JSON.parse(init.body as string).messages[1].content); return response();});
+  await generateDrafts(state, 'a');
+  assert.equal(context.reviewedConversationMemory.unconfirmedModelRecap, null);
+  assert.equal(context.reviewedConversationMemory.userProvidedRecap.summary, '');
+  assert.deepEqual(context.reviewedConversationMemory.userProvidedRecap.openTopics, ['用户补充的未完话题']);
+  assert.ok(!JSON.stringify(context).includes('旧模型回顾不可恢复'));
+  contact.memory!.summaryOrigin = 'manual'; await generateDrafts(state, 'a');
+  assert.equal(context.reviewedConversationMemory.userProvidedRecap.summary, '旧模型回顾不可恢复', 'only an explicit manual summary edit changes its source');
+});
+
 test('contacts choose independent comparison models, inherit defaults or use just the primary', async t => {
   const state=fixture(),models:string[]=[];
   state.messages.push(message('peer-b','b','peer','你好',1));
