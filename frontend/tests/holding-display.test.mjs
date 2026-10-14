@@ -301,6 +301,41 @@ test("missing values are never fabricated as zero while recorded zero is retaine
   assert.equal(zero.daily.complete, true);
 });
 
+test("closed holdings keep amounts empty and are counted separately from true gaps", () => {
+  const closed = holding("closed", {
+    daily_return: {
+      date: asOf,
+      currency: "CNY",
+      status: "market_closed",
+      amount: null,
+    },
+  });
+  assert.equal(holdingDailyAmount(closed, asOf), null);
+  let group = summarizeHoldings([closed], asOf).groups[0];
+  let daily = group.daily;
+  assert.equal(daily.amount, null);
+  assert.equal(group.dailyMarketClosedCount, 1);
+  assert.equal(group.dailyMissingCount, 0);
+  assert.equal(daily.complete, false);
+  group = summarizeHoldings(
+    [closed, holding("known"), holding("gap", { daily_return: null })],
+    asOf,
+  ).groups[0];
+  daily = group.daily;
+  assert.equal(daily.amount, "2");
+  assert.equal(daily.known, 1);
+  assert.equal(group.dailyMarketClosedCount, 1);
+  assert.equal(group.dailyMissingCount, 1);
+  assert.equal(daily.total, 3);
+  assert.equal(daily.complete, false);
+  const unresolved = summarizeHoldings(
+    [{ ...closed, status: "needs_reconciliation" }],
+    asOf,
+  ).groups[0];
+  assert.equal(unresolved.dailyMarketClosedCount, 0);
+  assert.equal(unresolved.dailyMissingCount, 1);
+});
+
 test("daily estimates require today's explicit amount and never use cumulative profit or stale/foreign currency data", () => {
   const row = holding("a", { estimate_profit: "800", profit: "900" });
   assert.equal(holdingDailyAmount(row, asOf), "2");

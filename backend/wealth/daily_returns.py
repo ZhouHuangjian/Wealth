@@ -344,6 +344,7 @@ class ReturnEvidence:
             when,
             self.actions.get(iid, []),
             check_reader=self.read_check,
+            blocked_dates=self.nav_quarantines.get(iid, {}),
         )
         if item is None:
             return None
@@ -409,7 +410,24 @@ class ReturnEvidence:
                 "missing_baseline",
             )
         if reference:
+            from .investments import _closed_calendar_item
             from .trading_calendar import is_trading_day
+
+            previous = next(
+                (q for q in reversed(formal) if q.economic_date < when), None
+            )
+            closed = _closed_calendar_item(
+                instrument,
+                when,
+                item,
+                previous,
+                self.movements[key],
+                self.dividends[key],
+                corporate_actions=self.actions.get(iid, []),
+                blocked_dates=self.nav_quarantines.get(iid, {}),
+            )
+            if closed:
+                return closed
 
             if is_trading_day(when, _calendar_id(instrument)) is not True:
                 return _unavailable(
@@ -484,7 +502,8 @@ class ReturnEvidence:
         return item
 
     def snapshot(self, aid, when, *, estimated=False, allow_cash_carry_forward=True):
-        account, rows = self.snapshot_accounts[aid], self.snapshots[aid]
+        account = self.snapshot_accounts[aid]
+        rows = [row for row in self.snapshots[aid] if row.economic_date <= when]
         base = {
             "account_id": aid,
             "account_name": account.name,
@@ -529,77 +548,61 @@ class ReturnEvidence:
                 None,
             )
         previous = next((s for s in reversed(formal) if s.economic_date < when), None)
-        if (
-            allow_cash_carry_forward
-            and not current
-            and previous
-            and rows[-1].pk == previous.pk
-        ):
-            # A verified, cash-only account needs no invented daily settlement.
-            # Reuse the same exposure/flow checks as the account valuation; this
-            # is explicitly an assumption, not an institution's new statement.
-            from .availability import RESTRICTED_KEYS, _zero
-            from .portfolio import _institution_value
+        if allow_cash_carry_forward:
+            from .return_account_state import cash_only_daily_return
 
-            unrestricted = not account.frozen and all(
-                _zero(previous.details.get(key)) for key in RESTRICTED_KEYS
+            cash_only = cash_only_daily_return(
+                self.space, account, when, snapshots=rows, cash_flows=self.flows[aid]
             )
-            if unrestricted and previous.currency == account.currency:
-                carried = _institution_value(self.space, account, when)
-                if carried.get("cash_only_carry_forward") and not carried["gaps"]:
-                    changes = [
-                        line
-                        for line in self.flows[aid]
-                        if line.event.economic_date == when
-                    ]
-                    capital = sum(
-                        (
-                            line.amount
-                            for line in changes
-                            if line.event.kind in EXTERNAL_FLOWS
-                        ),
-                        ZERO,
+            if cash_only:
+                return {**base, **cash_only}
+        if not current and previous and rows[-1].pk == previous.pk:
+            from .return_sessions import closed_return_state
+            from .valuation_basis import settled_market_remained_closed
+
+            has_activity = (
+                any(
+                    previous.economic_date < move["date"] <= when
+                    for (account_id, _), moves in self.movements.items()
+                    if account_id == aid
+                    for move in moves
+                )
+                or any(
+                    previous.economic_date < line.event.economic_date <= when
+                    and line.event.kind not in EXTERNAL_FLOWS
+                    for line in self.flows[aid]
+                )
+                or any(
+                    previous.economic_date < day(value) <= when
+                    for versions in self.option_versions[aid]
+                    for _, data in versions
+                    for value in (
+                        data.get("purchase_date"),
+                        data.get("as_of"),
+                        data.get("closed_date"),
                     )
-                    dividends = sum(
-                        (
-                            line.amount
-                            for line in changes
-                            if line.event.kind == "dividend"
-                        ),
-                        ZERO,
-                    )
-                    opening = carried["local_value"] - sum(
-                        (line.amount for line in changes), ZERO
-                    )
-                    basis = opening + sum(
-                        (
-                            max(line.amount, ZERO)
-                            for line in changes
-                            if line.event.kind in EXTERNAL_FLOWS
-                        ),
-                        ZERO,
-                    )
+                    if value
+                )
+            )
+            if (
+                not has_activity
+                and not (
+                    previous.includes_options is False and self.option_active(aid, when)
+                )
+                and settled_market_remained_closed(previous, when)
+                and not self._snapshot_scope_error(aid, previous, rows)
+            ):
+                closed = closed_return_state(
+                    None,
+                    when,
+                    item=base,
+                    calendar_id=previous.details.get("calendar_id"),
+                )
+                if closed:
                     return {
                         **base,
-                        "amount": dividends,
-                        "basis": basis,
-                        "return_rate": dividends / basis if basis > ZERO else None,
-                        "capital_flow": capital,
-                        "dividends": dividends,
-                        "status": "estimated",
-                        "source": "cash_only_carry_forward",
-                        "price_basis": "estimate",
-                        "observation_kind": "reference",
-                        "quantity_source": "no_recorded_positions",
-                        "cash_only_carry_forward": True,
-                        "settlement_pnl": ZERO,
-                        "published_at": None,
-                        "observed_at": previous.details.get("valuation_observed_at")
-                        or previous.created_at,
-                        "interval_start": when - timedelta(days=1),
-                        "message": "无已记录持仓，按资金流水延续；结算盈亏按 0 推算"
-                        if not dividends
-                        else "仅含已记录分红；无持仓期间的结算盈亏按 0 推算",
+                        **closed,
+                        "message": f"相关市场休市，保留 {previous.economic_date} 的结算权益；不新增该日收益",
                     }
         if not current or not previous:
             return base
@@ -619,31 +622,9 @@ class ReturnEvidence:
         if not _continuous_baseline(previous.economic_date, when, calendar_id):
             return _unavailable(base, "结算权益之间缺少交易日记录，不能当作单日收益")
         for snapshot in (previous, current):
-            if (
-                not snapshot.complete
-                or snapshot.currency != account.currency
-                or snapshot.includes_options is None
-                or (
-                    snapshot.includes_options is False
-                    and (
-                        snapshot.details.get("no_option_positions") is not True
-                        or self.option_active(aid, snapshot.economic_date)
-                    )
-                )
-            ):
-                return _unavailable(base, "机构权益包含范围尚未核实")
-            relevant = [
-                line
-                for line in self.flows[aid]
-                if rows[0].economic_date
-                <= line.event.economic_date
-                <= snapshot.economic_date
-            ]
-            if any(
-                str(line.event_id) not in snapshot.included_event_ids
-                for line in relevant
-            ):
-                return _unavailable(base, "机构权益未核对实际资金流水的包含范围")
+            error = self._snapshot_scope_error(aid, snapshot, rows)
+            if error:
+                return _unavailable(base, error)
         period = [
             line
             for line in self.flows[aid]
@@ -664,6 +645,31 @@ class ReturnEvidence:
             if current.details.get("valuation_basis") == "intraday"
             else "confirmed",
         }
+
+    def _snapshot_scope_error(self, aid, snapshot, rows):
+        account = self.snapshot_accounts[aid]
+        if (
+            not snapshot.complete
+            or snapshot.currency != account.currency
+            or snapshot.includes_options is None
+            or (
+                snapshot.includes_options is False
+                and (
+                    snapshot.details.get("no_option_positions") is not True
+                    or self.option_active(aid, snapshot.economic_date)
+                )
+            )
+        ):
+            return "机构权益包含范围尚未核实"
+        if any(
+            str(line.event_id) not in snapshot.included_event_ids
+            for line in self.flows[aid]
+            if rows[0].economic_date
+            <= line.event.economic_date
+            <= snapshot.economic_date
+        ):
+            return "机构权益未核对实际资金流水的包含范围"
+        return None
 
     def convert(self, item, currency):
         return convert_return_currency(item, currency, self.fx_rows)
@@ -795,6 +801,7 @@ def daily_return_overview(
                     }
                 )
     known = [item for item in items if item["base_amount"] is not None]
+    closed = [item for item in items if item["status"] == "market_closed"]
     complete = bool(items) and len(known) == len(items)
     amount = sum((item["base_amount"] for item in known), ZERO) if known else None
     basis = sum((item.get("base_basis") or ZERO for item in known), ZERO)
@@ -812,12 +819,15 @@ def daily_return_overview(
         if complete
         else "partial"
         if known
+        else "market_closed"
+        if items and len(closed) == len(items)
         else "unavailable"
         if items
         else "no_position",
         "known_count": len(known),
         "total_count": len(items),
-        "missing_count": len(items) - len(known),
+        "missing_count": len(items) - len(known) - len(closed),
+        "market_closed_count": len(closed),
         "items": items,
         "currency_policy": CURRENCY_POLICY,
         "knowledge_basis": "currently_recorded_facts",

@@ -7,7 +7,13 @@ export const dailyReturnLabels: Record<string, string> = {
   partial: "部分可计算",
   unavailable: "待更新",
   no_position: "暂无持仓",
+  market_closed: "休市",
 };
+
+/** A closed market has no amount to complete; other missing values retain their warning. */
+export function closedReturnPlaceholder(status: unknown, hidden = false) {
+  return status === "market_closed" ? (hidden ? "••••••" : "—") : null;
+}
 
 const missingReasonLabels: Record<string, string> = {
   no_estimate: "暂无盘中估值",
@@ -46,7 +52,8 @@ export function dailyReturnIssues(
 ) {
   const groups = new Map<string, number>();
   for (const row of data?.items || []) {
-    if (["estimated", "confirmed"].includes(row.status)) continue;
+    if (["estimated", "confirmed", "market_closed"].includes(row.status))
+      continue;
     const label = dailyReturnIssueLabel(row);
     groups.set(label, (groups.get(label) || 0) + 1);
   }
@@ -66,6 +73,10 @@ export function dailyReturnItemLabel(
   const status = nativeReturnStatus(data);
   if (!["confirmed", "estimated"].includes(status))
     return dailyReturnLabels[status] || "待更新";
+  if (status === "estimated" && data?.source === "cash_only_carry_forward")
+    return data?.missing_reason_code === "fx_missing"
+      ? "无已记录持仓 · 推算（原币，待折算）"
+      : "无已记录持仓 · 推算";
   const formal =
     data?.observation_kind === "formal" || data?.price_basis === "formal";
   const inferred =
@@ -127,6 +138,17 @@ export function dailyReturnDisplay(
   const complete = ["estimated", "confirmed"].includes(status);
   const known = Number(data?.known_count || 0);
   const total = Number(data?.total_count || 0);
+  const closed = Number(data?.market_closed_count || 0);
+  const missing = Number(
+    data?.missing_count ?? Math.max(0, total - known - closed),
+  );
+  const items = data?.items || [];
+  const cashOnly =
+    status === "estimated" &&
+    items.length > 0 &&
+    items.every(
+      (row: Record<string, any>) => row.source === "cash_only_carry_forward",
+    );
   const candidate = complete
     ? data?.amount
     : status === "partial" && known > 0
@@ -139,11 +161,60 @@ export function dailyReturnDisplay(
     amount,
     rate: complete ? percentText(data?.return_rate) : null,
     partial: status === "partial",
+    known,
+    closed,
+    missing,
+    cashOnly,
     coverage:
       status === "no_position"
         ? "暂无投资持仓"
-        : total > 0
-          ? `${known} / ${total} 项可计算（按条目数）`
-          : "等待当日行情与计算基准",
+        : closed > 0 || status === "market_closed"
+          ? [
+              known > 0 ? `已计算 ${known} 项` : "",
+              `${closed || total} 项休市`,
+              missing > 0 ? `${missing} 项待补全` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ") + "（按条目数）"
+          : total > 0
+            ? `${known} / ${total} 项可计算（按条目数）`
+            : "等待当日行情与计算基准",
+  };
+}
+
+/** Calendar periods may have observations and closed days without missing data. */
+export function calendarReturnDisplay(
+  data: Record<string, any> | null | undefined,
+) {
+  const status = data?.status;
+  const candidate = ["market_closed", "no_position"].includes(status)
+    ? null
+    : (data?.amount ?? (status === "partial" ? data?.known_amount : null));
+  const amount = formatDecimal(candidate, false, 2) === null ? null : candidate;
+  const closedDays = Number(data?.market_closed_days || 0);
+  const closedItems = Number(data?.market_closed_count || 0);
+  return {
+    amount,
+    label:
+      status === "market_closed"
+        ? "休市"
+        : status === "no_position"
+          ? "无持仓"
+          : amount == null
+            ? "未更新"
+            : null,
+    note:
+      closedDays > 0
+        ? [
+            `${closedDays} 天休市`,
+            Number(data?.missing_days || 0) > 0
+              ? `${data?.missing_days} 天待补全`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : closedItems > 0
+          ? dailyReturnDisplay(data).coverage
+          : "",
   };
 }

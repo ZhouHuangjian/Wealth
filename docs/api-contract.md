@@ -210,7 +210,7 @@ CSRF 在进入业务视图前由 Django 中间件校验。**CSRF 失败可能返
 
 `GET /profit-calendar` 支持不超过三年的 start/end 区间；period 为 day/week/month/year，selected_day 决定返回哪一天明细，账户/产品必须属于当前空间。返回 `days`, `buckets`, `details`, `summary`, `currency`, `data_revision`、`return_basis`、`currency_policy` 和 `history_warnings`。
 
-每一天含 date/amount/known_amount/return_rate/status/items。状态为 confirmed/partial/unavailable/no_position/future；amount 为完整可计算值，否则 null；known_amount 只表示已知部分。未来日期、无持仓、无正式价格、缺汇率和未核对公司行动不能展示成零收益。
+每一天含 date/amount/known_amount/return_rate/status/items。状态为 confirmed/estimated/partial/unavailable/no_position/market_closed/future；amount 为完整可计算值，否则 null；known_amount 只表示已知部分。未来日期、无持仓、无正式价格、缺汇率和未核对公司行动不能展示成零收益。
 
 日收益依据正式价格、已记录的持仓变化及关联产品的实际分红计算；期货/期权账户依据机构权益和已知出入金。单个合约没有独立结算资料时，不把整个账户盈亏归到该合约。收益率以日初市值加正向投入为基础，完整观察区间按日收益率复合，不能简单相加，也不等同 XIRR。跨币种日收益按当日汇率折算，独立汇兑损益不混入产品收益。
 
@@ -601,9 +601,13 @@ AUD-002/003/004/006已修复并随2.12发布：完整实际证据升级有效份
 | `missing_reason_code` | 可空语义码，区分无当日估值/价格、基准缺失、NAV冲突、刷新失败、获取过期、报价时间缺失/延迟、日历、持仓/交易核对与汇率缺口。`quote_metadata_mismatch`表示已有行情元数据与选用Price不匹配，等待对应证据更新；不得借主quote的fetch放行。`message`保留具体原因；未知码按缺口展示，不能转成零或放行写入 |
 | `fetched_at` | 可空、带时区的真实行情获取时刻；子估值与选用Price严格匹配后取自己的时刻。未知不以`observed_at`或请求时间代替。原`published_at`仍为来源公布时刻，`observed_at`为记录/观察时刻（Price分支来自`created_at`），均不改变`return_date` |
 
-首页/持仓日收益和收益日历对机构总权益使用同一现金流与日期资格；日历只采正式结算，同一日正式NAV替代同日估值，不能再加一次。日历按账户/产品筛选时无关股息不得改变范围。收益折算统一使用收益日及以前、最多7个自然日的有效汇率；原币可算而折算缺失时两种状态分别展示。规则唯一维护在[领域模型§14](domain-model.md#14-指标字典估算与缺失)。
+首页/持仓日收益和收益日历对机构总权益使用同一现金流与日期资格；日历正式部分只采正式结算，另有下述2.14.4空仓推算例外；同一日正式NAV替代同日估值，不能再加一次。日历按账户/产品筛选时无关股息不得改变范围。收益折算统一使用收益日及以前、最多7个自然日的有效汇率；原币可算而折算缺失时两种状态分别展示。规则唯一维护在[领域模型§14](domain-model.md#14-指标字典估算与缺失)。
 
 前端仅从上述语义码和当前空间对象身份构造已有路由，不接受行情返回的任意URL：产品行情进入`analytics?tab=settlement&section=quotes&instrument_id=...`；汇率进入`manage?tab=fx`；产品交易日规则定位产品编辑；交易依据定位原账户投资流水，机构范围定位账户核对。页面读取/导航不会核对、调平或生成账务；对象不存在/无权访问仍由既有页面与API阻止。
+
+2.14.4扩展上述契约：汇总和明细支持`market_closed`，日汇总增加`market_closed_count`，`missing_count=total_count-known_count-market_closed_count`。休市明细的`amount/base_amount/basis/return_rate=null`、`missing_reason_code=null`；`market_calendar`保存日历ID、日历日期、市场当地日期、时区、来源和判断依据。不得把休市计入待补全或输出修正按钮。已知+休市仍`partial/amount=null`，`known_amount`展示已计算部分。收益日历的天同样包含上述条目计数，周期增加`market_closed_days`；含partial日的周期仍partial，独立休市日不增加missing_days。正式数据、NAV冲突和实际交易核对优先于休市展示。
+
+机构日历正式观察规则的限定扩展：`source=cash_only_carry_forward`可在首页及日历返回`estimated`，说明持续无已记录持仓而结算盈亏推算0；字段`settlement_pnl/capital_flow/dividends/quantity_source/price_date/interval_start`保留证据。不能把这种0改成confirmed，也不能清零当日平仓收益。现行业务定义见[领域模型§14.4](domain-model.md#144-空仓休市与缺数2144)。overview算法版本升为`account-equity-v28`，读时绕过旧投影，GET不删除缓存或写账。
 
 ### 21.1 最近基金收益更新（2.14.2）
 

@@ -111,7 +111,13 @@ def reject_writes(execute, sql, params, many, context):
 
 
 @pytest.mark.parametrize(
-    "legacy_version", ["account-equity-v24", "account-equity-v25", "account-equity-v26"]
+    "legacy_version",
+    [
+        "account-equity-v24",
+        "account-equity-v25",
+        "account-equity-v26",
+        "account-equity-v27",
+    ],
 )
 @pytest.mark.parametrize(
     ("status", "message"),

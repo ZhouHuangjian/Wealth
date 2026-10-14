@@ -26,6 +26,7 @@ export function dailyReturnNextAction(
   spaceId: string,
   row: Values,
 ): BusinessAction | null {
+  if (row.status === "market_closed") return null;
   if (row.missing_reason_code === "fx_missing")
     return {
       kind: "cash",

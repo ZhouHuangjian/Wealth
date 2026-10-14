@@ -8,6 +8,7 @@ import {
   dailyReturnDisplay,
   dailyReturnItemLabel,
   dailyReturnIssues,
+  closedReturnPlaceholder,
   returnDateDisplay,
 } from "../daily-return";
 import { dailyReturnNextAction } from "../business-action";
@@ -21,6 +22,7 @@ const sourceLabels: Record<string, string> = {
   option_position_reference: "期权持仓参考",
   ledger: "已记录交易",
   manual: "手工录入",
+  cash_only_carry_forward: "无已记录持仓，按资金流水推算",
 };
 
 export default function DailyReturnCard({
@@ -59,10 +61,12 @@ export default function DailyReturnCard({
           </Tag>
         </div>
         <strong className={hidden ? "" : profitTone(view.amount)}>
-          <Money value={view.amount} currency={displayCurrency} sign />
+          {closedReturnPlaceholder(view.status, hidden) ?? (
+            <Money value={view.amount} currency={displayCurrency} sign />
+          )}
         </strong>
         <div className="daily-return-secondary">
-          {view.rate && !hidden ? (
+          {view.rate && !hidden && !view.cashOnly ? (
             <span className={profitTone(data?.return_rate)}>{view.rate}</span>
           ) : view.partial ? (
             <span>已计算部分，非全部收益</span>
@@ -70,22 +74,28 @@ export default function DailyReturnCard({
             <span>
               {view.status === "no_position"
                 ? "暂无投资持仓"
-                : "按实际收益日统计"}
+                : view.status === "market_closed"
+                  ? "休市，无当日收益观测"
+                  : view.cashOnly
+                    ? "无已记录持仓，按资金流水推算"
+                    : "按实际收益日统计"}
             </span>
           )}
           <time>{data?.date || asOf}</time>
         </div>
-        {!hidden && ["partial", "unavailable"].includes(view.status) && (
-          <p className="daily-return-gaps">
-            {issues.length
-              ? issues
-                  .slice(0, 2)
-                  .map((issue) => `${issue.count} 项${issue.label}`)
-                  .join("；") + (issues.length > 2 ? "等" : "")
-              : "缺少对应日期的行情或计算依据"}
-            。缺少部分保留空缺。
-          </p>
-        )}
+        {!hidden &&
+          view.missing > 0 &&
+          ["partial", "unavailable"].includes(view.status) && (
+            <p className="daily-return-gaps">
+              {issues.length
+                ? issues
+                    .slice(0, 2)
+                    .map((issue) => `${issue.count} 项${issue.label}`)
+                    .join("；") + (issues.length > 2 ? "等" : "")
+                : "缺少对应日期的行情或计算依据"}
+              。缺少部分保留空缺。
+            </p>
+          )}
         <div className="daily-return-bottom">
           <small>{hidden ? "金额已隐藏" : view.coverage}</small>
           <Button
@@ -121,7 +131,13 @@ export default function DailyReturnCard({
                   {view.partial ? "已计算部分收益（非全部）" : title}
                 </small>
                 <strong className={profitTone(view.amount)}>
-                  <Money value={view.amount} currency={displayCurrency} sign />
+                  {closedReturnPlaceholder(view.status, hidden) ?? (
+                    <Money
+                      value={view.amount}
+                      currency={displayCurrency}
+                      sign
+                    />
+                  )}
                 </strong>
               </div>
               <div>
@@ -166,11 +182,13 @@ export default function DailyReturnCard({
                   width: 165,
                   render: (_, row) => (
                     <div className={`cell-name ${profitTone(row.base_amount)}`}>
-                      <Money
-                        value={row.base_amount}
-                        currency={displayCurrency}
-                        sign
-                      />
+                      {closedReturnPlaceholder(row.status, hidden) ?? (
+                        <Money
+                          value={row.base_amount}
+                          currency={displayCurrency}
+                          sign
+                        />
+                      )}
                       {row.base_amount == null &&
                         row.latest_formal_return?.base_amount != null && (
                           <small>
@@ -190,11 +208,13 @@ export default function DailyReturnCard({
                       {row.currency && row.currency !== displayCurrency && (
                         <small>
                           原币{" "}
-                          <Money
-                            value={row.amount}
-                            currency={row.currency}
-                            sign
-                          />
+                          {closedReturnPlaceholder(row.status, hidden) ?? (
+                            <Money
+                              value={row.amount}
+                              currency={row.currency}
+                              sign
+                            />
+                          )}
                         </small>
                       )}
                     </div>
@@ -207,7 +227,7 @@ export default function DailyReturnCard({
                       <span>
                         {dailyReturnItemLabel(row)}
                         {returnDateDisplay(row).returnDate
-                          ? ` · 收益归属 ${returnDateDisplay(row).returnDate}`
+                          ? ` · ${row.status === "market_closed" ? "休市日期" : "收益归属"} ${returnDateDisplay(row).returnDate}`
                           : ""}
                       </span>
                       {returnDateDisplay(row).navDate && (

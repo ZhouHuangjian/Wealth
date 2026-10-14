@@ -376,6 +376,14 @@ export function summarizeHoldings(rows: HoldingRow[], asOf: string) {
           complete: known.length === source.length,
         };
       };
+      const daily = sum((r) => holdingDailyAmount(r, asOf));
+      const marketClosed = confirmed.filter(
+        (row) =>
+          reliable(row) &&
+          row.daily_return?.date === asOf &&
+          row.daily_return?.currency === currency &&
+          row.daily_return?.status === "market_closed",
+      ).length;
       return {
         currency,
         count: items.length,
@@ -391,7 +399,9 @@ export function summarizeHoldings(rows: HoldingRow[], asOf: string) {
           ),
         ),
         profit: sum((r) => r.profit),
-        daily: sum((r) => holdingDailyAmount(r, asOf)),
+        daily,
+        dailyMarketClosedCount: marketClosed,
+        dailyMissingCount: daily.total - daily.known - marketClosed,
       };
     }),
   };

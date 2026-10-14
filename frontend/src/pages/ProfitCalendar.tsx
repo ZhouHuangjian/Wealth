@@ -11,6 +11,11 @@ import { QuoteStatus, Rate } from "./InvestmentWorkspace";
 import { newestFirst } from "../date-ordering";
 import { Link } from "react-router-dom";
 import { dailyReturnNextAction } from "../business-action";
+import {
+  calendarReturnDisplay,
+  dailyReturnItemLabel,
+  closedReturnPlaceholder,
+} from "../daily-return";
 
 export default function ProfitCalendar() {
   const { hidden, space } = useWorkspace();
@@ -47,6 +52,7 @@ export default function ProfitCalendar() {
     (b) => selectedDay >= b.date && selectedDay <= (b.end || b.date),
   );
   const summary = data?.summary;
+  const summaryView = calendarReturnDisplay(summary);
   function step(direction: number) {
     if (["month", "year"].includes(period))
       setMonth(`${Number(year) + direction}-${month.slice(5)}`);
@@ -68,16 +74,13 @@ export default function ProfitCalendar() {
   }, [month]);
   const value = (row: any) =>
     metric === "amount" ? (
-      <Money value={row?.amount} sign />
+      <Money value={calendarReturnDisplay(row).amount} sign />
     ) : (
       <Rate value={row?.return_rate} />
     );
   function label(row: any, date: string) {
     if (date > today) return "";
-    if (!row) return "未更新";
-    if (row.status === "no_position") return "无持仓";
-    if (row.amount === null || row.amount === undefined) return "未更新";
-    return null;
+    return calendarReturnDisplay(row).label;
   }
   return (
     <div className="profit-calendar">
@@ -162,24 +165,24 @@ export default function ProfitCalendar() {
                 {["month", "year"].includes(period) ? "本年" : "本月"}
                 {summary?.status === "partial" ? "已知收益" : "收益"}
               </small>
-              <strong
-                className={
-                  hidden
-                    ? ""
-                    : profitTone(summary?.amount ?? summary?.known_amount)
-                }
-              >
-                <Money
-                  value={summary?.amount ?? summary?.known_amount}
-                  currency={data?.currency}
-                  sign
-                />
+              <strong className={hidden ? "" : profitTone(summaryView.amount)}>
+                {closedReturnPlaceholder(summary?.status, hidden) ?? (
+                  <Money
+                    value={summaryView.amount}
+                    currency={data?.currency}
+                    sign
+                  />
+                )}
               </strong>
+              {(summaryView.note || summary?.status === "market_closed") && (
+                <small>{summaryView.note || "休市，无当期收益观测"}</small>
+              )}
             </div>
             <div className="calendar-legend">
               <span className="profit-up">● 盈利</span>
               <span className="profit-down">● 亏损</span>
               <span>— 未更新</span>
+              <span>休市 · 无当日观测</span>
             </div>
           </div>
           {period === "day" ? (
@@ -209,14 +212,21 @@ export default function ProfitCalendar() {
                       aria-label={`${date}${hidden ? " 金额已隐藏" : text ? ` ${text}` : " 收益"}`}
                       aria-pressed={selectedDay === date}
                       onClick={() => setSelectedDay(date)}
-                      className={`calendar-day ${selectedDay === date ? "selected" : ""} ${date > today ? "future-day" : ""} ${hidden ? "" : profitTone(row?.amount)}`}
+                      className={`calendar-day ${selectedDay === date ? "selected" : ""} ${date > today ? "future-day" : ""} ${hidden ? "" : profitTone(calendarReturnDisplay(row).amount)}`}
                     >
                       <span className="calendar-date">
                         {date === today ? "今" : day}
                       </span>
                       <strong>{text !== null ? text : value(row)}</strong>
-                      {row?.status === "partial" && <small>部分数据</small>}
-                      {row?.status === "estimated" && <small>含推算份额</small>}
+                      {row?.status === "partial" && (
+                        <small>
+                          {Number(row.market_closed_count || 0) > 0 &&
+                          Number(row.missing_count || 0) === 0
+                            ? "已计算部分 · 含休市"
+                            : "部分数据"}
+                        </small>
+                      )}
+                      {row?.status === "estimated" && <small>含推算结果</small>}
                     </button>
                   );
                 })}
@@ -233,7 +243,7 @@ export default function ProfitCalendar() {
                     key={b.date}
                     aria-pressed={currentBucket?.date === b.date}
                     onClick={() => setSelectedDay(b.date)}
-                    className={`${hidden ? "" : profitTone(b.amount)} ${currentBucket?.date === b.date ? "selected" : ""}`}
+                    className={`${hidden ? "" : profitTone(calendarReturnDisplay(b).amount)} ${currentBucket?.date === b.date ? "selected" : ""}`}
                   >
                     <span>
                       {period === "year"
@@ -242,8 +252,13 @@ export default function ProfitCalendar() {
                           ? `${Number(b.date.slice(5, 7))} 月`
                           : `${b.date.slice(5)} — ${(b.end || b.date).slice(5)}`}
                     </span>
-                    <strong>{b.amount == null ? "未更新" : value(b)}</strong>
+                    <strong>
+                      {calendarReturnDisplay(b).label ?? value(b)}
+                    </strong>
                     <QuoteStatus status={b.status} />
+                    {calendarReturnDisplay(b).note && (
+                      <small>{calendarReturnDisplay(b).note}</small>
+                    )}
                   </button>
                 ))
               ) : (
@@ -251,14 +266,15 @@ export default function ProfitCalendar() {
               )}
             </div>
           )}
-          {summary?.status === "partial" && (
-            <Alert
-              className="form-alert"
-              type="info"
-              showIcon
-              message="部分日期缺少正式价格或持仓依据，汇总只显示已知收益。"
-            />
-          )}
+          {summary?.status === "partial" &&
+            Number(summary?.missing_days || 0) > 0 && (
+              <Alert
+                className="form-alert"
+                type="info"
+                showIcon
+                message="部分日期缺少正式价格或持仓依据，汇总只显示已知收益。"
+              />
+            )}
         </LoadState>
         <p className="data-caption">
           收益按净值或价格归属日记录；QDII
@@ -305,11 +321,13 @@ export default function ProfitCalendar() {
                   <span
                     className={hidden ? "" : profitTone(r.amount ?? r.profit)}
                   >
-                    <Money
-                      value={r.amount ?? r.profit}
-                      currency={r.currency || data?.currency}
-                      sign
-                    />
+                    {closedReturnPlaceholder(r.status, hidden) ?? (
+                      <Money
+                        value={r.amount ?? r.profit}
+                        currency={r.currency || data?.currency}
+                        sign
+                      />
+                    )}
                   </span>
                 ),
               },
@@ -330,7 +348,11 @@ export default function ProfitCalendar() {
                 title: "状态",
                 render: (_, r: any) => (
                   <div className="cell-name">
-                    <QuoteStatus status={r.status} />
+                    {r.source === "cash_only_carry_forward" ? (
+                      <Tag>{dailyReturnItemLabel(r)}</Tag>
+                    ) : (
+                      <QuoteStatus status={r.status} />
+                    )}
                     {r.message && (
                       <small style={{ maxWidth: 240, whiteSpace: "normal" }}>
                         {hidden ? "内容已隐藏" : r.message}

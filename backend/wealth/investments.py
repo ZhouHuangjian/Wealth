@@ -19,11 +19,9 @@ from .models import (
     Account,
     Event,
     Instrument,
-    JournalLine,
     PositionMovement,
     Price,
     Resource,
-    Snapshot,
     Workspace,
 )
 
@@ -442,8 +440,8 @@ def holdings_summary(
     include_daily=True,
     include_pending=True,
 ):
-    from .reporting import formal_price, positions
     from .market_quality import available_prices
+    from .reporting import formal_price, positions
 
     when = day(when)
     accounts, instruments = _selected_rows(space, account_id, instrument_id, kind)
@@ -773,6 +771,52 @@ def _latest_quote(prices, when):
     )
 
 
+def _closed_calendar_item(
+    instrument,
+    when,
+    item,
+    previous,
+    movements,
+    dividends,
+    *,
+    corporate_actions=(),
+    blocked_dates=(),
+):
+    """Label a continuous closed interval without inventing a price or return."""
+    from .reporting import FORMAL_PRICE_KINDS
+    from .return_sessions import closed_return_state
+    from .trading_calendar import is_trading_day
+
+    if (
+        previous is None
+        or previous.kind not in FORMAL_PRICE_KINDS
+        or previous.economic_date >= when
+        or any(previous.economic_date < row["date"] <= when for row in movements)
+        or any(previous.economic_date < row.economic_date <= when for row in dividends)
+        or any(previous.economic_date < day(value) <= when for value in blocked_dates)
+        or any(
+            previous.economic_date < row["date"] <= when for row in corporate_actions
+        )
+    ):
+        return None
+    patch = closed_return_state(instrument, when, item=item)
+    if patch is None:
+        return None
+    calendar_id = patch["market_calendar"]["calendar_id"]
+    cursor = previous.economic_date + timedelta(days=1)
+    while cursor <= when:
+        if is_trading_day(cursor, calendar_id) is not False:
+            return None
+        cursor += timedelta(days=1)
+    return {
+        **item,
+        **patch,
+        "price_date": previous.economic_date,
+        "latest_observation_date": previous.economic_date,
+        "message": f"相关市场休市，保留 {previous.economic_date} 的最近有效数据；不新增该日收益",
+    }
+
+
 def _calendar_item(
     space,
     account,
@@ -784,6 +828,8 @@ def _calendar_item(
     corporate_actions=(),
     *,
     check_reader=None,
+    allow_closed=True,
+    blocked_dates=(),
 ):
     """Profit for a price observation, with actual trade cashflows separated.
 
@@ -894,8 +940,52 @@ def _calendar_item(
             "message": "期货期权收益须按机构权益与真实入出金计算",
             "missing_reason_code": "account_snapshot_needed",
         }
+    if any(
+        day(value) == when
+        or (q_before and opening and opening.economic_date < day(value) <= when)
+        for value in blocked_dates
+    ):
+        return {
+            **base,
+            "message": "对应收益区间正式净值来源存在差异，请核对行情",
+            "missing_reason_code": "nav_conflict",
+        }
+    pending_actions = [
+        action
+        for action in corporate_actions
+        if q_before
+        and opening
+        and opening.economic_date < action["date"] < when
+        and not any(event.economic_date == action["date"] for event in dividends)
+        and not any(
+            row["date"] == action["date"] and row["event"].kind in {"reinvest", "split"}
+            for row in movements
+        )
+    ]
+    if pending_actions:
+        return {
+            **base,
+            "corporate_actions": pending_actions,
+            "message": "上次有效价格之后有分红或折算待核对，暂不能将期间视为单纯休市",
+            "missing_reason_code": "corporate_action",
+        }
     if q_after and (not closing or closing.economic_date != when):
-        return {**base, "missing_reason_code": "no_current_price"}
+        missing = {**base, "missing_reason_code": "no_current_price"}
+        closed = (
+            _closed_calendar_item(
+                instrument,
+                when,
+                missing,
+                closing,
+                movements,
+                dividends,
+                corporate_actions=corporate_actions,
+                blocked_dates=blocked_dates,
+            )
+            if allow_closed
+            else None
+        )
+        return closed or missing
     from .valuation_calendar import open_days_between, return_calendar
 
     opening_lag = (
@@ -1007,7 +1097,17 @@ def _calendar_item(
 
 def _aggregate_days(rows):
     values = [row for row in rows if row["amount"] is not None]
-    missing = [row for row in rows if row["status"] in {"unavailable", "partial"}]
+    missing = [
+        row
+        for row in rows
+        if row["status"] in {"unavailable", "partial"}
+        and row.get("missing_count", 1) > 0
+    ]
+    closed = [
+        row
+        for row in rows
+        if row["status"] == "market_closed" or row.get("market_closed_count", 0)
+    ]
     known_values = [
         row for row in rows if row.get("known_amount", row["amount"]) is not None
     ]
@@ -1015,7 +1115,8 @@ def _aggregate_days(rows):
     # A period percentage cannot be obtained by adding daily percentages.
     # Chain the available day returns only for a complete observed period.
     rate = D(1)
-    rate_valid = bool(values) and not missing
+    rate_valid = bool(values) and not missing and not closed
+    partial = any(row["status"] == "partial" for row in rows)
     for row in values:
         if row["return_rate"] is None:
             rate_valid = False
@@ -1023,22 +1124,25 @@ def _aggregate_days(rows):
             rate *= D(1) + row["return_rate"]
     status = (
         "partial"
-        if missing and known_values
+        if (missing and known_values) or partial
         else "unavailable"
         if missing
         else "estimated"
-        if any(row["status"] == "estimated" for row in values)
+        if any(row["status"] in {"estimated", "partial"} for row in known_values)
         else "confirmed"
-        if values
+        if known_values
+        else "market_closed"
+        if closed
         else "no_position"
     )
     return {
-        "amount": known if values and not missing else None,
+        "amount": known if known_values and not missing and not partial else None,
         "known_amount": known if known_values else None,
         "return_rate": rate - D(1) if rate_valid else None,
         "status": status,
         "observed_days": len(values),
         "missing_days": len(missing),
+        "market_closed_days": len(closed),
     }
 
 
@@ -1052,9 +1156,9 @@ def profit_calendar(
     instrument_id=None,
     kind=None,
 ):
-    from .reporting import FORMAL_PRICE_KINDS
     from .daily_returns import convert_return_currency
     from .models import FxRate
+    from .reporting import FORMAL_PRICE_KINDS
 
     end = day(end)
     start = day(start) if start else end.replace(day=1)
@@ -1065,8 +1169,8 @@ def profit_calendar(
     selected = day(selected_day) if selected_day else min(end, timezone.localdate())
     accounts, instruments = _selected_rows(space, account_id, instrument_id, kind)
     movement_groups = defaultdict(list)
-    from .return_dates import analytical_movement
     from .fund_reconciliation import actual_confirmation_ids
+    from .return_dates import analytical_movement
 
     known_on = timezone.localdate()
     movement_rows = list(
@@ -1094,7 +1198,9 @@ def profit_calendar(
             )
         )
     prices = defaultdict(list)
-    from .market_quality import approved_prices
+    from .market_quality import approved_prices, nav_quarantine
+
+    quarantines = nav_quarantine(space)
 
     for quote in approved_prices(
         Price.objects.filter(
@@ -1104,6 +1210,7 @@ def profit_calendar(
             economic_date__lte=end,
         ),
         space,
+        quarantines=quarantines,
     ).order_by("economic_date", "created_at"):
         prices[str(quote.instrument_id)].append(quote)
     dividends = defaultdict(list)
@@ -1122,7 +1229,7 @@ def profit_calendar(
     for event in Event.objects.filter(
         tenant=space,
         kind="dividend",
-        economic_date__range=(start, end),
+        economic_date__lte=end,
         reversal__isnull=True,
         reverses__isnull=True,
     ):
@@ -1145,7 +1252,7 @@ def profit_calendar(
     snapshot_accounts = {
         aid: account
         for aid, account in accounts.items()
-        if account.valuation_mode == "snapshot"
+        if account.valuation_mode == "snapshot" or account.kind in DERIVATIVES
     }
     # A broker statement covers the whole account. It cannot be attributed to a
     # selected individual option or future without contract-level settlement.
@@ -1186,8 +1293,20 @@ def profit_calendar(
                     dividends[(aid, iid)],
                     when,
                     corporate_actions.get(iid, []),
+                    allow_closed=str(when) not in quarantines.get(iid, {}),
+                    blocked_dates=quarantines.get(iid, {}),
                 )
                 if item is not None:
+                    if str(when) in quarantines.get(iid, {}):
+                        item = {
+                            **item,
+                            "amount": None,
+                            "basis": None,
+                            "return_rate": None,
+                            "status": "unavailable",
+                            "missing_reason_code": "nav_conflict",
+                            "message": "本日正式净值来源存在差异，暂停收益计算",
+                        }
                     items.append(
                         convert_return_currency(item, space.base_currency, fx_rows)
                     )
@@ -1199,7 +1318,7 @@ def profit_calendar(
                     ):
                         continue
                     item = snapshot_evidence.snapshot(
-                        aid, when, estimated=False, allow_cash_carry_forward=False
+                        aid, when, estimated=False, allow_cash_carry_forward=True
                     )
                     item["kind"] = (
                         "future"
@@ -1210,6 +1329,7 @@ def profit_calendar(
                         convert_return_currency(item, space.base_currency, fx_rows)
                     )
         known_items = [row for row in items if row["base_amount"] is not None]
+        closed_items = [row for row in items if row["status"] == "market_closed"]
         known = sum((row["base_amount"] for row in known_items), ZERO)
         complete = bool(items) and len(known_items) == len(items)
         basis = sum((row["base_basis"] or ZERO for row in known_items), ZERO)
@@ -1222,6 +1342,8 @@ def profit_calendar(
             if complete
             else "partial"
             if known_items
+            else "market_closed"
+            if items and len(closed_items) == len(items)
             else "unavailable"
             if items
             else "no_position"
@@ -1234,6 +1356,10 @@ def profit_calendar(
                 "return_rate": known / basis if complete and basis else None,
                 "status": status,
                 "items": items,
+                "known_count": len(known_items),
+                "total_count": len(items),
+                "market_closed_count": len(closed_items),
+                "missing_count": len(items) - len(known_items) - len(closed_items),
             }
         )
         when += timedelta(days=1)

@@ -1,6 +1,8 @@
 # Wealth 项目地图与维护入口
 
 维护日期：2026-10-13。2.14.2已于2026-10-13 19:34:36（北京时间）部署，应用`71f322456e8f64651bfc6b8d1da6e3599eece586`、schema`0015_chat_remote_controls`。指定定投补足、受限海外参考、实际镜像与验证范围见[最新发布记录](release-2.14.2.md)。初始审查基线`e379dfe67a715d9913af246eba021c7b26ce45d1`及2.14.1历史记录保留；后续状态见[开发状态](development-status.md)。
+2.14.4空仓/休市批次正在验收，当前实现及边界见[发布记录](release-2.14.4.md)。新增维护入口`return_account_state`、`return_sessions`与`ReturnEvidence`/`profit_calendar`，规则唯一维护于领域§14.4，回归与排障见RUNBOOK§8.10。
+
 本文负责“去哪里查、改哪里、测什么”；业务定义只维护在下面列出的唯一位置。覆盖和运行结果见[本次审查](audits/system-audit-2026-10-09.md)，不能从文件存在或测试数量推断已部署。
 
 2.12.0 的展示定位、日期倒序、表单默认值和独立娱乐角已于 2026-10-10 保数据发布，08:13:25（北京时间）最终验收通过；对应镜像、回归及运行范围见[发布说明](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)。只读接口维护在[api-contract§25](api-contract.md#25-2120只读展示与处理定位)，操作和验收维护在[RUNBOOK§8.6](RUNBOOK.md#86-2120-定位与保数据发布)。这批不新增账务事实、资产类型或迁移，未执行历史重算或数据修复。

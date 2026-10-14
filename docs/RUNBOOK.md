@@ -341,3 +341,18 @@ node --experimental-strip-types --test frontend/tests/dca-automation.test.mjs fr
 本批回归入口`backend/tests/test_fund_return_updates_v2142.py`须覆盖上述切换、有效估算优先、零收益/推算份额、FX缺失、跨账户/产品和冲突阻断；浏览器验证最近更新详情的日期、原因及隐藏金额。最终命令和结果见[2.14.3发布记录](release-2.14.3.md)。本批仅回退读侧应用即可恢复2.14.2行为，保留其补足配置/事件和新事实，不恢复旧库；更早版本的补足兼容限制仍按§8.8处理。
 
 定投现金不足的待办点击后进入对应计划资金设置，选择补足账户与生效日再保存；保存会处理适用的未扣款到期期次。首次默认为空间当地今天，无默认银行卡；要覆盖旧期次必须明确选择较早日期。上线本身不代填生产账户，也不自动补扣10/08等历史等待。
+
+
+### 8.10 空仓0、休市与缺数排障（2.14.4）
+
+先核对收益所属日期和所选账户。`cash_only_carry_forward`表示更早完整正式权益之后没有已记录投资敞口，现金区间已核对；0仅为推算，无需每天伪造结算单。若当天实际平仓、手续费或期权参考变化，应补真实结算/核对范围，不能用“现在没持仓”抹掉收益。冻结或可提取上限仍限制提现，和收益资格分别处理。
+
+`market_closed`无需补行情、补零流水或人工确认；查看market_calendar来源/时区与最近观察原日，继续正常定时抓取。若期间漏过开放日、NAV冲突、实际交易或范围问题，仍为待补全并沿已有入口定位；禁止为消除提示改交易日历或填假价格。海外当前日期、夜盘、未知年份与货币基金规则不明确时保留未知。
+
+首页和日历共用ReturnEvidence；检查日历是否正确显示estimated空仓0，而非机构确认。全部休市显示“休市/—”，known+closed保持partial且缺口数0；周期partial不得升级完整。更改这些规则需同时检查收益原日、持仓页、日历天/周/月/年、原币/FX缺口与overview版本，并运行：
+
+```sh
+.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 test tests/test_empty_returns_v290.py tests/test_return_account_state.py tests/test_return_sessions.py tests/test_closed_returns_v2144.py tests/test_return_session_integration_guards.py tests/test_return_calendar_consistency.py tests/test_daily_returns_v263.py tests/test_overview_projection_version.py
+```
+
+前端执行test、typecheck、format:check、build，并用普通合成用户实际验证空仓0、休市无缺口及混合部分收益。冻结版本在独立Linux合成库完整回归；生产只读复核不得制造会话/行情/账务，切换保持既有库和私有文件。2.14.4无迁移，只回滚兼容应用，不恢复旧数据库。实际命令、失败、界面、备份和上线核验见[发布记录](release-2.14.4.md)。

@@ -1,0 +1,90 @@
+{
+  "status": "local_ui_verified",
+  "verified_at": "2026-10-14T09:02:59.718464+08:00",
+  "environment": {
+    "database": "wealth_ui_test",
+    "namespace": "return-state-2144-ui",
+    "base_url": "http://127.0.0.1:18093",
+    "user": "return-state-2144-ui",
+    "production": false
+  },
+  "commands": [
+    "/Volumes/mi/Wealth/.venv/bin/python .runtime/return-state-2144/ui/run_seed.py",
+    "/Volumes/mi/Wealth/.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 web",
+    "npm test",
+    "npm run typecheck",
+    "npm run format:check",
+    "npm run build",
+    "git diff --check"
+  ],
+  "frontend": {
+    "tests_passed": 222,
+    "tests_failed": 0,
+    "tests_skipped": 0,
+    "typecheck": "passed",
+    "format_check": "passed",
+    "build": "passed",
+    "build_seconds": 4.51,
+    "warning": "Existing Vite chunk size warning (>500KB)"
+  },
+  "checks": [
+    {
+      "route": "/spaces/270885bb-fad8-4e72-9ab9-be6964bad508/home",
+      "action": "Ordinary owner login, space selection, current 2026-10-14 date",
+      "result": "CNY 0.00 estimated; no recorded positions and cashflow-based calculation stated; 1/1 calculated; zero outstanding issues",
+      "screenshot": "cash-only-home-final.jpg"
+    },
+    {
+      "route": "/spaces/08ced03e-5ad9-4697-96a4-451915681640/home",
+      "action": "Changed statistics date using actual date input to 2026-09-25, opened return drawer",
+      "result": "Market closed and em dash, not missing data or zero; latest formal CNY +10.00 stays 2026-09-24; no corrective action for closure",
+      "screenshots": [
+        "closed-home-after.jpg",
+        "closed-details-after.jpg"
+      ]
+    },
+    {
+      "route": "/spaces/08ced03e-5ad9-4697-96a4-451915681640/home",
+      "action": "Toggled hide amount and opened drawer",
+      "result": "Sensitive financial detail hidden; drawer explains how to show details",
+      "screenshot": "closed-hidden.jpg"
+    },
+    {
+      "route": "/spaces/08ced03e-5ad9-4697-96a4-451915681640/analytics",
+      "action": "Clicked previous month, clicked actual 2026-09-25 calendar cell",
+      "result": "Holiday cell and detail show market closed; amount/rate em dash; preserve 2026-09-24 last value",
+      "screenshot": "calendar-2026-09-25.jpg"
+    },
+    {
+      "route": "/spaces/08ced03e-5ad9-4697-96a4-451915681640/analytics",
+      "action": "Clicked actual 2026-09-26 calendar cell",
+      "result": "Weekend cell and detail show market closed, no value invented",
+      "screenshot": "calendar-2026-09-26.jpg"
+    },
+    {
+      "route": "/spaces/08ced03e-5ad9-4697-96a4-451915681640/analytics",
+      "action": "Clicked actual 2026-09-24 calendar cell",
+      "result": "Formal CNY +10.00 and +10.00% remain on original date; September summary explicitly 3 closed days and 3 genuinely missing open days",
+      "screenshot": "calendar-2026-09-24.jpg"
+    },
+    {
+      "route": "/spaces/08ced03e-5ad9-4697-96a4-451915681640/assets",
+      "action": "Opened actual holdings page",
+      "result": "Most recent formal return/date preserved; current date truly lacks estimate",
+      "screenshot": "holding-formal-date.jpg"
+    }
+  ],
+  "discovered_and_fixed": "Actual closed-day browser path originally displayed Money(null) as 待补全. Parent authorized parent-status-only placeholder correction for home, holdings and calendar detail; global Money missing value remains unchanged. Rebuilt and rechecked real pages.",
+  "limits": [
+    "Local synthetic ordinary-owner UI only; no production UI or data touched.",
+    "Holdings has no historical date selector; historical closed holding row covered by unit tests but not observed in browser.",
+    "Mixed known+closed period behavior covered by helper/backend regression, not a separate browser fixture."
+  ],
+  "server": {
+    "state": "running_for_parent",
+    "gunicorn_master_pid": 15310,
+    "gunicorn_worker_pid": 15311,
+    "port": 18093,
+    "log": "web.log"
+  }
+}

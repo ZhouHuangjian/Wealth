@@ -297,3 +297,14 @@ test("links encode identities and contain no amounts or statement contents", () 
   assert.ok(!action.to.includes("123.45"));
   assert.ok(!action.to.includes("private fact"));
 });
+test("market closure is informational and never routes to a corrective task", () => {
+  assert.equal(
+    dailyReturnNextAction("space", {
+      status: "market_closed",
+      account_id: "account",
+      instrument_id: "fund",
+      missing_reason_code: null,
+    }),
+    null,
+  );
+});
