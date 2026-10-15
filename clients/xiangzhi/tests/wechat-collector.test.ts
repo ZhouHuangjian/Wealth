@@ -364,6 +364,28 @@ test('identifier upgrades and repeated reads preserve recognized summaries, atta
   assert.equal(events.length, eventCount);
 });
 
+test('custom sticker metadata upgrades preserve recognition, while changed MD5 invalidates only its source',async t=>{
+  const sticker=record(100,{kind:'emoji',text:'[表情，待人工查看]',mediaStatus:'pending'});let rows=[sticker];
+  const {store,collector,events}=setup(t,async()=>page(rows),{enabled:true});await collector.poll('wechat-test');
+  store.update(state=>{
+    const m=state.messages[0];m.mediaStatus='recognized';m.imageAttachment={id:'sticker-image',filename:'emoji.gif',mimeType:'image/gif',source:'wechat'};
+    m.imageRecognition={summary:'猫咪表情包',visibleText:'好的',facts:['猫咪'],provider:'qwen',modelName:'vision',recognizedAt:''};
+  });
+  const eventCount=events.length;rows=[{...sticker,wechatEmoji:{md5:'a'.repeat(32)}}];await collector.poll('wechat-test');
+  assert.equal(store.read().messages[0].imageRecognition?.visibleText,'好的');assert.equal(store.read().messages[0].wechatEmoji?.md5,'a'.repeat(32));assert.equal(events.length,eventCount);
+  rows=[{...sticker,wechatEmoji:{md5:'b'.repeat(32)}}];await collector.poll('wechat-test');
+  assert.equal(store.read().messages[0].imageRecognition,undefined);assert.equal(store.read().messages[0].imageAttachment,undefined);assert.equal(store.read().messages[0].mediaStatus,'pending');assert.equal(events.at(-1)!.live,false);
+});
+
+test('only live peer custom stickers opt into their contact automatic image switch',async t=>{
+  let rows=[record(100)];const {store,collector}=setup(t,async()=>page(rows),{enabled:true});
+  store.update(state=>state.conversations[0].processing={autoRecognizeImages:true});await collector.poll('wechat-test');
+  rows.push(record(101,{kind:'emoji',text:'[表情]',mediaStatus:'pending'}),record(102,{kind:'emoji',role:'self',text:'[表情]',mediaStatus:'pending'}));
+  await collector.poll('wechat-test');assert.equal(store.read().messages[1].autoMediaEligible,true);assert.equal(store.read().messages[2].autoMediaEligible,false);
+  store.update(state=>state.conversations[0].processing!.autoRecognizeImages=false);rows.push(record(103,{kind:'emoji',text:'[表情]',mediaStatus:'pending'}));await collector.poll('wechat-test');
+  assert.equal(store.read().messages[3].autoMediaEligible,false);
+});
+
 test('a changed voice source invalidates its decoded audio and transcription', async t => {
   const voice = record(100, {kind: 'voice', text: '[语音]', mediaStatus: 'pending'}); let rows = [voice];
   const {store, collector} = setup(t, async () => page(rows), {enabled: true});

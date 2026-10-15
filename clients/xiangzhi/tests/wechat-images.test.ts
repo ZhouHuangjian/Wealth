@@ -47,6 +47,46 @@ test('image resolver accepts scoped metadata and rejects traversal, wrong contac
   }
 });
 
+test('downloaded custom stickers use one account and exact content MD5 without export or network access',async()=>{
+  const stickerMd5=createHash('md5').update(png).digest('hex');
+  const sticker={...input,message:{...input.message,kind:'emoji' as const,wechatImage:undefined,wechatEmoji:{md5:stickerMd5}}};
+  await fixture('process.exit(9);',async(root,data)=>{
+    const persist=join(data,name,'business/emoticon/Persist',stickerMd5.slice(0,2));await mkdir(persist,{recursive:true});
+    await writeFile(join(persist,stickerMd5),png);
+    const result=await readWechatImage(sticker);assert.deepEqual(result.bytes,png);assert.equal(result.mimeType,'image/png');
+    assert.deepEqual(result.wechatEmoji,{md5:stickerMd5});assert.equal(result.filename,'wechat-emoji.png');
+    await assert.rejects(readFile(join(root,'calls')),{code:'ENOENT'});
+  });
+});
+
+test('legacy custom stickers backfill only their stored sequence and never retain CDN details',async()=>{
+  const stickerMd5=createHash('md5').update(png).digest('hex');
+  const row={sort_seq:input.message.sourceSequence,server_id:input.message.externalId,msg_type:'47',sub_type:'0',talker:'filehelper',direction:'incoming',create_time:'1791676800',content:{Emoji:{xml:`<emoji md5="${stickerMd5}" cdnurl="https://not-requested.invalid/secret"/>`}}};
+  const page=JSON.stringify({items:[row],paging:{returned:1,has_more:false,limit:1},stats:{skipped:0}});
+  await fixture(`if(args[0]==='query')process.stdout.write(${JSON.stringify(page)});else process.exit(3);`,async(root,data)=>{
+    const persist=join(data,name,'business/emoticon/PersistStore',stickerMd5.slice(0,2));await mkdir(persist,{recursive:true});await writeFile(join(persist,stickerMd5),png);
+    const result=await readWechatImage({...input,message:{...input.message,kind:'emoji',wechatImage:undefined}});
+    assert.deepEqual(result.wechatEmoji,{md5:stickerMd5});assert.doesNotMatch(JSON.stringify(result),/not-requested|secret/);
+    const calls=(await readFile(join(root,'calls'),'utf8')).trim().split('\n').map(row=>JSON.parse(row) as string[]);
+    assert.equal(calls.length,1);assert.equal(calls[0][calls[0].indexOf('--type')+1],'emoji');assert.equal(calls[0][calls[0].indexOf('--after-sort-seq')+1],'999999999999999998');
+  });
+});
+
+test('sticker reading refuses symlinks and wrong-content files, and marks exact thumbnail fallback',async()=>{
+  const stickerMd5=createHash('md5').update(png).digest('hex');
+  const sticker={...input,message:{...input.message,kind:'emoji' as const,wechatImage:undefined,wechatEmoji:{md5:stickerMd5}}};
+  await fixture('process.exit(9);',async(root,data)=>{
+    const persist=join(data,name,'business/emoticon/Persist',stickerMd5.slice(0,2));await mkdir(persist,{recursive:true});
+    await writeFile(join(persist,stickerMd5),Buffer.concat([png,Buffer.from('wrong-content')]));
+    await assert.rejects(readWechatImage(sticker),/尚未找到.*表情包/);
+    await rm(join(persist,stickerMd5));await writeFile(join(root,'external.png'),png);await symlink(join(root,'external.png'),join(persist,stickerMd5));
+    await assert.rejects(readWechatImage(sticker),/尚未找到.*表情包/);
+    const thumbnail=join(data,name,'business/emoticon/Thumb',stickerMd5.slice(0,2));await mkdir(thumbnail,{recursive:true});await writeFile(join(thumbnail,stickerMd5+'.thumb'),png);
+    const result=await readWechatImage(sticker);assert.equal(result.thumbnail,true);assert.equal(result.filename,'wechat-emoji-thumbnail.png');
+    await assert.rejects(readWechatImage({...sticker,accountFingerprint:'b'.repeat(64)}),/账号已变化/);
+  });
+});
+
 test('Mac _M.dat images remain readable when the stale hardlink index has no entry', async () => {
   await fixture(`if(args[1]==='resolve-path')process.exit(1);if(args[1]!=='decrypt-dat'||args.includes('--account'))process.exit(2);fs.writeFileSync(args[args.indexOf('--output')+1],Buffer.from(${JSON.stringify(png.toString('base64'))},'base64'));`, async (root, data) => {
     const img = join(data, name, 'msg/attach', contactHash, '2026-10/Img');

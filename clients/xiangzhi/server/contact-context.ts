@@ -1,6 +1,7 @@
 import type { AppState, ContactMemoryEntry, Conversation, Message } from '../shared/types.js';
 import { safeContextText } from './contact-model.js';
 import { messageEvidenceHash } from './contact-evidence.js';
+import {messageEmojiRecognition} from '../shared/emoji.js';
 
 function recentContextPriority<T extends {origin?: 'manual' | 'model'; createdAt: string; updatedAt?: string}>(
   items: T[], legacyOrigin: 'manual' | 'model',
@@ -23,13 +24,16 @@ export function scopedMessages(state: AppState, conversationId: string): Message
 }
 
 export function messageObservation(message: Message, maximum = 1400) {
+  const emoji=messageEmojiRecognition(message);
   return {id: message.id, sequence: message.sequence, speaker: message.role, sentAt: message.sentAt,
     text: safeContextText(message.text, maximum), kind: message.kind ?? 'text',
-    ...(message.kind === 'image' && message.mediaStatus === 'recognized' && message.imageRecognition ? {imageObservation: {
+    ...(emoji?{emojiObservation:{tokens:emoji.tokens.slice(0,16),source:'本地图形字典，不是心理或意图推断',uncertain:true}}:{}),
+    ...((message.kind === 'image'||message.kind==='emoji') && message.mediaStatus === 'recognized' && message.imageRecognition ? {imageObservation: {
       summary: safeContextText(message.imageRecognition.summary, 600),
       visibleText: safeContextText(message.imageRecognition.visibleText, 600),
       facts: message.imageRecognition.facts.slice(0, 6).map(value => safeContextText(value, 200)),
       uncertain: true,
+      ...(message.kind==='emoji'?{isSticker:true,source:'表情包画面与文字，不能当作已确认事实或真实情绪'}:{}),
     }} : {}),
     ...(message.kind === 'voice' && message.mediaStatus === 'recognized' && message.audioRecognition ? {
       voiceTranscript: safeContextText(message.audioRecognition.text, 1000), uncertain: true,

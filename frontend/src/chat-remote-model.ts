@@ -1,3 +1,8 @@
+import type {
+  RemoteCurrentView,
+  RemoteCurrentConversation,
+} from "./chat-current-model";
+
 export type RemoteModelChoice = {
   id: string;
   provider: "demo" | "ollama" | "compatible" | "codex";
@@ -139,7 +144,11 @@ export type RemoteCommand = {
     | "conversation.memory.entry.add"
     | "conversation.memory.entry.patch"
     | "conversation.memory.entry.delete"
-    | "conversation.memory.compress";
+    | "conversation.memory.compress"
+    | "conversation.refresh"
+    | "conversation.message.analyze"
+    | "conversation.drafts.generate"
+    | "conversation.message.recognize";
   payload: Record<string, unknown>;
   status:
     | "pending"
@@ -155,6 +164,7 @@ export type RemoteCommand = {
     contacts?: { externalId: string; name: string }[];
     hasMore?: boolean;
     profile?: RemoteProfile;
+    currentView?: RemoteCurrentConversation;
   };
   error: string;
 };
@@ -163,6 +173,7 @@ export type RemoteSnapshot = {
   remoteEnabled: boolean;
   settings: RemoteSettings;
   conversations: RemoteConversation[];
+  currentView?: RemoteCurrentView;
   capabilities: {
     wechatAvailable: boolean;
     codexAvailable: boolean;
@@ -322,6 +333,10 @@ export const remoteCommandLabels: Record<RemoteCommand["type"], string> = {
   "conversation.memory.entry.patch": "修改记忆条目",
   "conversation.memory.entry.delete": "删除记忆条目",
   "conversation.memory.compress": "用模型压缩对话记忆",
+  "conversation.refresh": "读取最新会话",
+  "conversation.message.analyze": "分析这条消息",
+  "conversation.drafts.generate": "生成回复草稿",
+  "conversation.message.recognize": "解析这条媒体消息",
 };
 export const remoteCommandStates: Record<RemoteCommand["status"], string> = {
   pending: "等待 Mac 接收",

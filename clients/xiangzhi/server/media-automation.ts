@@ -23,10 +23,10 @@ export class MediaAutomation {
     if(this.pending||this.closed)return this.pending??Promise.resolve();
     const state=this.store.read();
     const candidate=state.messages.find(m=>m.autoMediaEligible && m.role==='peer' && m.source==='wechat'
-      && m.mediaStatus==='pending' && (m.kind==='image'||m.kind==='voice')
-      && state.conversations.some(c=>c.id===m.conversationId&&c.wechat?.enabled&&contactAutoMediaEnabled(c,m.kind as 'image'|'voice')));
+      && m.mediaStatus==='pending' && (m.kind==='image'||m.kind==='emoji'||m.kind==='voice')
+      && state.conversations.some(c=>c.id===m.conversationId&&c.wechat?.enabled&&contactAutoMediaEnabled(c,m.kind==='emoji'?'image':m.kind as 'image'|'voice')));
     if(!candidate)return Promise.resolve();
-    const kind=candidate.kind as 'image'|'voice',controller=new AbortController();this.active={kind,conversationId:candidate.conversationId,controller};
+    const kind=candidate.kind==='emoji'?'image':candidate.kind as 'image'|'voice',controller=new AbortController();this.active={kind,conversationId:candidate.conversationId,controller};
     this.store.update(s=>{const message=s.messages.find(m=>m.id===candidate.id);if(message)message.autoMediaEligible=false;});
     this.pending=(async()=>{
       try{await this.options.recognize(candidate.id,kind,controller.signal);if(!this.closed&&!controller.signal.aborted)this.options.onComplete?.(candidate.conversationId);}

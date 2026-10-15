@@ -15,7 +15,7 @@ manualBasis 包含人工提供和模型提取的背景，以 origin 区分；ori
 意图百分比是你对多种解读的相对权重，未经校准，不是事实概率。仅在 intentEnabled 为 true 时输出意图；否则 intents 必须为空。
 意图标签只可选：关心、质问、询问、分享、邀请、玩笑、表达不满、其他。intents 的每个对象恰好只有 label、percentage 两个字段，不能添加 reason、解释或其他字段。1 至 6 个互不重复标签，百分比为 1 至 100 的整数，总和必须为 100。targetHasAnalyzableUtterance 为 false 时，用“其他”100并说明无法判断，不能据图片观察或媒体占位符还原发言。
 仅在 affinityEnabled 为 true 时输出 affinity 对象，否则为 null。“好感度”仅指这段对话表现出的互动积极程度指数，不是恋爱喜欢程度，不能由一条质问或回复速度断定。score 为 0 至 100 的整数，信息不足时为 null；confidence 为 0 至 100 的主观信息充分度，不是正确率；evidence 为最多 6 条具体沟通线索，每条最多 300 字。无具体线索则 score 为 null、confidence 为 0、evidence 为空。
-图片观察只能提供话题背景，不能当作对方说出的话或其意图；语音仅使用已有转写并保留误识别可能。对明确表达的边界如实描述，不把拒绝解释成好感。手动资料只用作背景；模型生成记忆的内容保持不确定。
+普通图片观察只能提供话题背景，不能当作对方说出的话或其意图；表情符号和已解析的表情包是表达形式，可结合前后文分析多种可能用意，但字典名称、画面人物表情和表情包文字不是对方真实心理、承诺、个人经历或好感的证明。没有已解析内容的表情占位符不能分析。语音仅使用已有转写并保留误识别可能。对明确表达的边界如实描述，不把拒绝解释成好感。手动资料只用作背景；模型生成记忆的内容保持不确定。
 只返回 JSON，恰好字段 intents、affinity、uncertainty。uncertainty 为 1 至 600 字，说明歧义、缺失上下文及估计局限。没有额外字段或代码围栏。`;
 
 function input(state: AppState, conversationId: string, messageId: string) {
@@ -26,7 +26,8 @@ function input(state: AppState, conversationId: string, messageId: string) {
   if (!enabled.intentEnabled && !enabled.affinityEnabled) throw new Error('请先在这个联系人的信息处理中开启意图分析或好感度。');
   const config = effectiveContactModelSettings(state.settings, conversation, 'analysis');
   const targetHasAnalyzableUtterance = (!target.kind || target.kind === 'text') && !!target.text.trim()
-    || target.kind === 'voice' && target.mediaStatus === 'recognized' && !!target.audioRecognition?.text.trim();
+    || target.kind === 'voice' && target.mediaStatus === 'recognized' && !!target.audioRecognition?.text.trim()
+    || target.kind==='emoji'&&target.mediaStatus==='recognized'&&!!target.imageRecognition?.summary.trim();
   const prior = boundedMessageBatch(scopedMessages(state, conversationId)
     .filter(message => message.sequence < target.sequence).reverse(), 19, 35_000).reverse();
   const context = {targetMessageId: target.id, targetHasAnalyzableUtterance: !!targetHasAnalyzableUtterance, ...enabled,

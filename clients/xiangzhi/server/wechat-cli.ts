@@ -4,11 +4,15 @@ import { accessSync, constants, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute } from 'node:path';
 import type { MessageKind } from '../shared/types.js';
+import {parseEmojiText} from '../shared/emoji.js';
+import {wechatEmojiMetadata} from './emoji-metadata.js';
 
 export interface WechatRecord {
   id: string; sortSeq: string; sentAt: string | null; role: 'self' | 'peer' | 'system';
   kind: MessageKind; text: string; mediaStatus?: 'pending';
   wechatImage?: {localId?: string; md5?: string};
+  wechatEmoji?: {localId?: string; md5?: string};
+  emojiRecognition?: ReturnType<typeof parseEmojiText>;
 }
 export interface WechatPage { records: WechatRecord[]; hasMore: boolean; accountFingerprint: string }
 export interface WechatContactsPage { contacts: {externalId: string; name: string}[]; hasMore: boolean }
@@ -106,6 +110,7 @@ function projectRecord(value: unknown, contact: string): WechatRecord {
     const content = object(row.content);
     if (typeof content.Text !== 'string' || !content.Text.length || content.Text.length > 10_000) throw new Error(INVALID);
     record.kind = 'text'; record.text = content.Text;
+    record.emojiRecognition=parseEmojiText(record.text,record.sentAt??'');
     delete record.mediaStatus;
   } else if (type === '3') {
     record.kind = 'image'; record.text = '[图片，待人工查看]';
@@ -121,7 +126,11 @@ function projectRecord(value: unknown, contact: string): WechatRecord {
   }
   else if (type === '34') { record.kind = 'voice'; record.text = '[语音，待人工查看]'; }
   else if (type === '43' || type === '62') { record.kind = 'video'; record.text = '[视频，待人工查看]'; }
-  else if (type === '47') { record.kind = 'emoji'; record.text = '[表情，待人工查看]'; }
+  else if (type === '47') {
+    record.kind = 'emoji'; record.text = '[表情，待人工查看]';
+    const localId=typeof row.local_id==='string'&&positiveInteger.test(row.local_id)?row.local_id:undefined;
+    record.wechatEmoji=wechatEmojiMetadata(row.content,localId);
+  }
   else if (type === '49') {
     record.kind = subType === '6' ? 'file' : 'link';
     record.text = subType === '6' ? '[文件，待人工查看]' : '[分享内容，待人工查看]';

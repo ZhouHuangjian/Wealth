@@ -7,7 +7,7 @@ import type {Message} from '../shared/types.js';
 import {parseWechatPage, runWechat} from './wechat-cli.js';
 
 export interface WechatMediaInput {contact: string; message: Message; accountFingerprint?: string}
-export interface WechatMediaFile {bytes: Buffer; mimeType: string; filename: string; wechatImage?: Message['wechatImage']}
+export interface WechatMediaFile {bytes: Buffer; mimeType: string; filename: string; wechatImage?: Message['wechatImage']; wechatEmoji?: Message['wechatEmoji']; thumbnail?:boolean}
 const INVALID = '微信媒体标识或账号不匹配，请重新读取该会话。';
 const MISSING = '尚未找到这条微信图片的本地文件，请先在微信中打开或下载图片后重试。';
 const DECODE = '微信图片解码未完成，请检查本地图片文件与微信图片密钥后重试。';
@@ -109,9 +109,10 @@ function imageMime(bytes: Buffer): string | null {
 }
 
 async function readImage(input: WechatMediaInput, signal?: AbortSignal): Promise<WechatMediaFile> {
-  if (input.message.kind !== 'image') throw new Error(INVALID);
+  if (input.message.kind !== 'image'&&input.message.kind!=='emoji') throw new Error(INVALID);
   const bounded = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60_000)]);
   const context = await account(input, bounded);
+  if(input.message.kind==='emoji')return readSticker(input,context,bounded);
   let metadata = input.message.wechatImage;
   if (!metadata?.md5) {
     // Previously collected images have only sequence/server identifiers. Query
@@ -175,6 +176,50 @@ async function readImage(input: WechatMediaInput, signal?: AbortSignal): Promise
     }
     throw new Error(found ? DECODE : MISSING);
   } finally {await rm(directory, {recursive: true, force: true});}
+}
+
+/** Exact, downloaded sticker files in the already verified account; never follow CDN URLs. */
+async function readSticker(input:WechatMediaInput,context:Awaited<ReturnType<typeof account>>,signal:AbortSignal):Promise<WechatMediaFile>{
+  let metadata=input.message.wechatEmoji;
+  if(!metadata?.md5){
+    const {stdout,stderr}=await runWechat(['query',input.contact,'--no-server','--data-dir',context.data,
+      '--account',context.name,'--type','emoji','--after-sort-seq',(BigInt(input.message.sourceSequence!)-1n).toString(),
+      '--order','asc','--limit','1','--offset','0','--format','json'],signal);
+    const page=parseWechatPage(stdout,`Auto-detected account: ${context.name} (source: selected-account)\n${stderr}`,input.contact);
+    const record=page.records[0],provisional=input.message.externalId===`seq:${input.message.sourceSequence}`;
+    if(page.accountFingerprint!==input.accountFingerprint||page.records.length!==1||!record
+      ||record.sortSeq!==input.message.sourceSequence||record.kind!=='emoji'||record.role!==input.message.role
+      ||(!provisional&&record.id!==input.message.externalId)||!record.wechatEmoji?.md5)throw new Error(INVALID);
+    metadata=record.wechatEmoji;
+  }
+  const md5=metadata.md5;
+  if(!md5||!md5Pattern.test(md5))throw new Error('这条表情包尚无有效的本地标识，请重新读取或手动补充表情图片。');
+  const prefix=md5.slice(0,2);
+  const candidates:{path:string;thumbnail:boolean}[]=[];
+  const append=(directory:string,thumbnail=false,suffixes=['','.gif','.png','.webp','.jpg'])=>{
+    for(const suffix of suffixes)candidates.push({path:join(context.data,directory,prefix,md5+suffix),thumbnail});
+  };
+  append('business/emoticon/Persist');append('business/emoticon/PersistStore');
+  const at=input.message.sentAt?Date.parse(input.message.sentAt):NaN;
+  if(Number.isFinite(at))for(const offset of [0,-1,1]){
+    const date=new Date(at),month=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+offset,1)).toISOString().slice(0,7);
+    append(join('cache',month,'Emoticon'));
+  }
+  append('business/emoticon/Thumb',true,['.thumb']);append('business/emoticon/ThumbStore',true,['','.icon']);
+  for(const candidate of candidates){
+    if(signal.aborted)throw new Error('微信表情读取已取消或超过时限。');
+    try{
+      const bytes=await readBounded(candidate.path,context.dataRoot,MAX_IMAGE_BYTES),mimeType=imageMime(bytes);
+      if(!mimeType)continue;
+      // Full sticker files are named by their content hash. A thumbnail has a
+      // different hash, but its exact name remains scoped to that sticker/account.
+      if(!candidate.thumbnail&&createHash('md5').update(bytes).digest('hex')!==md5)continue;
+      const extension=mimeType==='image/jpeg'?'jpg':mimeType.slice(6);
+      return {bytes,mimeType,filename:`wechat-emoji${candidate.thumbnail?'-thumbnail':''}.${extension}`,
+        wechatEmoji:metadata,...(candidate.thumbnail?{thumbnail:true}:{})};
+    }catch(error){if(signal.aborted)throw error;}
+  }
+  throw new Error('尚未找到这条表情包的本地文件，请先在微信中打开表情，或手动补充表情图片。');
 }
 
 export async function readWechatImage(input: WechatMediaInput, signal?: AbortSignal): Promise<WechatMediaFile> {

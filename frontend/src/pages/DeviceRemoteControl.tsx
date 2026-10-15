@@ -328,12 +328,14 @@ export default function DeviceRemoteControl({
   onClose,
   onPrivateError,
   onAccessError,
+  initialProfileId,
 }: {
   userId: string;
   device: ChatDevice;
   onClose: () => void;
   onPrivateError: () => void;
   onAccessError: (error: unknown) => void;
+  initialProfileId?: string;
 }) {
   const { message } = App.useApp();
   const [status, setStatus] = useState<RemoteStatus | null>(null);
@@ -352,6 +354,7 @@ export default function DeviceRemoteControl({
     reading = useRef(false),
     posting = useRef(false);
   const callbacks = useRef({ onClose, onPrivateError, onAccessError });
+  const openedInitialProfile = useRef(false);
   callbacks.current = { onClose, onPrivateError, onAccessError };
   const accept = useCallback(
     (
@@ -402,6 +405,17 @@ export default function DeviceRemoteControl({
       if (!accept(result, current) || requestedRevision !== revision.current)
         return;
       setStatus(result);
+      if (
+        !openedInitialProfile.current &&
+        initialProfileId &&
+        result.snapshot?.conversations.some(
+          (person) => person.id === initialProfileId,
+        ) &&
+        supportsRemoteCommand(result.snapshot, "conversation.profile.get")
+      ) {
+        setProfileConversationId(initialProfileId);
+        openedInitialProfile.current = true;
+      }
       setError("");
     } catch (e) {
       handleError(e, current);
@@ -411,7 +425,7 @@ export default function DeviceRemoteControl({
         setLoading(false);
       }
     }
-  }, [device.id, accept, handleError]);
+  }, [device.id, accept, handleError, initialProfileId]);
   useEffect(() => {
     epoch.current++;
     reading.current = false;
@@ -997,7 +1011,7 @@ export default function DeviceRemoteControl({
                   </Form.Item>
                 </div>
                 <p className="chat-remote-note">
-                  好感度仅展示估计百分比，具体意图仍在 Mac 的分析详情中查看。
+                  好感度显示在姓名旁；意图名称和百分比显示在“会话动态”的对应消息下方。
                 </p>
                 <Form.Item
                   name={["processing", "analysisModel"]}

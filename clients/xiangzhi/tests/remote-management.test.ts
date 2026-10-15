@@ -26,6 +26,12 @@ test('remote management uses local validation, limits contacts, never sends or l
   app.store.update(s=>{s.settings.apiKey='must-not-leak';s.settings.modelUrl='https://private-model.invalid';s.settings.allowRemoteModel=true;});
   next=command('conversation.add',{externalId:'wxid_test',name:'虚构朋友'});await app.remote.tick();
   const cid=app.store.read().conversations[0].id;
+  const at=new Date().toISOString(),mid=randomUUID(),simulator=randomUUID();
+  app.store.update(state=>{
+    state.messages.push({id:mid,conversationId:cid,role:'peer',text:'AUTHORIZED-CURRENT-TEXT',kind:'text',source:'wechat',externalId:'PRIVATE-WECHAT-MESSAGE-ID',sourceFingerprint:'PRIVATE-SOURCE-FINGERPRINT',sentAt:at,sequence:1,aiAssisted:false});
+    state.conversations.push({id:simulator,name:'本机演练',avatar:'演',color:'',note:'',autoReplyEnabled:false,channel:'simulator',externalId:null,createdAt:at,updatedAt:at});
+    state.messages.push({id:randomUUID(),conversationId:simulator,role:'peer',text:'SIMULATOR-PRIVATE-TEXT',kind:'text',source:'demo',externalId:null,sentAt:at,sequence:1,aiAssisted:false});
+  });
   assert.equal(app.store.read().conversations[0].wechat?.enabled,false);
   assert.equal(app.store.read().conversations[0].autoReplyEnabled,false);
   await app.remote.tick();assert.equal(requests.at(-1).completed[0].status,'succeeded');
@@ -39,8 +45,16 @@ test('remote management uses local validation, limits contacts, never sends or l
   next=command('conversation.patch',{id:cid,note:'虚构备注',enabled:true,autoReplyEnabled:true});await app.remote.tick();
   assert.equal(app.store.read().conversations[0].wechat?.enabled,true);assert.equal(app.store.read().conversations[0].autoReplyEnabled,true);
   next=command('conversation.patch',{id:cid,enabled:false});await app.remote.tick();assert.equal(app.store.read().conversations[0].wechat?.enabled,false);
-  const wire=JSON.stringify(requests);assert.ok(!wire.includes('must-not-leak'));assert.ok(!wire.includes('private-model.invalid'));assert.ok(!wire.includes('messages'));assert.ok(!wire.includes('hidden'));
-  assert.equal(sends,0);assert.equal(app.store.read().jobs.length,0);assert.equal(app.store.read().messages.length,0);
+  const wire=JSON.stringify(requests);
+  for(const secret of ['must-not-leak','private-model.invalid','SIMULATOR-PRIVATE-TEXT','PRIVATE-WECHAT-MESSAGE-ID','PRIVATE-SOURCE-FINGERPRINT','hidden',config.token])assert.ok(!wire.includes(secret),secret);
+  const snapshots=requests.filter(request=>request.snapshot.currentView?.conversations.length);
+  assert.ok(snapshots.length>0);assert.ok(snapshots.every(request=>request.snapshot.remoteEnabled===true));
+  const shown=snapshots.at(-1).snapshot.currentView.conversations.find((view:any)=>view.conversationId===cid);
+  assert.deepEqual(shown.messages.map((message:any)=>({id:message.id,text:message.text})),[{id:mid,text:'AUTHORIZED-CURRENT-TEXT'}]);
+  const configurationOnly=requests.map(request=>{const copy=structuredClone(request);delete copy.snapshot.currentView;return copy;});
+  assert.doesNotMatch(JSON.stringify(configurationOnly),/"messages"\s*:|AUTHORIZED-CURRENT-TEXT/);
+  assert.doesNotMatch(wire,/"(?:sourceFingerprint|sourceSequence|accountFingerprint|imageAttachment|audioAttachment|modelUrl|apiKey)"\s*:/);
+  assert.equal(sends,0);assert.equal(app.store.read().jobs.length,0);assert.equal(app.store.read().messages.length,2);
 });
 
 test('duplicate delivery and interrupted receipt survive restart; expired commands never run',async t=>{
@@ -71,11 +85,14 @@ test('inflight response cannot apply after rebind or disable and polling never o
 test('disable heartbeat and durable pause barrier clear old queued work before enabling',async t=>{
   const directory=mkdtempSync(join(tmpdir(),'xiangzhi-pause-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));const path=join(directory,'state.sqlite');
   let store=new Store(path),enabled=false,calls=0,executions=0;
-  let worker=new RemoteManagement(store,{config:()=>config,enabled:()=>enabled,snapshot:()=>({remoteEnabled:true}),execute:async()=>{executions++;return {};},fetch:async()=>{calls++;throw new Error('offline');}});
+  const snapshot=()=>({remoteEnabled:true,currentView:{conversations:[{messages:[{text:'PAUSED-CURRENT-PRIVATE-TEXT'}]}]}});
+  let worker=new RemoteManagement(store,{config:()=>config,enabled:()=>enabled,snapshot,execute:async()=>{executions++;return {};},fetch:async(_url,init)=>{calls++;const body=JSON.parse(String(init?.body));assert.ok(!('currentView'in body.snapshot));assert.doesNotMatch(JSON.stringify(body),/PAUSED-CURRENT-PRIVATE-TEXT|"messages"\s*:/);throw new Error('offline');}});
   worker.invalidate(true);await worker.tick();await worker.tick();assert.equal(calls,1);assert.equal(store.remotePausePending(),true);worker.stop();store.close();
-  store=new Store(path);enabled=true;const enabledValues:boolean[]=[];
-  worker=new RemoteManagement(store,{config:()=>config,enabled:()=>enabled,snapshot:()=>({remoteEnabled:true}),execute:async()=>{executions++;return {};},fetch:async(_url,init)=>{enabledValues.push(JSON.parse(String(init?.body)).snapshot.remoteEnabled);return response([command('settings.patch',{dailyLimit:10})]);}});
-  await worker.tick();assert.equal(executions,0);assert.equal(store.remotePausePending(),false);await worker.tick();assert.equal(executions,1);assert.deepEqual(enabledValues,[false,true]);worker.stop();store.close();
+  store=new Store(path);enabled=true;const enabledValues:boolean[]=[],requests:any[]=[];
+  worker=new RemoteManagement(store,{config:()=>config,enabled:()=>enabled,snapshot,execute:async()=>{executions++;return {};},fetch:async(_url,init)=>{const body=JSON.parse(String(init?.body));requests.push(body);enabledValues.push(body.snapshot.remoteEnabled);return response([command('settings.patch',{dailyLimit:10})]);}});
+  await worker.tick();assert.equal(executions,0);assert.equal(store.remotePausePending(),false);await worker.tick();assert.equal(executions,1);assert.deepEqual(enabledValues,[false,true]);
+  assert.ok(!('currentView'in requests[0].snapshot));assert.doesNotMatch(JSON.stringify(requests[0]),/PAUSED-CURRENT-PRIVATE-TEXT|"messages"\s*:/);
+  assert.match(JSON.stringify(requests[1].snapshot.currentView),/PAUSED-CURRENT-PRIVATE-TEXT/);worker.stop();store.close();
 });
 
 test('bounded JSON response and unsupported endpoint fail without executing',async t=>{
@@ -124,11 +141,14 @@ test('old server falls back to v1 without losing new receipts and re-probes afte
   const store=new Store(':memory:'),scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex');let now=Date.now(),updated=false;const requests:any[]=[];
   const cmd=command('conversation.profile.get',{id:randomUUID()},now+900_000),profile=remoteProfile({...largeProfileConversation(),basisFacts:[],memory:undefined});
   store.remoteClaim(scope,cmd.id,Date.parse(cmd.expires_at));store.remoteFinish(scope,{id:cmd.id,status:'succeeded',result:{profile},error:''});
-  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,now:()=>now,snapshot:()=>remoteSnapshotV2(store.read().settings,[],[],{wechatAvailable:true,codexAvailable:false}),execute:async()=>({}),fetch:async(_input,init)=>{const body=JSON.parse(String(init?.body));requests.push(body);return !updated&&body.snapshot.version===2?new Response('{}',{status:422,headers:{'Content-Type':'application/json'}}):response();}});
+  const snapshot=()=>({...remoteSnapshotV2(store.read().settings,[],[],{wechatAvailable:true,codexAvailable:false}),currentView:{syncedAt:new Date(now).toISOString(),conversations:[{messages:[{text:'V2-CURRENT-PRIVATE-TEXT'}]}]}});
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,now:()=>now,snapshot,execute:async()=>({}),fetch:async(_input,init)=>{const body=JSON.parse(String(init?.body));requests.push(body);return !updated&&body.snapshot.version===2?new Response('{}',{status:422,headers:{'Content-Type':'application/json'}}):response();}});
   t.after(()=>{worker.stop();store.close();});
   await worker.tick();assert.deepEqual(requests.map(body=>body.snapshot.version),[2,1]);assert.equal(requests[1].completed.length,0);assert.equal(store.remoteReceipts(scope).length,1);assert.ok(!('analysis'in requests[1].snapshot.settings));
+  assert.ok(!('currentView'in requests[1].snapshot));assert.doesNotMatch(JSON.stringify(requests[1]),/V2-CURRENT-PRIVATE-TEXT|"messages"\s*:/);
   await worker.tick();assert.equal(requests.at(-1).snapshot.version,1);assert.equal(store.remoteReceipts(scope).length,1);
   now+=60_001;updated=true;await worker.tick();assert.equal(requests.at(-1).snapshot.version,2);assert.equal(requests.at(-1).completed.length,1);assert.equal(store.remoteReceipts(scope).length,0);
+  assert.match(JSON.stringify(requests.at(-1).snapshot.currentView),/V2-CURRENT-PRIVATE-TEXT/);
 });
 
 test('legacy fallback never executes newly queued profile work from a reverted server',async t=>{

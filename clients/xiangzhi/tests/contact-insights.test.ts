@@ -143,6 +143,31 @@ test('picture descriptions and untranscribed media do not become a spoken intent
   assert.deepEqual(result.intents, [{label: '其他', percentage: 100}]); assert.match(result.uncertainty, /不能据图片/);
 });
 
+test('inline emoji and recognized custom stickers provide bounded expressions, while unresolved stickers remain unknown',async()=>{
+  const state=insightState(),target=state.messages.find(item=>item.id==='a2')!;
+  target.text='[微笑]😅';
+  await analyzeContactMessage(state,'A','a2',undefined,{fetch:async(_url,init)=>{
+    const body=JSON.parse(String(init!.body)),context=JSON.parse(body.messages[1].content);
+    assert.equal(context.targetHasAnalyzableUtterance,true);
+    assert.deepEqual(context.target.emojiObservation.tokens.map((token:any)=>token.value),['[微笑]','😅']);
+    assert.match(body.messages[0].content,/表情符号.*表达形式/);return response();
+  }});
+  target.kind='emoji';target.text='[表情，待人工查看]';target.mediaStatus='recognized';
+  target.imageRecognition={summary:'猫咪举着写有早安的牌子',visibleText:'早安',facts:['猫咪图形','牌子上写早安'],provider:'qwen',modelName:'vision',recognizedAt:''};
+  const result=await analyzeContactMessage(state,'A','a2',undefined,{fetch:async(_url,init)=>{
+    const context=JSON.parse(JSON.parse(String(init!.body)).messages[1].content);
+    assert.equal(context.targetHasAnalyzableUtterance,true);assert.equal(context.target.imageObservation.isSticker,true);
+    assert.equal(context.target.imageObservation.visibleText,'早安');return response();
+  }});
+  assert.deepEqual(result.intents,valid.intents);assert.equal(target.text,'[表情，待人工查看]');
+  target.mediaStatus='pending';delete target.imageRecognition;
+  const unknown=await analyzeContactMessage(state,'A','a2',undefined,{fetch:async(_url,init)=>{
+    const context=JSON.parse(JSON.parse(String(init!.body)).messages[1].content);
+    assert.equal(context.targetHasAnalyzableUtterance,false);assert.equal(context.target.imageObservation,undefined);return response();
+  }});
+  assert.deepEqual(unknown.intents,[{label:'其他',percentage:100}]);
+});
+
 test('long utterance analysis bounds the most recent preceding context', async () => {
   const state = insightState(); state.messages = Array.from({length: 30}, (_, index) => message(`a${index + 1}`, 'A', index + 1, '很长的合成发言'.repeat(1000)));
   await analyzeContactMessage(state, 'A', 'a30', undefined, {fetch: async (_url, init) => {

@@ -24,7 +24,8 @@ import { MediaFiles, parseImageUpload, parseAudioUpload, MAX_MEDIA_BYTES } from 
 import { MediaAutomation } from './media-automation.js';
 import { bridgeConfig, createSender, isBridgeConfigured, isBridgeReceiveConfigured, secureEqual, validateEndpoint, type BridgeConfig } from './bridge.js';
 import {RemoteManagement,wechatAddSchema,conversationPatchSchema,searchCommandSchema} from './remote-management.js';
-import {remoteSnapshotV2} from './remote-protocol.js';
+import {remoteSnapshotV2,remoteCurrentCommandSchemas,parseRemoteCurrentPayload,knownRemoteSecrets} from './remote-protocol.js';
+import {withRemoteCurrentView,remoteCurrentConversation,remoteMessageRevision} from './remote-current.js';
 import {executeRemoteEdit} from './remote-actions.js';
 import {readModelCatalog} from './model-catalog.js';
 import {unavailableModelCatalog} from '../shared/model-catalog.js';
@@ -150,7 +151,7 @@ export function createApplication(options: {
   const generate:typeof generateDrafts = (state,cid,intent,signal) => generateModel({...state,settings:effectiveContactSettings(state.settings,state.conversations.find(c=>c.id===cid))},cid,intent,signal);
   const engine = new AutoReplyEngine(store, { send }, { generate, onDrafts:async cid=>{ await syncDrafts(cid,true); },mediaPending:cid=>{
     const state=store.read(),conversation=state.conversations.find(c=>c.id===cid);return state.messages.some(m=>m.conversationId===cid&&m.mediaStatus==='pending'
-      &&(m.autoMediaEligible||mediaRequests.has(m.id))&&(m.kind==='image'||m.kind==='voice')&&contactAutoMediaEnabled(conversation,m.kind));
+      &&(m.autoMediaEligible||mediaRequests.has(m.id))&&(m.kind==='image'||m.kind==='emoji'||m.kind==='voice')&&contactAutoMediaEnabled(conversation,m.kind==='emoji'?'image':m.kind));
   } });
   const session = randomBytes(32).toString('hex');
   let insights:ContactInsightService;
@@ -378,7 +379,7 @@ export function createApplication(options: {
   const invalidateMediaContext=(cid:string)=>{insights.changed(cid);engine.conversationChanged(cid);suggestionRequests.delete(cid);store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);for(const m of s.messages.filter(m=>m.conversationId===cid))delete m.insights;});};
   async function readMessageMedia(mid:string,kind:'image'|'voice',signal?:AbortSignal,forceRead=false) {
     const message=messageOf(mid),attachment=kind==='image'?message.imageAttachment:message.audioAttachment;
-    if(message.kind!==kind)throw new Error(kind==='image'?'该消息不是图片。':'该消息不是语音。');
+    if(message.kind!==kind&&!(kind==='image'&&message.kind==='emoji'))throw new Error(kind==='image'?'该消息不是图片或表情。':'该消息不是语音。');
     if(attachment&&(!forceRead||message.source!=='wechat'))return mediaFiles.read(attachment);
     const state=store.read(),c=conversationOf(state,message.conversationId);
     if(message.source!=='wechat'||c.channel!=='wechat'||!c.externalId)throw new Error('请先上传原始媒体文件。');
@@ -393,7 +394,7 @@ export function createApplication(options: {
     let sameImage=false;
     if(forceRead&&kind==='image'&&prior){try{sameImage=imageSha256(mediaFiles.read(prior).bytes)===imageSha256(file.bytes);}catch{/* Missing old files cannot establish unchanged content. */}}
     if(forceRead&&prior){cancelMedia(mid);if(!sameImage)invalidateMediaContext(current.conversationId);}
-    try{store.update(s=>{const m=s.messages.find(m=>m.id===mid)!;if(kind==='image'){m.imageAttachment=saved;if(file.wechatImage)m.wechatImage={...m.wechatImage,...file.wechatImage};if(forceRead&&!sameImage)delete m.imageRecognition;}else{m.audioAttachment=saved;if(forceRead)delete m.audioRecognition;}if(forceRead){if(!sameImage)m.mediaStatus='pending';m.autoMediaEligible=false;}});}
+    try{store.update(s=>{const m=s.messages.find(m=>m.id===mid)!;if(kind==='image'){m.imageAttachment=saved;if(file.wechatImage)m.wechatImage={...m.wechatImage,...file.wechatImage};if('wechatEmoji'in file&&file.wechatEmoji)m.wechatEmoji={...m.wechatEmoji,...file.wechatEmoji};if(forceRead&&!sameImage)delete m.imageRecognition;}else{m.audioAttachment=saved;if(forceRead)delete m.audioRecognition;}if(forceRead){if(!sameImage)m.mediaStatus='pending';m.autoMediaEligible=false;}});}
     catch(error){mediaFiles.delete(saved);throw error;}
     if(forceRead)mediaFiles.delete(prior);
     return file;
@@ -434,7 +435,7 @@ export function createApplication(options: {
   }
   const mediaAutomation=new MediaAutomation(store,{
     recognize:async(...args)=>{await recognizeMessage(...args);},
-    onComplete:cid=>{const latest=store.read().messages.filter(m=>m.conversationId===cid).at(-1);if(latest?.role==='peer'){engine.enqueue(cid,latest.id,true);if(latest.kind==='voice')insights.observed(cid,latest.id,true);}},
+    onComplete:cid=>{const latest=store.read().messages.filter(m=>m.conversationId===cid).at(-1);if(latest?.role==='peer'){engine.enqueue(cid,latest.id,true);if(latest.kind==='voice'||latest.kind==='emoji')insights.observed(cid,latest.id,true);}},
     onFailure:(cid,kind)=>store.update(s=>addActivity(s,'warning',kind==='image'?'图片自动识别未完成':'语音自动转写未完成','可在这条消息中手动重试或上传媒体文件。',cid)),
   });
   app.post('/api/images/test',async(req,res)=>{
@@ -467,7 +468,7 @@ export function createApplication(options: {
     res.status(201).json(message);
   });
   app.post('/api/messages/:id/image',(req,res)=>{
-    const mid=param(req),message=messageOf(mid);if(message.kind!=='image')throw new Error('该消息不是图片。');
+    const mid=param(req),message=messageOf(mid);if(message.kind!=='image'&&message.kind!=='emoji')throw new Error('该消息不是图片或表情。');
     const saved=mediaFiles.save(parseImageUpload(uploadSchema.parse(req.body)),'upload'),prior=message.imageAttachment;
     cancelMedia(mid);invalidateMediaContext(message.conversationId);
     try{store.update(s=>{const m=s.messages.find(m=>m.id===mid)!;m.imageAttachment=saved;delete m.imageRecognition;m.mediaStatus='pending';m.autoMediaEligible=false;});}
@@ -610,8 +611,8 @@ export function createApplication(options: {
     insights.changed(cid);
     store.update(s=>{
       Object.assign(conversationOf(s,cid),next);
-      for(const message of s.messages.filter(m=>m.conversationId===cid&&(m.kind==='image'||m.kind==='voice'))) {
-        if(!contactAutoMediaEnabled(next,message.kind as 'image'|'voice'))message.autoMediaEligible=false;
+      for(const message of s.messages.filter(m=>m.conversationId===cid&&(m.kind==='image'||m.kind==='emoji'||m.kind==='voice'))) {
+        if(!contactAutoMediaEnabled(next,message.kind==='emoji'?'image':message.kind as 'image'|'voice'))message.autoMediaEligible=false;
       }
       if(replyChanged)s.drafts=s.drafts.filter(d=>d.conversationId!==cid);
       if(Object.keys(information).length>0||processing?.intentEnabled!==undefined||processing?.affinityEnabled!==undefined||processing?.analysisModel!==undefined||processing?.memoryEnabled!==undefined)for(const m of s.messages.filter(m=>m.conversationId===cid))delete m.insights;
@@ -644,23 +645,29 @@ export function createApplication(options: {
     res.status(201).json(m);
   });
 
-  app.post('/api/conversations/:id/suggest', async (req,res)=>{
-    const {intent}=z.object({intent:z.string().trim().max(2000).default('')}).parse(req.body??{});
-    const cid=param(req); const before=store.read(); const conversation=conversationOf(before,cid); checkModelReady(effectiveContactSettings(before.settings,conversation));
+  async function generateSuggestions(cid:string,intent:string,signal?:AbortSignal){
+    signal?.throwIfAborted();
+    const before=store.read(),conversation=conversationOf(before,cid);checkModelReady(effectiveContactSettings(before.settings,conversation));
     assertReplyContextReady(before,cid);
     const latest=before.messages.filter(m=>m.conversationId===cid).at(-1);
-    if(!latest) throw new Error('先添加一条对话消息，再生成建议。');
-    if(activeSends.has(cid)) return res.status(409).json({error:'该会话已有发送等待确认，请稍后生成。'});
+    if(!latest)throw new Error('先添加一条对话消息，再生成建议。');
+    if(activeSends.has(cid))throw Object.assign(new Error('该会话已有发送等待确认，请稍后生成。'),{status:409});
     engine.conversationChanged(cid);
-    const requestId=randomUUID(); suggestionRequests.set(cid,requestId);
-    const drafts=await generate(before,cid,intent);
+    const requestId=randomUUID();suggestionRequests.set(cid,requestId);
+    const drafts=await generate(before,cid,intent,signal);
+    signal?.throwIfAborted();
+    if(closed)throw new Error('本机服务已停止。');
     const current=store.read();
-    if(!current.conversations.some(c=>c.id===cid)||current.messages.filter(m=>m.conversationId===cid).at(-1)?.id!==latest.id) return res.status(409).json({error:'对话已有新消息，请重新生成建议。'});
-    if(suggestionRequests.get(cid)!==requestId || replyContextFingerprint(current,cid)!==replyContextFingerprint(before,cid)) return res.status(409).json({error:'设置、个人档案、反馈或生成请求已更新，请重新生成建议。'});
-    if(!drafts.length || drafts.some(d=>d.conversationId!==cid || d.basedOnMessageId!==latest.id || !d.text.trim() || d.text.length>500)) throw new Error('生成结果无效，请重新生成建议。');
+    if(!current.conversations.some(c=>c.id===cid)||current.messages.filter(m=>m.conversationId===cid).at(-1)?.id!==latest.id)throw Object.assign(new Error('对话已有新消息，请重新生成建议。'),{status:409});
+    if(suggestionRequests.get(cid)!==requestId||replyContextFingerprint(current,cid)!==replyContextFingerprint(before,cid))throw Object.assign(new Error('设置、个人档案、反馈或生成请求已更新，请重新生成建议。'),{status:409});
+    if(!drafts.length||drafts.some(d=>d.conversationId!==cid||d.basedOnMessageId!==latest.id||!d.text.trim()||d.text.length>500))throw new Error('生成结果无效，请重新生成建议。');
     store.update(s=>{s.drafts=s.drafts.filter(d=>d.conversationId!==cid);s.drafts.push(...drafts);});
-    await syncDrafts(cid,true).catch(()=>{});
-    res.json({drafts});
+    if(!signal?.aborted)await syncDrafts(cid,true).catch(()=>{});
+    return {drafts};
+  }
+  app.post('/api/conversations/:id/suggest',async(req,res)=>{
+    const {intent}=z.object({intent:z.string().trim().max(2000).default('')}).parse(req.body??{});
+    res.json(await generateSuggestions(param(req),intent));
   });
   app.post('/api/conversations/:id/feedback', (req,res)=>{
     const body=z.object({draftId:id,text,reason:z.string().trim().max(1000).default(''),requestId:id}).strict().parse(req.body);
@@ -783,8 +790,10 @@ export function createApplication(options: {
       const safe=/^[\u4e00-\u9fff]/.test(message)&&message.length<240&&!message.includes(syncConnection.config().token||'\0');
       store.update(s=>addActivity(s,'warning','网页远程操作未完成',safe?message:'请检查远程操作的输入格式与本机配置后重试。'));
     },
-    snapshot:()=>{const state=store.read();return remoteSnapshotV2(state.settings,state.conversations.filter(c=>c.channel==='wechat').slice(0,8),state.messages,
-      {wechatAvailable:wechatInspection().available,codexAvailable:codexStatus.available,codexModels:modelCatalog.codex.models},[syncConnection.config().token??'']);},
+    snapshot:()=>{const state=store.read();const secrets=[...knownRemoteSecrets(state.settings),syncConnection.config().token??''];
+      const config=remoteSnapshotV2(state.settings,state.conversations.filter(c=>c.channel==='wechat').slice(0,8),state.messages,
+        {wechatAvailable:wechatInspection().available,codexAvailable:codexStatus.available,codexModels:modelCatalog.codex.models},secrets);
+      return withRemoteCurrentView(config,state,secrets);},
     execute:async(command,signal)=>{
       signal.throwIfAborted();
       if(command.type==='contacts.search') {
@@ -795,6 +804,28 @@ export function createApplication(options: {
         // Only explicit search results leave the Mac; no message or account fields.
         const contacts=page.contacts.slice(0,limit).map(({externalId,name})=>wechatAddSchema.parse({externalId,name}));
         return {contacts,hasMore:page.hasMore||page.contacts.length>limit};
+      }
+      if(command.type in remoteCurrentCommandSchemas){
+        const {id:cid,messageId,expectedMessageRevision,intent}=parseRemoteCurrentPayload(command.type,command.payload);
+        const before=store.read(),target=conversationOf(before,cid);
+        if(target.channel!=='wechat'||!before.conversations.filter(c=>c.channel==='wechat').slice(0,8).some(c=>c.id===cid))throw new Error('远程管理只支持已接入的微信会话。');
+        const message=messageId?before.messages.find(m=>m.id===messageId&&m.conversationId===cid):undefined;
+        if(messageId&&(!message||message.role==='system'))throw new Error('找不到此会话中的这条消息。');
+        if(message&&remoteMessageRevision(message)!==expectedMessageRevision)throw Object.assign(new Error('这条消息已变化，请刷新后重试。'),{status:409});
+        if(command.type==='conversation.refresh'){
+          if(!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');
+          await collector.poll(cid,signal);
+        }else if(command.type==='conversation.message.analyze')await insights.analyze(cid,messageId,signal);
+        else if(command.type==='conversation.message.recognize'){
+          if(!message||!['image','emoji','voice'].includes(message.kind??''))throw new Error('此消息没有需要模型识别的图片、表情或语音。');
+          await recognizeMessage(messageId!,message.kind==='voice'?'voice':'image',signal);
+        }else if(command.type==='conversation.drafts.generate'){
+          if(before.messages.filter(m=>m.conversationId===cid).at(-1)?.id!==messageId)throw Object.assign(new Error('对话已更新，请基于最新消息生成回复草稿。'),{status:409});
+          await generateSuggestions(cid,intent??'',signal);
+        }
+        signal.throwIfAborted();
+        const current=store.read();
+        return {currentView:remoteCurrentConversation(current,cid,[...knownRemoteSecrets(current.settings),syncConnection.config().token??''],messageId)};
       }
       return executeRemoteEdit(command,signal,{store,insights,patchSettings,patchConversation,setWechatEnabled,addWechatConversation,
         wechatAvailable:()=>wechatInspection().available,secrets:()=>[syncConnection.config().token??'']});

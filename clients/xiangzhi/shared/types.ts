@@ -122,6 +122,11 @@ export interface Conversation {
   };
 }
 export type MessageKind = 'text' | 'image' | 'voice' | 'video' | 'emoji' | 'file' | 'link' | 'system' | 'unknown';
+export interface EmojiRecognition {
+  tokens: {value: string; name: string; description: string}[];
+  parserVersion: 'wechat-emoji-v2';
+  recognizedAt: string;
+}
 export interface Message {
   id: string; conversationId: string; role: 'self' | 'peer' | 'system'; text: string;
   sentAt: string | null; sequence: number; source: 'demo' | 'import' | 'manual' | 'bridge' | 'auto' | 'wechat';
@@ -130,6 +135,9 @@ export interface Message {
   imageAttachment?: ImageAttachment; imageRecognition?: ImageRecognition;
   imageRecognitionHistory?: ImageRecognitionCacheEntry[];
   wechatImage?: {localId?: string; md5?: string};
+  wechatEmoji?: {localId?: string; md5?: string};
+  /** A local dictionary describes glyphs; it does not infer the sender's feelings. */
+  emojiRecognition?: EmojiRecognition;
   audioAttachment?: ImageAttachment;
   audioRecognition?: AudioRecognition;
   autoMediaEligible?: boolean;

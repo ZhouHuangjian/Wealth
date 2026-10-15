@@ -1,5 +1,6 @@
-"""Allowlisted device configuration, delivered only through authenticated polling."""
+"""Allowlisted device controls and bounded current views, authenticated per owner."""
 
+import json
 import re
 import uuid
 from datetime import timedelta
@@ -82,7 +83,25 @@ V2_COMMAND_TYPES = {
     "conversation.memory.entry.delete",
     "conversation.memory.compress",
 }
-ALL_COMMAND_TYPES = COMMAND_TYPES | V2_COMMAND_TYPES
+CURRENT_COMMAND_TYPES = {
+    "conversation.refresh",
+    "conversation.message.analyze",
+    "conversation.message.recognize",
+    "conversation.drafts.generate",
+}
+ALL_COMMAND_TYPES = COMMAND_TYPES | V2_COMMAND_TYPES | CURRENT_COMMAND_TYPES
+INTENT_LABELS = {"关心", "质问", "询问", "分享", "邀请", "玩笑", "表达不满", "其他"}
+MESSAGE_KINDS = {
+    "text",
+    "image",
+    "voice",
+    "emoji",
+    "video",
+    "file",
+    "link",
+    "system",
+    "unknown",
+}
 BASIS_CATEGORIES = {
     "current_status",
     "interest",
@@ -97,6 +116,7 @@ MAX_POLL_BYTES = 1024 * 1024
 MAX_COMMAND_BYTES = 8 * 1024
 MAX_COMMAND_V2_BYTES = 32 * 1024
 MAX_PROFILE_BYTES = 768 * 1024
+MAX_CURRENT_VIEW_BYTES = 200 * 1024
 MAX_QUEUED_COMMANDS = 50
 COMMAND_TTL = timedelta(minutes=15)
 FAILURE_MESSAGE = "本地执行失败，请在 Mac 查看详情。"
@@ -106,6 +126,15 @@ def invalid():
     raise DomainError(
         "远程配置字段缺失、无效或包含不支持的内容", "invalid_remote_payload", 422
     )
+
+
+def json_bytes(value):
+    try:
+        return len(
+            json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        )
+    except (TypeError, ValueError, UnicodeEncodeError):
+        invalid()
 
 
 def fields(body, allowed, required=()):
@@ -313,11 +342,12 @@ def validate_conversation(body, *, version=1):
 
 
 def validate_snapshot(body):
-    exact_fields(
-        body, {"version", "remoteEnabled", "settings", "conversations", "capabilities"}
-    )
+    required = {"version", "remoteEnabled", "settings", "conversations", "capabilities"}
+    fields(body, required | {"currentView"}, required)
     integer(body["version"], 1, 2)
     version = body["version"]
+    if version == 1 and "currentView" in body:
+        invalid()
     boolean(body["remoteEnabled"])
     validate_settings(body["settings"], full=True, version=version)
     capability_fields = {"wechatAvailable", "codexAvailable"} | (
@@ -370,6 +400,10 @@ def validate_snapshot(body):
         invalid()
     if len({item["externalId"] for item in conversations}) != len(conversations):
         invalid()
+    if "currentView" in body:
+        validate_current_view(body["currentView"], conversations=conversations)
+        if not body["remoteEnabled"] and body["currentView"]["conversations"]:
+            invalid()
     return body
 
 
@@ -411,6 +445,8 @@ def validate_payload(kind, body, *, version=2):
                 invalid()
         if "expectedRevision" in body:
             revision(body["expectedRevision"])
+    elif kind in CURRENT_COMMAND_TYPES:
+        validate_current_payload(kind, body)
     else:
         validate_profile_payload(kind, body)
     return body
@@ -546,7 +582,7 @@ def validate_profile_payload(kind, body):
 
 def requires_v2(kind, body):
     return (
-        kind in V2_COMMAND_TYPES
+        kind in V2_COMMAND_TYPES | CURRENT_COMMAND_TYPES
         or (kind == "settings.patch" and bool(set(body) - SETTINGS_FIELDS))
         or (
             kind == "conversation.patch"
@@ -564,12 +600,7 @@ def supports_command(snapshot, kind, body):
 
 
 def validate_profile(body):
-    import json
-
-    if (
-        len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-        > MAX_PROFILE_BYTES
-    ):
+    if json_bytes(body) > MAX_PROFILE_BYTES:
         invalid()
     exact_fields(body, {"id", "revision", "basisFacts", "memory"})
     identifier(body["id"])
@@ -653,6 +684,209 @@ def validate_profile(body):
     return body
 
 
+def validate_current_payload(kind, body):
+    required = {"id"}
+    allowed = set(required)
+    if kind != "conversation.refresh":
+        required |= {"messageId", "expectedMessageRevision"}
+        allowed |= required
+    if kind == "conversation.drafts.generate":
+        allowed.add("intent")
+    fields(body, allowed, required)
+    identifier(body["id"])
+    if "messageId" in body:
+        identifier(body["messageId"])
+        revision(body["expectedMessageRevision"])
+    if "intent" in body:
+        safe_text(body["intent"], 300)
+
+
+def validate_current_analysis(body):
+    exact_fields(body, {"intents", "affinity", "provider", "modelName", "analyzedAt"})
+    intents = body["intents"]
+    if not isinstance(intents, list) or len(intents) > 6:
+        invalid()
+    for item in intents:
+        exact_fields(item, {"label", "percentage"})
+        if not isinstance(item["label"], str) or item["label"] not in INTENT_LABELS:
+            invalid()
+        integer(item["percentage"], 1, 100)
+    if len({item["label"] for item in intents}) != len(intents) or (
+        intents and sum(item["percentage"] for item in intents) != 100
+    ):
+        invalid()
+    if body["affinity"] is not None:
+        exact_fields(body["affinity"], {"score", "confidence"})
+        if body["affinity"]["score"] is not None:
+            integer(body["affinity"]["score"], 0, 100)
+        integer(body["affinity"]["confidence"], 0, 100)
+    if not isinstance(body["provider"], str) or body["provider"] not in {
+        "qwen",
+        "compatible",
+        "codex",
+    }:
+        invalid()
+    safe_text(body["modelName"], 200)
+    timestamp(body["analyzedAt"])
+
+
+def validate_current_message(body):
+    required = {"id", "revision", "role", "text", "kind", "sentAt", "sequence"}
+    fields(
+        body,
+        required | {"mediaSummary", "recognition", "analysis", "truncated"},
+        required,
+    )
+    identifier(body["id"])
+    revision(body["revision"])
+    if not isinstance(body["role"], str) or body["role"] not in {
+        "self",
+        "peer",
+        "system",
+    }:
+        invalid()
+    safe_text(body["text"], 2000)
+    if not isinstance(body["kind"], str) or body["kind"] not in MESSAGE_KINDS:
+        invalid()
+    if body["sentAt"] is not None:
+        timestamp(body["sentAt"])
+    integer(body["sequence"], 1, 2**53 - 1)
+    if "mediaSummary" in body:
+        safe_text(body["mediaSummary"], 2000)
+    if "recognition" in body:
+        exact_fields(body["recognition"], {"provider", "modelName", "recognizedAt"})
+        item = body["recognition"]
+        if not isinstance(item["provider"], str) or item["provider"] not in {
+            "local",
+            "qwen",
+            "compatible",
+            "codex",
+        }:
+            invalid()
+        safe_text(item["modelName"], 200)
+        timestamp(item["recognizedAt"])
+    if "analysis" in body:
+        if body["role"] == "system":
+            invalid()
+        validate_current_analysis(body["analysis"])
+    if "truncated" in body:
+        boolean(body["truncated"])
+    return body
+
+
+def validate_current_draft(body):
+    required = {
+        "id",
+        "basedOnMessageId",
+        "text",
+        "label",
+        "reason",
+        "createdAt",
+        "provider",
+    }
+    fields(body, required | {"modelName", "modelChoiceId", "profileVersion"}, required)
+    identifier(body["id"])
+    identifier(body["basedOnMessageId"])
+    safe_text(body["text"], 2000, blank=False)
+    safe_text(body["label"], 80)
+    safe_text(body["reason"], 600)
+    timestamp(body["createdAt"])
+    if not isinstance(body["provider"], str) or body["provider"] not in {
+        "demo",
+        "ollama",
+        "compatible",
+        "codex",
+    }:
+        invalid()
+    if "modelName" in body:
+        safe_text(body["modelName"], 200)
+    if "modelChoiceId" in body:
+        identifier(body["modelChoiceId"])
+    if "profileVersion" in body and body["profileVersion"] is not None:
+        safe_text(body["profileVersion"], 100)
+    return body
+
+
+def validate_current_conversation(body):
+    required = {"conversationId", "revision", "syncedAt", "messages", "drafts"}
+    fields(
+        body,
+        required | {"profile", "profileTruncated", "wechat", "truncated"},
+        required,
+    )
+    identifier(body["conversationId"])
+    revision(body["revision"])
+    timestamp(body["syncedAt"])
+    messages, drafts = body["messages"], body["drafts"]
+    if not isinstance(messages, list) or len(messages) > 30:
+        invalid()
+    for item in messages:
+        validate_current_message(item)
+    message_ids = {item["id"] for item in messages}
+    if len(message_ids) != len(messages):
+        invalid()
+    if not isinstance(drafts, list) or len(drafts) > 12:
+        invalid()
+    for item in drafts:
+        validate_current_draft(item)
+        if item["basedOnMessageId"] not in message_ids:
+            invalid()
+    if len({item["id"] for item in drafts}) != len(drafts):
+        invalid()
+    if "profile" in body:
+        validate_profile(body["profile"])
+        if body["profile"]["id"] != body["conversationId"]:
+            invalid()
+    if "profileTruncated" in body:
+        boolean(body["profileTruncated"])
+    if "truncated" in body:
+        boolean(body["truncated"])
+    if "wechat" in body:
+        exact_fields(body["wechat"], {"enabled", "status", "lastCheckedAt", "detail"})
+        item = body["wechat"]
+        boolean(item["enabled"])
+        if not isinstance(item["status"], str) or item["status"] not in {
+            "paused",
+            "reading",
+            "ready",
+            "error",
+        }:
+            invalid()
+        if item["lastCheckedAt"] is not None:
+            timestamp(item["lastCheckedAt"])
+        safe_text(item["detail"], 300)
+    return body
+
+
+def validate_current_view(body, *, conversations):
+    if json_bytes(body) > MAX_CURRENT_VIEW_BYTES:
+        invalid()
+    exact_fields(body, {"syncedAt", "conversations"})
+    timestamp(body["syncedAt"])
+    views = body["conversations"]
+    if not isinstance(views, list) or len(views) > 8:
+        invalid()
+    configured_ids = {item["id"] for item in conversations}
+    ids = set()
+    message_ids = set()
+    draft_ids = set()
+    for item in views:
+        validate_current_conversation(item)
+        if (
+            item["conversationId"] not in configured_ids
+            or item["conversationId"] in ids
+        ):
+            invalid()
+        ids.add(item["conversationId"])
+        local_messages = {message["id"] for message in item["messages"]}
+        local_drafts = {draft["id"] for draft in item["drafts"]}
+        if local_messages & message_ids or local_drafts & draft_ids:
+            invalid()
+        message_ids |= local_messages
+        draft_ids |= local_drafts
+    return body
+
+
 def command_record(command):
     return {
         "id": str(command.pk),
@@ -666,6 +900,43 @@ def command_record(command):
         "result": command.result,
         "error": command.error,
     }
+
+
+def remote_command_records(device, snapshot):
+    """Keep status history while exposing only a bounded latest current view."""
+    records = []
+    current_ids = set()
+    remaining = MAX_CURRENT_VIEW_BYTES
+    configured_ids = {
+        item.get("id")
+        for item in (snapshot or {}).get("conversations", [])
+        if isinstance(item, dict)
+    }
+    current_available = bool(snapshot and snapshot.get("remoteEnabled"))
+    for command in device.commands.order_by("-created_at", "-id")[:100]:
+        record = command_record(command)
+        if device.revoked_at:
+            record["result"] = {}
+        elif command.type in CURRENT_COMMAND_TYPES:
+            record["result"] = {}
+            if command.status == "succeeded" and current_available:
+                try:
+                    exact_fields(command.result, {"currentView"})
+                    view = validate_current_conversation(command.result["currentView"])
+                except DomainError:
+                    view = None
+                if (
+                    view
+                    and view["conversationId"] in configured_ids
+                    and view["conversationId"] not in current_ids
+                ):
+                    current_ids.add(view["conversationId"])
+                    size = json_bytes(command.result)
+                    if len(current_ids) <= 8 and size <= remaining:
+                        record["result"] = command.result
+                        remaining -= size
+        records.append(record)
+    return records
 
 
 def cancel_commands(device):
@@ -709,14 +980,24 @@ def dispatch_remote(request, device_id, action, body):
         now = timezone.now()
         expire_commands(device, now)
         if action == "remote":
+            snapshot = device.remote_snapshot or None
+            if device.revoked_at:
+                snapshot = None
+            elif (
+                snapshot
+                and not snapshot.get("remoteEnabled")
+                and "currentView" in snapshot
+            ):
+                snapshot = {
+                    key: value
+                    for key, value in snapshot.items()
+                    if key != "currentView"
+                }
             return {
                 "device_id": str(device.pk),
-                "snapshot": device.remote_snapshot or None,
+                "snapshot": snapshot,
                 "last_poll_at": device.last_poll_at,
-                "commands": [
-                    command_record(item)
-                    for item in device.commands.order_by("-created_at", "-id")[:100]
-                ],
+                "commands": remote_command_records(device, snapshot),
             }
         if device.revoked_at:
             raise DomainError("设备已撤销", "device_revoked", 409)
@@ -736,6 +1017,14 @@ def dispatch_remote(request, device_id, action, body):
             raise DomainError(
                 "请先更新并连接 Mac，当前版本不支持此配置。",
                 "remote_capability_required",
+                409,
+            )
+        if body["type"] in CURRENT_COMMAND_TYPES and body["payload"]["id"] not in {
+            item["id"] for item in device.remote_snapshot.get("conversations", [])
+        }:
+            raise DomainError(
+                "该联系人尚未同步，请先刷新 Mac 连接。",
+                "remote_conversation_unavailable",
                 409,
             )
         if (
@@ -813,6 +1102,18 @@ def receipt_result(command, body):
         exact_fields(result, {"profile"})
         validate_profile(result["profile"])
         if result["profile"]["id"] != command.payload["id"]:
+            invalid()
+    elif command.type in CURRENT_COMMAND_TYPES:
+        exact_fields(result, {"currentView"})
+        view = result["currentView"]
+        if json_bytes(view) > MAX_CURRENT_VIEW_BYTES:
+            invalid()
+        validate_current_conversation(view)
+        if view["conversationId"] != command.payload["id"]:
+            invalid()
+        if command.type != "conversation.refresh" and command.payload[
+            "messageId"
+        ] not in {message["id"] for message in view["messages"]}:
             invalid()
     else:
         exact_fields(result, set())

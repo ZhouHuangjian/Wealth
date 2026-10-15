@@ -84,7 +84,7 @@ export class ContactInsightService {
       const state=this.store.read(),c=state.conversations.find(c=>c.id===id);
       if(!c||(c.channel==='wechat'&&!c.wechat?.enabled))return;
       const target=state.messages.find(m=>m.id===messageId&&m.conversationId===id);
-      const utterance=target&&(!target.kind||target.kind==='text'||(target.kind==='voice'&&target.mediaStatus==='recognized'&&target.audioRecognition));
+      const utterance=target&&(!target.kind||target.kind==='text'||(target.kind==='voice'&&target.mediaStatus==='recognized'&&target.audioRecognition)||(target.kind==='emoji'&&target.mediaStatus==='recognized'&&target.imageRecognition));
       if(utterance&&c.processing?.autoAnalyzeMessages&&(c.processing.intentEnabled||c.processing.affinityEnabled)){
         try{await this.analyze(id,messageId);}catch{
           const current=this.closed?undefined:this.store.read().conversations.find(c=>c.id===id);
@@ -103,7 +103,8 @@ export class ContactInsightService {
     })().finally(()=>{this.running=null;});
     return this.running;
   }
-  async analyze(id:string,targetId?:string):Promise<{insights:ContactInsights;cached:boolean}>{
+  async analyze(id:string,targetId?:string,signal?:AbortSignal):Promise<{insights:ContactInsights;cached:boolean}>{
+    signal?.throwIfAborted();
     if(this.closed)throw new Error('分析服务已停止。');
     const before=this.store.read(),c=conversation(before,id);
     if(!c.processing?.intentEnabled&&!c.processing?.affinityEnabled)throw new Error('请先为此人开启意图或好感分析。');
@@ -113,7 +114,7 @@ export class ContactInsightService {
     if(target.insights?.inputDigest===inputDigest)return {insights:target.insights,cached:true};
     const key=`${id}:analysis`;
     if(this.active.has(key))throw Object.assign(new Error('此人的分析正在进行，请等待结果。'),{status:409});
-    const controller=new AbortController(),configuration=modelConfiguration(before,id,'analysis');
+    const controller=new AbortController(),configuration=modelConfiguration(before,id,'analysis'),unlink=linkAbort(controller,signal);
     this.active.set(key,{cid:id,kind:'analysis',controller});
     try{
       const result=await (this.options.analyze??analyzeContactMessage)(before,id,target.id,controller.signal);
@@ -124,7 +125,7 @@ export class ContactInsightService {
       this.store.update(s=>{const m=s.messages.find(m=>m.id===target.id&&m.conversationId===id);if(!m)throw missing();m.insights=saved;});
       this.record(id,'已保存交流分析','百分比是模型对语境的估计，原结果保存在本机。');
       return {insights:saved,cached:false};
-    }finally{if(this.active.get(key)?.controller===controller)this.active.delete(key);}
+    }finally{unlink();if(this.active.get(key)?.controller===controller)this.active.delete(key);}
   }
   async compress(id:string,signal?:AbortSignal):Promise<{memory:ContactMemory;cached:boolean;remaining:number}>{
     signal?.throwIfAborted();

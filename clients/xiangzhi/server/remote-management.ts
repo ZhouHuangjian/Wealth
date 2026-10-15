@@ -28,8 +28,8 @@ export function batchRemoteReceipts(snapshot:Record<string,unknown>,receipts:rea
   return selected;
 }
 export function remoteCommandTimeout(command:RemoteCommand,now:number,serverTime:number):number{
-  const modelJob=['conversation.basis.generate','conversation.memory.compress'].includes(command.type);
-  return Math.min(modelJob?120_000:30_000,Math.max(1,Date.parse(command.expires_at)-now),Math.max(1,Date.parse(command.expires_at)-serverTime));
+  const modelJob=['conversation.basis.generate','conversation.memory.compress','conversation.message.analyze','conversation.message.recognize','conversation.drafts.generate'].includes(command.type);
+  return Math.min(modelJob?120_000:command.type==='conversation.refresh'?65_000:30_000,Math.max(1,Date.parse(command.expires_at)-now),Math.max(1,Date.parse(command.expires_at)-serverTime));
 }
 /** Outbound polling uses only the bound Wealth origin. Receipts survive process restarts. */
 export class RemoteManagement {
@@ -69,9 +69,10 @@ export class RemoteManagement {
         const nowBefore=this.options.now?.()??Date.now();
         const allCompleted=this.store.remoteReceipts(scope,nowBefore);
         const originalSnapshot:Record<string,unknown>={...this.options.snapshot(),remoteEnabled:!reportDisabled&&enabled};
+        if(!originalSnapshot.remoteEnabled)delete originalSnapshot.currentView;
         let legacyMode=this.legacyScope===scope&&this.legacyUntil>nowBefore&&originalSnapshot.version===2;
         let snapshot=legacyMode?legacyRemoteSnapshot(originalSnapshot):originalSnapshot;
-        let completed=batchRemoteReceipts(snapshot,legacyMode?allCompleted.filter(receipt=>!('profile'in receipt.result)):allCompleted);
+        let completed=batchRemoteReceipts(snapshot,legacyMode?allCompleted.filter(receipt=>!('profile'in receipt.result)&&!('currentView'in receipt.result)):allCompleted);
         const sendPoll=()=> (this.options.fetch??fetch)(new URL('/api/v1/chat/device/poll',check.origin),{
           method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.token}`},
           body:JSON.stringify({snapshot,completed}),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(15_000)])});
@@ -79,7 +80,7 @@ export class RemoteManagement {
         if(response.status===422&&originalSnapshot.version===2&&!legacyMode&&current()){
           await response.body?.cancel();
           legacyMode=true;snapshot=legacyRemoteSnapshot(originalSnapshot);
-          completed=batchRemoteReceipts(snapshot,allCompleted.filter(receipt=>!('profile'in receipt.result)));
+          completed=batchRemoteReceipts(snapshot,allCompleted.filter(receipt=>!('profile'in receipt.result)&&!('currentView'in receipt.result)));
           response=await sendPoll();
           if(response.ok){this.legacyScope=scope;this.legacyUntil=nowBefore+60_000;}
         }else if(response.ok&&!legacyMode){this.legacyScope=null;this.legacyUntil=0;}

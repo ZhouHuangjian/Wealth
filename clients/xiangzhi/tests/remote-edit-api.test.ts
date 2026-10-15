@@ -200,10 +200,24 @@ test('legacy wrong Codex selections can still be paused and repaired without unr
 test('remote basis and memory edits use profile revisions, preserve manual priority and persist without raw provenance upload', async () => {
   const h = await harness();
   try {
+    let sourceId='';
     h.store.update(state => {
       state.conversations.find(c => c.id === h.a)!.processing = { memoryEnabled: true };
-      addMessage(state, h.a, 'SYNTHETIC-RAW-CHAT-A 我喜欢散步');
+      Object.assign(state.conversations.find(c=>c.id===h.a)!.wechat!,{accountFingerprint:'PRIVATE-ACCOUNT-FINGERPRINT',cursor:'PRIVATE-WECHAT-CURSOR'});
+      const source=addMessage(state,h.a,`SYNTHETIC-RAW-CHAT-A 我喜欢散步 ${keys.join(' ')} ${connection.token} data:image/png;base64,SYNTHETIC-RAW-MEDIA`);
+      sourceId=source.id;Object.assign(source,{externalId:'PRIVATE-WECHAT-EXTERNAL-ID',sourceSequence:'987654321',sourceFingerprint:'PRIVATE-SOURCE-FINGERPRINT',wechatImage:{md5:'a'.repeat(32)},wechatEmoji:{md5:'b'.repeat(32)},
+        imageAttachment:{id:randomUUID(),filename:'/private/raw-media.png',mimeType:'image/png',source:'wechat'}});
       addMessage(state, h.b, 'SYNTHETIC-RAW-CHAT-B');
+      // The first eight explicit WeChat bindings are the remote scope. A ninth
+      // binding, an imported archive and a simulator must never join its view.
+      const binding=state.conversations.find(c=>c.id===h.b)!;
+      for(let index=0;index<6;index++)state.conversations.push({...structuredClone(binding),id:randomUUID(),name:`合成空会话 ${index}`,externalId:`wxid_empty_${index}`});
+      const unselected={...structuredClone(binding),id:randomUUID(),name:'未选择会话',externalId:'wxid_unselected'};state.conversations.push(unselected);
+      addMessage(state,unselected.id,'UNSELECTED-WECHAT-PRIVATE-TEXT');
+      for(const [name,text,source] of [['历史导入','ARCHIVE-PRIVATE-TEXT','import'],['本机演练','SIMULATOR-PRIVATE-TEXT','demo']] as const){
+        const id=randomUUID();state.conversations.push({...structuredClone(binding),id,name,channel:'simulator',externalId:null,wechat:undefined});
+        addMessage(state,id,text).source=source;
+      }
     });
     assert.equal((await h.run('conversation.basis.generate', { id: h.a })).status, 'succeeded');
     const generated = h.conversation(h.a).basisFacts![0];
@@ -232,7 +246,20 @@ test('remote basis and memory edits use profile revisions, preserve manual prior
     assert.equal(profileResult.status, 'succeeded');
     const profileWire = JSON.stringify(profileResult.result);
     assert.doesNotMatch(profileWire, /sourceMessageIds|sourceMessageHashes|compressedMessageHashes|sourceDigest|SYNTHETIC-RAW-CHAT/);
-    assert.doesNotMatch(JSON.stringify(h.polls), /SYNTHETIC-RAW-CHAT|sourceMessageIds|sourceMessageHashes/);
+    const latestViews=h.polls.at(-1).snapshot.currentView.conversations;
+    const selected=latestViews.find((view:any)=>view.conversationId===h.a);
+    assert.ok(selected.messages.some((message:any)=>message.id===sourceId&&message.text.includes('SYNTHETIC-RAW-CHAT-A')));
+    assert.ok(latestViews.find((view:any)=>view.conversationId===h.b).messages.some((message:any)=>message.text==='SYNTHETIC-RAW-CHAT-B'));
+    assert.equal(latestViews.length,8);assert.ok(h.polls.every(poll=>!poll.snapshot.currentView||poll.snapshot.remoteEnabled===true));
+    const outsideCurrentViews=h.polls.map(poll=>{const copy=structuredClone(poll);delete copy.snapshot.currentView;return copy;});
+    assert.doesNotMatch(JSON.stringify(outsideCurrentViews),/SYNTHETIC-RAW-CHAT|sourceMessageIds|sourceMessageHashes/);
+    for(const poll of h.polls)for(const completed of poll.completed){
+      assert.ok(!('currentView'in completed.result),'profile/settings edits do not return raw current-message results');
+      assert.doesNotMatch(JSON.stringify(completed.result),/SYNTHETIC-RAW-CHAT|sourceMessageIds|sourceMessageHashes|compressedMessageHashes|sourceDigest/);
+    }
+    const wire=JSON.stringify(h.polls);
+    for(const secret of [...keys,connection.token,'UNSELECTED-WECHAT-PRIVATE-TEXT','ARCHIVE-PRIVATE-TEXT','SIMULATOR-PRIVATE-TEXT','PRIVATE-WECHAT-EXTERNAL-ID','PRIVATE-SOURCE-FINGERPRINT','PRIVATE-ACCOUNT-FINGERPRINT','PRIVATE-WECHAT-CURSOR','SYNTHETIC-RAW-MEDIA','/private/raw-media.png','a'.repeat(32),'b'.repeat(32)])assert.ok(!wire.includes(secret),secret);
+    assert.doesNotMatch(wire,/"(?:sourceMessageIds|sourceMessageHashes|compressedMessageHashes|sourceDigest|sourceSequence|sourceFingerprint|imageAttachment|audioAttachment|imageRecognitionHistory|wechatImage|wechatEmoji|md5|accountFingerprint|modelUrl|apiKey)"\s*:|11435|data:image/);
     assert.equal((await h.profileRun('conversation.memory.entry.delete', h.a, { entryId })).status, 'succeeded');
     assert.equal(h.conversation(h.a).memory!.entries.some(entry => entry.id === entryId), false);
     assert.equal((await h.profileRun('conversation.basis.delete', h.a, { factId: generated.id })).status, 'succeeded');
