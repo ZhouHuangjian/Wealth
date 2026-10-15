@@ -286,7 +286,9 @@ def dispatch_chat(request, path, body):
                 device.revoked_at = timezone.now()
                 device.token_ciphertext = ""
                 device.remote_snapshot = {}
-                device.save(update_fields=["revoked_at", "token_ciphertext", "remote_snapshot"])
+                device.save(
+                    update_fields=["revoked_at", "token_ciphertext", "remote_snapshot"]
+                )
                 log_admin(owner, "chat.device.revoked", device.pk)
         return {"ok": True}
     if path == "chat/drafts" and request.method == "GET":
