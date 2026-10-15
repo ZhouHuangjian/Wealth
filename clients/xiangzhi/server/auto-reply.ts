@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { AppState, AutoJob, Conversation, Settings } from '../shared/types.js';
-import { generateDrafts, hasStopContactRequest, latestConversationMessage } from './generation.js';
+import { contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
+import { approvedSelfReplyClaims, contactReplyMemoryContext, generateDrafts, hasStopContactRequest, latestConversationMessage } from './generation.js';
 import { assertReplyContextReady, recentConversationMessages } from './message-context.js';
 
 interface StateStore { read(): AppState; update(fn: (state: AppState) => void): unknown }
 interface Sender { send(conversation: Conversation, text: string, idempotencyKey: string, signal: AbortSignal): Promise<void | string> }
-interface EngineOptions { now?: () => number; generate?: typeof generateDrafts; intervalMs?: number; onDrafts?: (conversationId: string) => Promise<void> }
+interface EngineOptions { now?: () => number; generate?: typeof generateDrafts; intervalMs?: number; onDrafts?: (conversationId: string) => Promise<void>; mediaPending?:(conversationId:string)=>boolean }
 const ACTIVE = new Set<AutoJob['status']>(['queued', 'generating']);
 const LIVE_SOURCES = new Set(['manual', 'bridge', 'demo', 'wechat']);
 const SHANGHAI_OFFSET = 8 * 60 * 60 * 1000;
@@ -32,7 +33,7 @@ function quietEndAt(settings: Settings, timestamp: number): number | null {
   return midnight + end * 60_000 + (start > end && minutes >= start ? 86_400_000 : 0);
 }
 function modelFingerprint(settings: Settings): string {
-  return JSON.stringify([settings.provider, settings.modelUrl, settings.modelName, settings.apiKey, settings.allowRemoteModel]);
+  return JSON.stringify([settings.provider, settings.modelUrl, settings.modelName, settings.apiKey, settings.allowRemoteModel,settings.modelPreset,settings.modelThinkingEnabled,settings.replyModels]);
 }
 // Any reviewed context change invalidates a response still being generated.
 export function replyContextFingerprint(state: AppState, conversationId: string): string {
@@ -41,13 +42,20 @@ export function replyContextFingerprint(state: AppState, conversationId: string)
   const configuration = conversation ? {
     id: conversation.id, name: conversation.name, note: conversation.note, channel: conversation.channel,
     externalId: conversation.externalId, autoReplyEnabled: conversation.autoReplyEnabled,
+    processing: {
+      replyModels: conversation.processing?.replyModels,
+      autoRecognizeImages: conversation.processing?.autoRecognizeImages,
+      autoTranscribeVoice: conversation.processing?.autoTranscribeVoice,
+      memoryEnabled: conversation.processing?.memoryEnabled,
+    },
     wechat: conversation.wechat ? {enabled: conversation.wechat.enabled, accountFingerprint: conversation.wechat.accountFingerprint} : null,
   } : null;
-  return JSON.stringify([modelFingerprint(state.settings), state.learnedProfile?.digest ?? null,
-    state.claims, state.feedback?.filter(item => item.conversationId === conversationId) ?? [],
+  return JSON.stringify([modelFingerprint(effectiveContactSettings(state.settings, conversation)), state.learnedProfile?.digest ?? null,
+    approvedSelfReplyClaims(state, conversationId), state.feedback?.filter(item => item.conversationId === conversationId) ?? [],
+    contactReplyMemoryContext(state, conversationId),
     configuration,
     recentConversationMessages(state, conversationId).map(message => [message.id, message.sequence, message.role, message.text,
-      message.kind ?? 'text', message.mediaStatus ?? null])]);
+      message.kind ?? 'text', message.mediaStatus ?? null,message.imageRecognition??null,message.audioRecognition??null])]);
 }
 
 function mediaBlockReason(state: AppState, conversationId: string): string | null {
@@ -60,6 +68,7 @@ export class AutoReplyEngine {
   private readonly generate: typeof generateDrafts;
   private readonly intervalMs: number;
   private readonly onDrafts?: EngineOptions['onDrafts'];
+  private readonly mediaPending?:EngineOptions['mediaPending'];
   private timer: ReturnType<typeof setInterval> | null = null;
   private runningTick: Promise<void> | null = null;
   private controllers = new Map<string, AbortController>();
@@ -70,6 +79,7 @@ export class AutoReplyEngine {
     this.generate = options.generate ?? generateDrafts;
     this.intervalMs = options.intervalMs ?? 500;
     this.onDrafts = options.onDrafts;
+    this.mediaPending=options.mediaPending;
     // A previous process may have submitted a send before stopping. Never retry it automatically.
     if (store.read().jobs.some(job => job.status === 'generating')) store.update(state => {
       for (const job of state.jobs.filter(job => job.status === 'generating')) {
@@ -98,19 +108,20 @@ export class AutoReplyEngine {
     });
   }
 
-  enqueue(conversationId: string, messageId: string): void {
+  enqueue(conversationId: string, messageId: string, contextRefresh=false): void {
     const state = this.store.read();
     const latest = latestConversationMessage(state, conversationId);
     // An old duplicate delivery must not cancel the newer job already waiting.
     if (latest?.id !== messageId) return;
-    if (state.jobs.some(job => job.conversationId === conversationId && job.messageId === messageId)) return;
+    const previous=state.jobs.filter(job=>job.conversationId===conversationId&&job.messageId===messageId);
+    if(previous.length&&(!contextRefresh||previous.some(job=>job.mode!=='draft'||ACTIVE.has(job.status)||job.status==='sent')))return;
     this.cancelJobs('会话出现更新，旧任务已撤销。', conversationId);
     const conversation = state.conversations.find(item => item.id === conversationId);
     if (!state.settings.autoReplyEnabled || !conversation?.autoReplyEnabled || latest.role !== 'peer' || !LIVE_SOURCES.has(latest.source)) return;
     const blocked = mediaBlockReason(state, conversationId)
       ?? (state.settings.autoReplyMode === 'send' && conversation.channel === 'wechat' ? '微信采集通道只接收消息，请使用生成草稿模式；不会自动发送。'
       : state.settings.autoReplyMode === 'send' && hasStopContactRequest(latest.text) ? '对方明确要求停止联系，自动回复已阻止。'
-      : state.settings.autoReplyMode === 'send' && conversation.channel === 'webhook' && state.settings.provider === 'demo' ? '演示规则不能用于真实通道自动发送，请先配置真实模型。' : null);
+      : state.settings.autoReplyMode === 'send' && conversation.channel === 'webhook' && contactUsesDemo(state.settings, conversation) ? '演示规则不能用于真实通道自动发送，请先配置真实模型。' : null);
     this.store.update(current => {
       current.jobs.push({id: randomUUID(), conversationId, messageId, mode: current.settings.autoReplyMode, status: blocked ? 'blocked' : 'queued',
         dueAt: new Date(this.now() + Math.max(0, current.settings.replyDelaySeconds) * 1000).toISOString(),
@@ -166,6 +177,11 @@ export class AutoReplyEngine {
     if (latest?.id !== job.messageId || latest.role !== 'peer' || !LIVE_SOURCES.has(latest.source)) {
       this.finish(jobId, 'cancelled', '最新消息已经改变，旧回复不会发送。'); return null;
     }
+    if(this.mediaPending?.(job.conversationId)) {
+      this.store.update(s=>{const current=s.jobs.find(item=>item.id===jobId);if(current&&ACTIVE.has(current.status)){current.status='queued';current.dueAt=new Date(this.now()+1000).toISOString();current.detail='正在识别新收到的媒体，完成后生成草稿。';}});
+      return null;
+    }
+    if(job.mode==='send'&&(effectiveContactSettings(state.settings,conversation).replyModels?.length??0)>1){this.finish(jobId,'blocked','多个模型的候选需要你选择，请使用草稿模式。');return null;}
     const mediaReason = mediaBlockReason(state, job.conversationId);
     if (mediaReason) {
       this.finish(jobId, 'blocked', mediaReason); return null;
@@ -176,7 +192,7 @@ export class AutoReplyEngine {
     if (job.mode === 'send' && hasStopContactRequest(latest.text)) {
       this.finish(jobId, 'blocked', '对方明确要求停止联系，自动回复已阻止。'); return null;
     }
-    if (job.mode === 'send' && conversation.channel === 'webhook' && state.settings.provider === 'demo') {
+    if (job.mode === 'send' && conversation.channel === 'webhook' && contactUsesDemo(state.settings, conversation)) {
       this.finish(jobId, 'blocked', '演示规则不能用于真实通道自动发送。'); return null;
     }
     // Draft generation does not contact anyone, so sending schedules and quotas
@@ -226,7 +242,7 @@ export class AutoReplyEngine {
       job.status = 'generating'; job.detail = job.mode === 'draft' ? '正在生成草稿，完成后等待你确认。' : '正在生成回复，发送前会再次检查开关和最新消息。';
     });
     try {
-      const drafts = await this.generate(initial.state, initial.conversation.id, '自然回应对方最新消息，尊重对方界限。', controller.signal);
+      const drafts = await this.generate({...initial.state, settings: effectiveContactSettings(initial.state.settings, initial.conversation)}, initial.conversation.id, '自然回应对方最新消息，尊重对方界限。', controller.signal);
       if (controller.signal.aborted) return;
       const current = this.check(jobId);
       if (!current) return;

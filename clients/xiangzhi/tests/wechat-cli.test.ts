@@ -74,6 +74,27 @@ test('WeChat media and system notifications become explicit pending placeholders
   assert.doesNotMatch(JSON.stringify(records), /secret|<msg>/);
 });
 
+test('image projection retains only valid MD5 and optional local IDs while omitting paths and payloads', () => {
+  const records = parseWechatPage(fixture([{...row, msg_type: '3', local_id: '9223372036854775802',
+    content: {Image: {md5: 'A'.repeat(32), path: '/sensitive/private.dat', xml: 'sensitive XML'}}}]), diagnostic, 'filehelper').records;
+  assert.deepEqual(records[0].wechatImage, {localId: '9223372036854775802', md5: 'a'.repeat(32)});
+  assert.doesNotMatch(JSON.stringify(records), /sensitive|private|xml/);
+  const withoutLocalId = parseWechatPage(fixture([{...row, msg_type: '3', content: {Image: {md5: 'b'.repeat(32)}}}]), diagnostic, 'filehelper').records;
+  assert.deepEqual(withoutLocalId[0].wechatImage, {md5: 'b'.repeat(32)});
+});
+
+test('WeChat text emojis parse locally and custom sticker rows retain only their MD5 identifiers',()=>{
+  const records=parseWechatPage(fixture([
+    {...row,content:{Text:'哈哈[嘿哈]😂'}},
+    {...row,sort_seq:'72057594037927938',msg_type:'47',local_id:'222',content:{Emoji:{xml:`<msg><emoji md5="${'a'.repeat(32)}" cdnurl="https://private-url" aeskey="sensitive-key"/></msg>`}}},
+  ]),diagnostic,'filehelper').records;
+  assert.deepEqual(records[0].emojiRecognition?.tokens.map(item=>item.value),['[嘿哈]','😂']);
+  assert.equal(records[0].text,'哈哈[嘿哈]😂');assert.equal(records[0].mediaStatus,undefined);
+  assert.deepEqual(records[1].wechatEmoji,{md5:'a'.repeat(32),localId:'222'});
+  assert.equal(records[1].kind,'emoji');assert.equal(records[1].mediaStatus,'pending');
+  assert.doesNotMatch(JSON.stringify(records),/private-url|sensitive-key|<msg>|cdnurl/);
+});
+
 test('WeChat rejects wrong contacts, ambiguous directions, unsafe identifiers, missing accounts, and malformed pages', () => {
   for (const changed of [
     {...row, talker: 'someone_else'}, {...row, direction: 'unknown'}, {...row, direction: undefined},

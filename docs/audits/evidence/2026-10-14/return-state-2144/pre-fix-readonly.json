@@ -1,0 +1,57 @@
+{
+  "checked_at": "2026-10-14T01:00:13.124875+00:00",
+  "enforced_read_only": true,
+  "financial_values_omitted": true,
+  "accounts": [
+    {
+      "recording": {
+        "recording_mode": "transactions",
+        "history_status": "unknown",
+        "recording_start_date": "2026-10-04"
+      },
+      "frozen": false,
+      "snapshot_count": 1,
+      "snapshots": [
+        {
+          "date": "2026-10-04",
+          "complete": true,
+          "includes_options": false,
+          "basis": "settlement",
+          "calendar_id": "CN_FUTURES",
+          "positions_provided": false,
+          "positions_empty": false,
+          "nonzero_margin": false,
+          "no_option_positions": true,
+          "has_recorded_investments": false
+        }
+      ],
+      "calendar": {
+        "status": "unavailable",
+        "amount_available": false,
+        "amount_zero": false,
+        "items": [
+          {
+            "status": "unavailable",
+            "source": "institution_snapshot",
+            "message": "缺少该日与上一有效结算权益"
+          }
+        ]
+      },
+      "return": {
+        "status": "estimated",
+        "message": "无已记录持仓，按资金流水延续；结算盈亏按 0 推算",
+        "source": "cash_only_carry_forward",
+        "missing_reason_code": null,
+        "cash_only_carry_forward": true
+      },
+      "amount_available": true,
+      "amount_zero": true,
+      "valuation": {
+        "gaps": [],
+        "cash_only_carry_forward": true,
+        "holiday_carry_forward": false,
+        "source": "manual_account_opening"
+      }
+    }
+  ]
+}

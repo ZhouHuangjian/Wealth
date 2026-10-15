@@ -1,0 +1,36 @@
+{
+  "checked_at": "2026-10-13T05:13:39.501687+00:00",
+  "tls_verification": true,
+  "health": {
+    "status": "ok",
+    "version": "2.14.1",
+    "mode": "production"
+  },
+  "asset_count": 23,
+  "all_bytes_match_frozen_build": true,
+  "paths": [
+    "/assets/AdminConsole-B0rIYSag.js",
+    "/assets/AdminDataManagement-CG7Uyvus.js",
+    "/assets/Analytics-BcoZqUyO.js",
+    "/assets/Assets-DfYWE2iJ.js",
+    "/assets/Cashbook-BO06eHGL.js",
+    "/assets/ChatAssistant-BQ1mFRWR.js",
+    "/assets/ChatAssistant-CEqq1azB.css",
+    "/assets/Home-DL8UZmOL.js",
+    "/assets/MarketValuation-Bg5sSYmx.js",
+    "/assets/MarketValuation-CI9FkBJO.css",
+    "/assets/Notebook-CoT3fy-5.js",
+    "/assets/Planning-C2kINhLJ.js",
+    "/assets/ProfitCalendar-CCB5BRxj.js",
+    "/assets/Settings-qjnTMduq.js",
+    "/assets/WorkspaceIdentity-Bsywriwf.js",
+    "/assets/download-wW1LvKXJ.js",
+    "/assets/ellipsis-B1lmCYFf.js",
+    "/assets/fund-reconciliation-Ct1iZCxi.js",
+    "/assets/index-D0586Jed.js",
+    "/assets/index-D4MdqZRd.css",
+    "/assets/index-DV9doiJX.js",
+    "/assets/trash-2-DtiTVKdr.js",
+    "/"
+  ]
+}

@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
+  Alert,
   Button,
   Collapse,
   Form,
@@ -12,23 +14,30 @@ import {
 } from "antd";
 import { Info, Minus, Plus, Repeat2 } from "lucide-react";
 import type { Item } from "../api";
-import { api, dateToday } from "../api";
+import { api } from "../api";
 import { useWorkspace } from "../state";
 import { HelpText } from "../help";
 import {
   dcaAutomationNotice,
+  dcaTopUpInitialDate,
+  dcaTopUpNotice,
+  dcaToday,
   eligibleDcaHolding,
   eligibleDcaInstrument,
+  eligibleDcaTopUp,
 } from "../dca-automation";
+import { dcaCashReconciliationAction } from "../business-action";
 
 export default function DcaAutomationFields({
   accounts,
   instruments,
   useDefaults = true,
+  fundingAttention = false,
 }: {
   accounts: Item[];
   instruments: Item[];
   useDefaults?: boolean;
+  fundingAttention?: boolean;
 }) {
   const form = Form.useFormInstance();
   const { space } = useWorkspace();
@@ -41,6 +50,35 @@ export default function DcaAutomationFields({
   const planStart = Form.useWatch("start_date", form);
   const instrumentId = Form.useWatch("instrument_id", form);
   const fundingMode = Form.useWatch("automatic_funding_source", form);
+  const topUpId = Form.useWatch("automatic_top_up_account_id", form);
+  const topUpStart = Form.useWatch("automatic_top_up_start_date", form);
+  const focusHandled = useRef(false);
+  const topUpAccounts = accounts.filter((account) =>
+    eligibleDcaTopUp(account, currency, fundingId, space.id),
+  );
+  const topUpAvailable = topUpAccounts.some(
+    (account) => account.id === topUpId,
+  );
+  const cashAction = dcaCashReconciliationAction(space.id, {
+    account_id: fundingId,
+  });
+  useEffect(() => {
+    if (
+      !fundingAttention ||
+      focusHandled.current ||
+      !enabled ||
+      fundingMode === "untracked"
+    )
+      return;
+    const frame = requestAnimationFrame(() => {
+      form.scrollToField("automatic_top_up_account_id", {
+        block: "center",
+        focus: true,
+      });
+      focusHandled.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fundingAttention, enabled, fundingMode, form]);
   const knownInstrument = instruments.find((item) => item.id === instrumentId);
   const [resolvedInstrument, setResolvedInstrument] = useState<Item | null>(
     null,
@@ -109,6 +147,7 @@ export default function DcaAutomationFields({
             "automatic_fee_mode",
             "account_id",
             "automatic_funding_source",
+            "automatic_top_up_account_id",
           ])
         ) {
           const defaults = {
@@ -208,8 +247,13 @@ export default function DcaAutomationFields({
                 { value: "untracked", label: "账外资金（不扣本账簿账户）" },
               ]}
               onChange={(value) => {
-                if (value === "untracked" && holdingId)
-                  form.setFieldValue("account_id", holdingId);
+                if (value === "untracked") {
+                  if (holdingId) form.setFieldValue("account_id", holdingId);
+                  form.setFieldsValue({
+                    automatic_top_up_account_id: null,
+                    automatic_top_up_start_date: null,
+                  });
+                }
               }}
             />
           </Form.Item>
@@ -257,6 +301,114 @@ export default function DcaAutomationFields({
         <Form.Item name="account_id" hidden>
           <Input />
         </Form.Item>
+      )}
+      {enabled && fundingMode !== "untracked" && (
+        <>
+          {fundingAttention && (
+            <Alert
+              type="info"
+              showIcon
+              message="本期等待可用现金。请先核对扣款账户，或明确指定补足来源和生效日期。"
+              style={{ marginBottom: 12 }}
+            />
+          )}
+          <Form.Item
+            name="automatic_top_up_account_id"
+            label="余额不足时，从哪里补足"
+            dependencies={["account_id", "currency"]}
+            extra={
+              <>
+                未选择时等待扣款账户补入资金。
+                {cashAction && (
+                  <Link to={cashAction.to}>核对扣款账户余额与流水</Link>
+                )}
+              </>
+            }
+            rules={[
+              {
+                validator: (_, value) =>
+                  !value ||
+                  topUpAccounts.some((account) => account.id === value)
+                    ? Promise.resolve()
+                    : Promise.reject(
+                        new Error(
+                          "请重选同币种的可用现金账户，或清除补足来源；不能选择主扣款账户。",
+                        ),
+                      ),
+              },
+            ]}
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="不自动补足 · 等待入金"
+              notFoundContent="暂无其他同币种现金账户"
+              options={[
+                ...(topUpId && !topUpAvailable
+                  ? [
+                      {
+                        value: topUpId,
+                        label: "原补足账户不可用 · 请重选或清除",
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+                ...topUpAccounts.map((account) => ({
+                  value: account.id,
+                  label: `${account.name} · ${account.currency}`,
+                })),
+              ]}
+              onChange={(value) => {
+                if (!value)
+                  form.setFieldsValue({
+                    automatic_top_up_account_id: null,
+                    automatic_top_up_start_date: null,
+                  });
+                else if (!topUpId || !topUpStart)
+                  form.setFieldValue(
+                    "automatic_top_up_start_date",
+                    dcaTopUpInitialDate(
+                      form.getFieldsValue(true),
+                      dcaToday(space.timezone),
+                    ),
+                  );
+              }}
+            />
+          </Form.Item>
+          {topUpId && (
+            <>
+              <Form.Item
+                name="automatic_top_up_start_date"
+                label="从哪一期开始允许补足"
+                dependencies={["automatic_start_date", "start_date"]}
+                rules={[
+                  { required: true, message: "请选择补足生效日期" },
+                  {
+                    validator: (_, value) =>
+                      !value ||
+                      (value >= (start || planStart) && value >= planStart)
+                        ? Promise.resolve()
+                        : Promise.reject(
+                            new Error("不能早于计划及自动补录生效日期"),
+                          ),
+                  },
+                ]}
+                extra={
+                  topUpStart && topUpStart < dcaToday(space.timezone)
+                    ? `将包含 ${topUpStart} 起尚未扣款的历史期次；保存后系统会继续处理，请确认资金事实适用于这些日期。`
+                    : "按期次实际执行日判断，仅该日及之后尚未扣款的期次可补足。更早的待办继续等待；如需补记，须明确选择更早日期。"
+                }
+              >
+                <Input type="date" min={start || planStart} />
+              </Form.Item>
+              <p className="dca-setting-note">
+                {dcaTopUpNotice}
+                已扣款期次保持原记录；补足账户余额不足时继续等待。
+              </p>
+            </>
+          )}
+        </>
       )}
       <div hidden={!enabled}>
         <div className="form-grid">
@@ -325,7 +477,7 @@ export default function DcaAutomationFields({
                     </Form.Item>
                   </div>
                   <p className="muted" style={{ fontSize: 12 }}>
-                    {start && start < dateToday()
+                    {start && start < dcaToday(space.timezone)
                       ? `包含 ${start} 起已到期的计划；按基金可申购日自动处理。`
                       : "按基金可申购日自动处理；生效日期之前不补记。"}
                   </p>

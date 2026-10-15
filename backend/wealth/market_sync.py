@@ -176,6 +176,8 @@ def quote_list(space):
             or quote.get("provider_attempts", []),
             "nav_quarantine": state.get("nav_quarantine", {}),
             "retained_previous_quote": state.get("retained_previous_quote", False),
+            "reference_estimate": state.get("reference_estimate")
+            or quote.get("reference_estimate"),
         }
         if (item.get("data_quality") or {}).get("status") == "conflict":
             item["status"] = "conflict"
@@ -484,6 +486,12 @@ def refresh_one(space_id, instrument_id, token=None):
             "nav_quarantine": quarantine,
         }
         if quote:
+            # Keep the independent reference visible even when a formal NAV
+            # conflict requires retaining the previous accounting observation.
+            # Its original timestamps and unknown economic date stay intact;
+            # it is never part of observations/Price or the accounting fallback.
+            if quote.get("reference_estimate"):
+                state.data["reference_estimate"] = serial(quote["reference_estimate"])
             state.data["retained_previous_quote"] = bool(
                 not ok and previous_quote.get("price") is not None
             )
@@ -535,6 +543,41 @@ def refresh_one(space_id, instrument_id, token=None):
         }
 
 
+def _refresh_time(value, now):
+    parsed = _time(value)
+    # Scheduling metadata is not a market observation. Broken legacy metadata
+    # must not crash the entire scan or park an instrument until a future date.
+    return parsed if parsed and timezone.is_aware(parsed) and parsed <= now else None
+
+
+def _refresh_is_due(data, now):
+    last = _refresh_time(data.get("last_attempt_at"), now)
+    if (
+        data.get("refresh_status") == "running"
+        and last
+        and (now - last).total_seconds() < LEASE
+    ):
+        return False
+    if data.get("refresh_status") in {"pending", "queued"}:
+        # Broker failure/redelivery retains the same request token and lease.
+        return True
+    # The request is the cadence anchor; worker start time is evidence of when
+    # an attempt actually ran. Anchoring on the latter loses a whole scan when
+    # the worker starts just after the previous beat. Legacy rows fall back to
+    # the real attempt time and are picked up by the next one-minute scan.
+    requested = _refresh_time(data.get("requested_at"), now)
+    # An old request after a long queue backlog is not a license to immediately
+    # repeat an attempt. Invalid/future request timestamps also use the actual
+    # worker start; no timestamp is rounded or overwritten in stored evidence.
+    anchor = (
+        requested
+        if requested
+        and (not last or 0 <= (last - requested).total_seconds() < INTERVAL)
+        else last
+    )
+    return not anchor or (now - anchor).total_seconds() >= INTERVAL
+
+
 def refresh_due(inline=False, limit=100):
     if not enabled():
         return {"scheduled": 0}
@@ -558,15 +601,8 @@ def refresh_due(inline=False, limit=100):
             ):
                 state = _state(space, instrument)
                 data = state.data if state else {}
-                last = _time(data.get("last_attempt_at"))
-                pending = data.get("refresh_status") == "pending"
-                if not pending and last and (now - last).total_seconds() < INTERVAL:
-                    continue
-                if (
-                    data.get("refresh_status") == "running"
-                    and last
-                    and (now - last).total_seconds() < LEASE
-                ):
+                last = _refresh_time(data.get("last_attempt_at"), now)
+                if not _refresh_is_due(data, now):
                     continue
                 # Across households, oldest observations are serviced first.
                 candidates.append(
@@ -589,18 +625,16 @@ def refresh_due(inline=False, limit=100):
                 continue
             state = _state(space, instrument)
             data = state.data if state else {}
-            requested = _time(data.get("requested_at"))
-            last = _time(data.get("last_attempt_at"))
-            if (
-                data.get("refresh_status") == "running"
-                and last
-                and (now - last).total_seconds() < LEASE
-            ):
+            locked_now = timezone.now()
+            requested = _refresh_time(data.get("requested_at"), locked_now)
+            # A concurrent scan/worker may have completed after inventory was
+            # read. Recheck under the space lock before issuing another token.
+            if not _refresh_is_due(data, locked_now):
                 continue
             preserve = (
                 data.get("refresh_status") in {"pending", "queued"}
                 and requested
-                and (now - requested).total_seconds() < LEASE
+                and (locked_now - requested).total_seconds() < LEASE
             )
             token = data.get("request_token") if preserve else str(uuid.uuid4())
             data = {
@@ -610,7 +644,7 @@ def refresh_due(inline=False, limit=100):
                 "refresh_status": "pending",
                 "requested_at": data.get("requested_at")
                 if preserve
-                else now.isoformat(),
+                else locked_now.isoformat(),
             }
             if not state:
                 state = Resource(

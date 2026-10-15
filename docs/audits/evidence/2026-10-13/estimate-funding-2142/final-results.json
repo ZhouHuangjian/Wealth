@@ -1,0 +1,291 @@
+{
+  "status": "deployed",
+  "version": "2.14.2",
+  "source_commit": "71f322456e8f64651bfc6b8d1da6e3599eece586",
+  "image_id": "sha256:8e7a7ad87dcc87ac8478a7bb847234e432e71bb07d97e81b63a15e163f098057",
+  "previous_image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5",
+  "schema": "0015_chat_remote_controls",
+  "deployed_at": "2026-10-13T11:34:36.154528+00:00",
+  "deployed_at_shanghai": "2026-10-13T19:34:36.154528+08:00",
+  "linux_full_regression": {
+    "passed": 1791,
+    "subtests_passed": 12,
+    "skipped": 0,
+    "database": "wealth_funding_v2142_test",
+    "production_database_used": false
+  },
+  "local_validation": {
+    "backend_passed": 1791,
+    "subtests_passed": 12,
+    "frontend_passed": 214,
+    "skipped": 0,
+    "frontend_typecheck": true,
+    "frontend_format": true,
+    "frontend_build": true,
+    "frozen_archive_rebuilt": true,
+    "release_guards_passed": 8
+  },
+  "preservation": {
+    "existing_tables_preserved": 44,
+    "full_fingerprint_equal": true,
+    "sessions_preserved": true,
+    "files_preserved": true,
+    "schema_preserved": true,
+    "permissions_preserved": true,
+    "production_migrations_run": false
+  },
+  "backup": {
+    "file": "wealth-20261013T113222Z.backup.enc",
+    "sha256": "f6385237f9117b0b1729a6f44fc96452072cad75da7932d7bbd103e17f7b5ed7",
+    "size": 6246481,
+    "server_authenticated_verify": true,
+    "local_bytes_match_authenticated_server_copy": true,
+    "restore_drill_performed": false
+  },
+  "runtime": {
+    "version": "2.14.2",
+    "checked_at": "2026-10-13T11:34:36.272015+00:00",
+    "containers": [
+      {
+        "service": "web",
+        "healthy": true,
+        "image_id": "sha256:8e7a7ad87dcc87ac8478a7bb847234e432e71bb07d97e81b63a15e163f098057"
+      },
+      {
+        "service": "worker",
+        "healthy": true,
+        "image_id": "sha256:8e7a7ad87dcc87ac8478a7bb847234e432e71bb07d97e81b63a15e163f098057"
+      },
+      {
+        "service": "beat",
+        "healthy": true,
+        "image_id": "sha256:8e7a7ad87dcc87ac8478a7bb847234e432e71bb07d97e81b63a15e163f098057"
+      },
+      {
+        "service": "db",
+        "healthy": true,
+        "image_id": "sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650"
+      },
+      {
+        "service": "rabbitmq",
+        "healthy": true,
+        "image_id": "sha256:2531fe16e1cb4ec4086d3eaa63118c8f074dd98620d55f022f453a397b18f037"
+      }
+    ],
+    "timers": {
+      "wealth-backup.timer": "active",
+      "wealth-certbot.timer": "active"
+    },
+    "disposable_test_database_retained": true,
+    "production_database_reset": false,
+    "production_migrations_run": false
+  },
+  "public": {
+    "checked_at": "2026-10-13T11:35:12.479280+00:00",
+    "tls_verification": true,
+    "health": {
+      "status": "ok",
+      "version": "2.14.2",
+      "mode": "production"
+    },
+    "asset_count": 23,
+    "all_bytes_match_frozen_build": true,
+    "paths": [
+      "/assets/AdminConsole-CcInn5sY.js",
+      "/assets/AdminDataManagement-G-WvU3sD.js",
+      "/assets/Analytics-BIjzsrxu.js",
+      "/assets/Assets-DKktF1Nd.js",
+      "/assets/Cashbook-Byj8zYKP.js",
+      "/assets/ChatAssistant-CEqq1azB.css",
+      "/assets/ChatAssistant-Cuclrxln.js",
+      "/assets/Home-W-xkLzxQ.js",
+      "/assets/MarketValuation-CI9FkBJO.css",
+      "/assets/MarketValuation-tngZdFzQ.js",
+      "/assets/Notebook-Cbzmop2Y.js",
+      "/assets/Planning-DVk2E92P.js",
+      "/assets/ProfitCalendar-a6690UpQ.js",
+      "/assets/Settings-vrBw9CfN.js",
+      "/assets/WorkspaceIdentity-Ckao8Y5u.js",
+      "/assets/download-CWNbI1QR.js",
+      "/assets/ellipsis-BhgcBxEa.js",
+      "/assets/fund-reconciliation-Ct1iZCxi.js",
+      "/assets/index-D4MdqZRd.css",
+      "/assets/index-DcTERlBJ.js",
+      "/assets/index-Wo1Bw-BL.js",
+      "/assets/trash-2-Dt1S_pKE.js",
+      "/"
+    ]
+  },
+  "live_readonly": {
+    "checked_at": "2026-10-13T11:37:52.169587+00:00",
+    "version": "2.14.2",
+    "enforced_read_only": true,
+    "session_created": false,
+    "login_performed": false,
+    "manual_refresh_triggered": false,
+    "financial_values_omitted": true,
+    "spaces": [
+      {
+        "api_status": 200,
+        "date": "2026-10-13",
+        "status": "partial",
+        "known_count": 2,
+        "total_count": 8,
+        "missing_count": 6,
+        "amount_available": false,
+        "known_amount_available": true,
+        "reason_counts": {
+          "no_estimate": 5,
+          "quote_delayed": 1,
+          "available_or_legacy": 2
+        },
+        "latest_fund_updates": {
+          "total_count": 7,
+          "known_count": 1,
+          "items": [
+            {
+              "code": "017641",
+              "status": "unavailable",
+              "native_status": "unavailable",
+              "return_date": null,
+              "base_nav_date": "2026-10-12",
+              "quoted_at": "2026-10-13T05:04:00+08:00",
+              "amount_available": false,
+              "reason": "reference_baseline"
+            },
+            {
+              "code": "019305",
+              "status": "unavailable",
+              "native_status": "unavailable",
+              "return_date": null,
+              "base_nav_date": "2026-10-12",
+              "quoted_at": "2026-10-13T05:04:00+08:00",
+              "amount_available": false,
+              "reason": "reference_baseline"
+            },
+            {
+              "code": "019172",
+              "status": "unavailable",
+              "native_status": "unavailable",
+              "return_date": null,
+              "base_nav_date": "2026-10-12",
+              "quoted_at": "2026-10-13T05:04:00+08:00",
+              "amount_available": false,
+              "reason": "reference_baseline"
+            },
+            {
+              "code": "021778",
+              "status": "unavailable",
+              "native_status": "unavailable",
+              "return_date": null,
+              "base_nav_date": "2026-10-12",
+              "quoted_at": "2026-10-13T05:04:00+08:00",
+              "amount_available": false,
+              "reason": "reference_baseline"
+            },
+            {
+              "code": "270042",
+              "status": "unavailable",
+              "native_status": "unavailable",
+              "return_date": null,
+              "base_nav_date": "2026-10-12",
+              "quoted_at": "2026-10-13T05:04:00+08:00",
+              "amount_available": false,
+              "reason": "reference_baseline"
+            },
+            {
+              "code": "000307",
+              "status": "estimated",
+              "native_status": "estimated",
+              "return_date": null,
+              "base_nav_date": "2026-10-12",
+              "quoted_at": "2026-10-13T16:04:00+08:00",
+              "amount_available": true,
+              "reason": null
+            },
+            {
+              "code": "020602",
+              "status": "unavailable",
+              "native_status": "unavailable",
+              "return_date": null,
+              "base_nav_date": "2026-10-13",
+              "quoted_at": "2026-10-13T16:05:00+08:00",
+              "amount_available": false,
+              "reason": "reference_baseline"
+            }
+          ]
+        },
+        "reference_sources": [
+          {
+            "code": "021778",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T11:35:25.017609+00:00"
+          },
+          {
+            "code": "270042",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T11:35:25.500635+00:00"
+          },
+          {
+            "code": "019172",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T11:35:30.545422+00:00"
+          },
+          {
+            "code": "019305",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T11:35:30.889185+00:00"
+          },
+          {
+            "code": "017641",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T11:35:33.360235+00:00"
+          }
+        ],
+        "top_up_configured_plan_count": 0
+      }
+    ],
+    "target_reference_codes": [
+      "017641",
+      "019305",
+      "019172",
+      "021778",
+      "270042"
+    ]
+  },
+  "boundaries": {
+    "production_plan_changed_by_agent": false,
+    "historical_financial_repair": false,
+    "new_database_migration": false,
+    "all_products_estimate_guarantee": false,
+    "production_browser_login_performed": false,
+    "server_test_database_retained": true
+  },
+  "evidence_sha256": {
+    "source-manifest.json": "21d85ecfcd53a34616bf25e8092878d31fe5a713bf806a0ffb76aec0048246d9",
+    "frontend-build-receipt.json": "5166094183d39ae6b59198a53d23c46f2d5a392b0be60a088ff6340f0dbd8ec9",
+    "image-files.json": "321b01be4ae90ddb5ef275c05ec9dbe34ed744ab1e8d8656c8b263fe35609e17",
+    "image-verification.json": "c2be7be615864ffa1f9a2656b81dadeb88fe648d0a111cd17af406fda394283d",
+    "server-full-regression.json": "63855417418ff453b906c0ffa239f8f821e70f06e9b63dfd1e09311509be5fcc",
+    "backend-full.log": "9dcad353c6e48d9b30d231ed4deb07de80c1973e01de42909e92a22c4d3d6eab",
+    "cutover.json": "0a388fbe207ca08ff89852c890f2de670258d0572114a44dbbd716e077ba5f96",
+    "post-deployment.json": "fb28e5407dc1e56f38a9bcde4843209f1959bd3a6a11c2be5bfc6e550dd42a68",
+    "public-verification.json": "c6a7cde9789f526eba9c14775b6835dbc06b4b328479d02096e40ad1c5551014",
+    "live-readonly.json": "823bd1b14d93d7d28b66673d996c9f2795c66fc02f502e605c06cf5066056fc3"
+  }
+}

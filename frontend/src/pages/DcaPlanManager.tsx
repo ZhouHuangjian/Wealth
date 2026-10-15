@@ -15,13 +15,17 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Plus, RefreshCw, Search } from "lucide-react";
-import { api, ApiError, dateToday, listOf, send } from "../api";
+import { api, ApiError, listOf, send } from "../api";
 import type { Item } from "../api";
 import { Fields, LoadState, Panel } from "../components";
 import type { Field } from "../components";
 import { helpColumns } from "../help";
 import { useDebounced, useResource, useWorkspace } from "../state";
-import { dcaAutomationInitial, dcaPlanPayload } from "../dca-automation";
+import {
+  dcaAutomationInitial,
+  dcaPlanPayload,
+  dcaToday,
+} from "../dca-automation";
 import DcaAutomationFields from "./DcaAutomationFields";
 import DcaPlanAutomationStatus from "./DcaPlanAutomationStatus";
 import "./fund-experience.css";
@@ -52,6 +56,7 @@ export default function DcaPlanManager({
   const [open, setOpen] = useState(false),
     [editing, setEditing] = useState<Item | null>(null),
     [initial, setInitial] = useState<Record<string, any>>({});
+  const [fundingAttention, setFundingAttention] = useState(false);
   const [loading, setLoading] = useState(false),
     [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false),
@@ -105,7 +110,7 @@ export default function DcaPlanManager({
           setActionError("指定记录不是定投计划，请重新选择。");
           return;
         }
-        if (canWrite) openForm(plan);
+        if (canWrite) openForm(plan, routeParams.get("focus") === "funding");
         else {
           setActionError(
             "已定位计划设置。修改扣款账户、费用或自动化规则请联系空间管理员。",
@@ -114,6 +119,7 @@ export default function DcaPlanManager({
         }
         const next = new URLSearchParams(routeParams);
         next.delete("action");
+        next.delete("focus");
         setRouteParams(next, { replace: true });
       })
       .catch(() => {
@@ -141,7 +147,10 @@ export default function DcaPlanManager({
       const current = await api<Item>(`/spaces/${space.id}/plans/${plan.id}`);
       if (!live.current || seq !== loadSequence.current) return;
       setEditing(current);
-      setInitial({ ...current, ...dcaAutomationInitial(current, dateToday()) });
+      setInitial({
+        ...current,
+        ...dcaAutomationInitial(current, dcaToday(space.timezone)),
+      });
     } catch (e) {
       if (live.current && seq === loadSequence.current)
         setLoadError((e as Error).message);
@@ -149,8 +158,9 @@ export default function DcaPlanManager({
       if (live.current && seq === loadSequence.current) setLoading(false);
     }
   }
-  function openForm(plan?: Item) {
+  function openForm(plan?: Item, focusFunding = false) {
     requestReveal(() => {
+      setFundingAttention(focusFunding);
       setEditing(plan || null);
       setDirty(false);
       setError("");
@@ -168,7 +178,9 @@ export default function DcaPlanManager({
         setInitial({
           name: "我的定投",
           ...values,
-          ...dcaAutomationInitial(values, dateToday(), { newPlan: true }),
+          ...dcaAutomationInitial(values, dcaToday(space.timezone), {
+            newPlan: true,
+          }),
         });
       }
     });
@@ -425,6 +437,7 @@ export default function DcaPlanManager({
                   accounts={accounts}
                   instruments={instruments}
                   useDefaults={!editing}
+                  fundingAttention={fundingAttention}
                 />
                 <Collapse
                   ghost

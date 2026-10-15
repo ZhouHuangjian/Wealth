@@ -1,11 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AppState, Conversation, Message } from '../shared/types.js';
+import { contactAutoMediaEnabled } from '../shared/contact-processing.js';
 import { queryWechat, type WechatQuery, type WechatRecord } from './wechat-cli.js';
+import { insightsInputDigest } from './contact-insights.js';
 
 interface StateStore { read(): AppState; update(fn: (state: AppState) => void): unknown }
 interface CollectorOptions {
   query?: WechatQuery; intervalMs?: number; now?: () => number;
   onMessages?: (conversationId: string, latestMessageId: string | null, live: boolean) => void;
+  onContextInvalidated?: (conversationId: string) => void;
 }
 const compareSeq = (a: string, b: string) => BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0;
 const fingerprint = (record: WechatRecord) => createHash('sha256').update(JSON.stringify([record.text, record.role, record.kind, record.sentAt])).digest('hex');
@@ -69,14 +72,18 @@ export class WechatCollector {
     })().finally(() => { this.tickPromise = null; });
     return this.tickPromise;
   }
-  poll(cid: string): Promise<{added: number; baseline: boolean}> {
+  poll(cid: string, externalSignal?:AbortSignal): Promise<{added: number; baseline: boolean}> {
+    externalSignal?.throwIfAborted();
     if (this.closed) return Promise.reject(new Error('微信采集服务已停止。'));
     const active = this.inflight.get(cid);
     if (active) return active.promise;
     const initial = this.store.read();
     const c = binding(initial, cid);
     const controller = new AbortController();
+    const abort=()=>controller.abort(externalSignal?.reason);
+    externalSignal?.addEventListener('abort',abort,{once:true});
     const promise = this.read(cid, c, initial, controller.signal).finally(() => {
+      externalSignal?.removeEventListener('abort',abort);
       if (this.inflight.get(cid)?.controller === controller) this.inflight.delete(cid);
     });
     this.inflight.set(cid, {controller, promise});
@@ -106,6 +113,7 @@ export class WechatCollector {
             const w = binding(state, cid).wechat!; w.enabled = false;
             w.status = 'error'; w.detail = '微信账号已变化，已停止采集；请核对账号后再读取，不能混入另一账号的消息。';
           });
+          this.options.onContextInvalidated?.(cid);
           throw new Error('微信账号已变化，采集已停止。');
         }
         account = page.accountFingerprint;
@@ -117,7 +125,7 @@ export class WechatCollector {
       if (signal.aborted || this.closed) throw new Error('采集已暂停。');
       const current = binding(this.store.read(), cid);
       if (current.externalId !== c.externalId || current.wechat!.enabled !== c.wechat!.enabled) throw new Error('采集设置已改变，请重新读取。');
-      let added = 0, changed = false, latestId: string | null = null, latestIsNew = false;
+      let added = 0, changed = false, sourceChanged = false, invalidatedInsights = false, latestId: string | null = null, latestIsNew = false;
       this.store.update(state => {
         const target = binding(state, cid), w = target.wechat!;
         const list = state.messages.filter(m => m.conversationId === cid);
@@ -135,21 +143,60 @@ export class WechatCollector {
             if(existing.externalId?.startsWith('seq:') && !record.id.startsWith('seq:')) {
               byId.delete(existing.externalId); existing.externalId = record.id; byId.set(record.id,existing);
             }
-            if (existing.sourceFingerprint !== hash) {
+            const imageChanged = existing.wechatImage?.md5 && record.wechatImage?.md5
+              && existing.wechatImage.md5 !== record.wechatImage.md5;
+            const emojiChanged=existing.wechatEmoji?.md5&&record.wechatEmoji?.md5&&existing.wechatEmoji.md5!==record.wechatEmoji.md5;
+            if (existing.sourceFingerprint !== hash || imageChanged || emojiChanged) {
               Object.assign(existing, {text:record.text,role:record.role,kind:record.kind,mediaStatus:record.mediaStatus,
-                sentAt:record.sentAt,sourceSequence:record.sortSeq,sourceFingerprint:hash});
-              changed = true;
+                sentAt:record.sentAt,sourceSequence:record.sortSeq,sourceFingerprint:hash,
+                wechatImage: record.wechatImage, imageRecognition: undefined, imageAttachment: undefined,
+                wechatEmoji:record.wechatEmoji,emojiRecognition:record.emojiRecognition,
+                audioRecognition: undefined, audioAttachment: undefined,
+                autoMediaEligible: false});
+              delete existing.insights;
+              changed = true; sourceChanged = true;
+            } else if (record.wechatImage) {
+              // Adding identifiers to a previously collected placeholder must not
+              // replace a reviewed/recognized summary or invalidate its drafts.
+              existing.wechatImage = {...existing.wechatImage, ...record.wechatImage};
             }
+            if(record.wechatEmoji)existing.wechatEmoji={...existing.wechatEmoji,...record.wechatEmoji};
+            if(record.emojiRecognition)existing.emojiRecognition=record.emojiRecognition;
             continue;
           }
           const message: Message = {id:randomUUID(),conversationId:cid,role:record.role,text:record.text,sentAt:record.sentAt,
             sequence:0,source:'wechat',externalId:record.id,aiAssisted:false,kind:record.kind,mediaStatus:record.mediaStatus,
-            sourceSequence:record.sortSeq,sourceFingerprint:hash};
+            sourceSequence:record.sortSeq,sourceFingerprint:hash,wechatImage:record.wechatImage,
+            wechatEmoji:record.wechatEmoji,emojiRecognition:record.emojiRecognition,
+            autoMediaEligible: !historyOnly && record.role === 'peer'
+              && (((record.kind === 'image'||record.kind==='emoji') && contactAutoMediaEnabled(target, 'image'))
+                || (record.kind === 'voice' && contactAutoMediaEnabled(target, 'voice')))};
           list.push(message); byId.set(record.id,message); newIds.add(message.id); added++; changed = true;
         }
-        list.sort((a,b) => compareSeq(a.sourceSequence ?? '0', b.sourceSequence ?? '0') || a.id.localeCompare(b.id));
+        // Uploaded context stays near its timestamp instead of moving ahead of
+        // all WeChat messages merely because it has no sourceSequence.
+        const manual = list.filter(m => m.source !== 'wechat');
+        const ordered = list.filter(m => m.source === 'wechat').sort((a,b) => compareSeq(a.sourceSequence ?? '0', b.sourceSequence ?? '0') || a.id.localeCompare(b.id));
+        for (const message of manual.sort((a,b) => a.sequence - b.sequence)) {
+          const at = message.sentAt ? Date.parse(message.sentAt) : NaN;
+          const index = Number.isFinite(at) ? ordered.findIndex(m => m.sentAt && Date.parse(m.sentAt) > at) : -1;
+          ordered.splice(index < 0 ? ordered.length : index, 0, message);
+        }
+        list.splice(0, list.length, ...ordered);
         list.forEach((m,index) => {m.sequence = index + 1;});
         state.messages = [...state.messages.filter(m => m.conversationId !== cid), ...list];
+        if (changed) {
+          // Newer messages must not erase valid analysis of an earlier utterance.
+          // Recheck only saved results in this binding against their scoped input.
+          for (const message of list) if (message.insights) {
+            let current = false;
+            try {
+              current = message.insights.conversationId === cid && message.insights.messageId === message.id
+                && !!message.insights.inputDigest && message.insights.inputDigest === insightsInputDigest(state, cid, message.id);
+            } catch { /* Disabled, missing or invalid model context cannot establish a current result. */ }
+            if (!current) {delete message.insights; invalidatedInsights = true;}
+          }
+        }
         w.cursor = high; w.accountFingerprint = account; w.initialized = true;
         w.lastCheckedAt = new Date(this.now()).toISOString(); w.status = w.enabled ? 'ready' : 'paused';
         w.detail = historyOnly ? `已读取上下文（新增 ${added} 条），本次不会触发自动草稿。`
@@ -160,6 +207,7 @@ export class WechatCollector {
         }
       });
       this.catchup.delete(cid); this.backoff.delete(cid);
+      if (sourceChanged || invalidatedInsights) this.options.onContextInvalidated?.(cid);
       if (changed) this.options.onMessages?.(cid,latestId,!historyOnly && latestIsNew);
       return {added,baseline};
     } catch (error) {

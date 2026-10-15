@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { AppState } from '../shared/types.js';
+import {messageEmojiRecognition} from '../shared/emoji.js';
 
 function initialState(): AppState {
   return {
@@ -77,6 +78,11 @@ export class Store {
     state.settings.syncDraftsEnabled ??= false;
     state.cloudDrafts ??= [];
     state.draftUploads ??= [];
+    for(const message of state.messages){
+      const parsed=messageEmojiRecognition(message);
+      if(parsed)message.emojiRecognition=parsed;
+      else delete message.emojiRecognition;
+    }
     return state;
   }
 

@@ -1,0 +1,12 @@
+{
+  "version": "2.14.1",
+  "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5",
+  "source_commit": "2abad9f8d26fb14607e51bcde42c016512c30770",
+  "source_manifest_sha256": "f200ba553470509ce051b5644d7cdde9f95f3c10626a1b6586b421099708a3e2",
+  "image_files_manifest_sha256": "79250fe2e5c7f5e345329b658adecf59c636e02a962002d257fcee2c1be20337",
+  "source_backend_files": 184,
+  "frontend_files": 23,
+  "parent_image": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf",
+  "verified_at": "2026-10-13T05:00:28.950355+00:00",
+  "status": "passed"
+}

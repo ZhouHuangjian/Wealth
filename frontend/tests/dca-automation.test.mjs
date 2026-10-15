@@ -8,8 +8,12 @@ import {
   dcaAutomationStatusLabel,
   dcaAutomationSummary,
   dcaPlanPayload,
+  dcaTopUpInitialDate,
+  dcaTopUpNotice,
+  dcaToday,
   eligibleDcaHolding,
   eligibleDcaInstrument,
+  eligibleDcaTopUp,
   validDcaDate,
 } from "../src/dca-automation.ts";
 
@@ -33,6 +37,46 @@ const form = {
   target_account_id: "holding-one",
   automatic_fee_mode: "unknown",
 };
+
+test("DCA top-up defaults use the workspace day across device timezones", () => {
+  const prior = process.env.TZ;
+  const instant = new Date("2026-10-13T16:30:00Z");
+  try {
+    for (const device of ["America/Los_Angeles", "UTC", "Asia/Tokyo"]) {
+      process.env.TZ = device;
+      const workspaceToday = dcaToday("Asia/Shanghai", instant);
+      assert.equal(workspaceToday, "2026-10-14");
+      const initial = dcaAutomationInitial(plan, workspaceToday);
+      assert.equal(initial.automatic_top_up_start_date, "2026-10-14");
+      assert.equal(dcaTopUpInitialDate(form, workspaceToday), "2026-10-14");
+      assert.ok(
+        "2026-10-13" < workspaceToday,
+        "yesterday must show the history warning",
+      );
+      assert.equal(dcaToday("America/Los_Angeles", instant), "2026-10-13");
+    }
+  } finally {
+    if (prior === undefined) delete process.env.TZ;
+    else process.env.TZ = prior;
+  }
+});
+
+test("DCA workspace dates handle year rollover, daylight saving and invalid metadata", () => {
+  assert.equal(
+    dcaToday("Asia/Shanghai", new Date("2026-12-31T16:30:00Z")),
+    "2027-01-01",
+  );
+  assert.equal(
+    dcaToday("America/New_York", new Date("2026-03-08T06:59:00Z")),
+    "2026-03-08",
+  );
+  assert.equal(
+    dcaToday("America/New_York", new Date("2026-03-08T07:01:00Z")),
+    "2026-03-08",
+  );
+  assert.throws(() => dcaToday(undefined), /空间时区/);
+  assert.throws(() => dcaToday("invalid-zone"), /空间时区/);
+});
 
 test("explicit untracked DCA and rate retain exact decimal settings", () => {
   const actual = dcaAutomationConfiguration({
@@ -449,4 +493,143 @@ test("human statuses distinguish automatic estimates, existing facts and missing
   );
   assert.match(dcaAutomationNotice, /不向银行或基金平台发起扣款/);
   assert.match(dcaAutomationNotice, /自动推算标记/);
+});
+
+test("existing and new plans never select a top-up source without an explicit choice", () => {
+  for (const options of [{}, { newPlan: true }]) {
+    const initial = dcaAutomationInitial(plan, "2026-10-13", options);
+    assert.equal(initial.automatic_top_up_account_id, undefined);
+    assert.equal(initial.automatic_top_up_start_date, "2026-10-13");
+    const payload = dcaPlanPayload({ ...form, ...initial });
+    assert.ok(!payload.automation.top_up_account_id);
+  }
+  assert.equal(
+    dcaTopUpInitialDate(
+      { start_date: "2026-10-14", automatic_start_date: "2026-10-15" },
+      "2026-10-13",
+    ),
+    "2026-10-15",
+  );
+  const delayed = dcaAutomationInitial(
+    { ...plan, automation: { enabled: true, start_date: "2026-10-20" } },
+    "2026-10-13",
+  );
+  assert.equal(delayed.automatic_top_up_start_date, "2026-10-20");
+});
+
+test("explicit top-up keeps its effective date across reopen and allows deliberate unpaid historical scope", () => {
+  const automation = {
+    ...dcaAutomationConfiguration(form),
+    top_up_account_id: "chosen-wallet",
+    top_up_start_date: "2026-10-08",
+  };
+  const saved = { ...plan, automation };
+  const initial = dcaAutomationInitial(saved, "2026-10-13");
+  assert.equal(initial.automatic_top_up_account_id, "chosen-wallet");
+  assert.equal(initial.automatic_top_up_start_date, "2026-10-08");
+  const payload = dcaPlanPayload({ ...saved, ...initial }, saved);
+  assert.deepEqual(payload.automation, automation);
+  assert.equal(payload.account_id, "bank-one");
+  assert.equal(payload.version, plan.version);
+  assert.equal(saved.automation.top_up_start_date, "2026-10-08");
+  assert.match(dcaTopUpNotice, /不足部分/);
+  assert.match(dcaTopUpNotice, /不向银行发起扣款/);
+  assert.match(dcaTopUpNotice, /不会自动赎回货币基金/);
+});
+
+test("top-up requires a distinct account and an explicit valid date within automation scope", () => {
+  const explicit = {
+    ...form,
+    automatic_top_up_account_id: "chosen-wallet",
+    automatic_top_up_start_date: "2026-10-13",
+  };
+  for (const change of [
+    { automatic_top_up_account_id: "bank-one" },
+    { automatic_top_up_account_id: true },
+    { automatic_top_up_account_id: " " },
+    { automatic_top_up_start_date: undefined },
+    { automatic_top_up_start_date: "2026-02-30" },
+    { automatic_top_up_start_date: "2026-09-27" },
+  ])
+    assert.throws(() => dcaAutomationConfiguration({ ...explicit, ...change }));
+  assert.equal(
+    dcaAutomationConfiguration(explicit).top_up_account_id,
+    "chosen-wallet",
+  );
+});
+
+test("clearing top-up or choosing untracked funds explicitly removes both settings", () => {
+  const previous = {
+    ...dcaAutomationConfiguration(form),
+    top_up_account_id: "chosen-wallet",
+    top_up_start_date: "2026-10-13",
+  };
+  for (const change of [
+    { automatic_top_up_account_id: null },
+    {
+      automatic_funding_source: "untracked",
+      automatic_top_up_account_id: "chosen-wallet",
+      automatic_top_up_start_date: "invalid-hidden-value",
+    },
+  ]) {
+    const actual = dcaAutomationConfiguration({ ...form, ...change }, previous);
+    assert.equal(actual.top_up_account_id, null);
+    assert.equal(actual.top_up_start_date, null);
+  }
+});
+
+test("turning automation off preserves saved top-up without validating hidden edits or enabling it", () => {
+  const previous = {
+    ...dcaAutomationConfiguration(form),
+    top_up_account_id: "chosen-wallet",
+    top_up_start_date: "2026-10-13",
+  };
+  assert.deepEqual(
+    dcaAutomationConfiguration(
+      {
+        ...form,
+        automatic_enabled: false,
+        automatic_top_up_account_id: "bank-one",
+        automatic_top_up_start_date: "invalid-hidden-value",
+      },
+      previous,
+    ),
+    { ...previous, enabled: false },
+  );
+});
+
+test("top-up choices only include distinct same-currency account cash in the current space", () => {
+  const account = {
+    id: "selected-source",
+    tenant_id: "space-one",
+    kind: "bank",
+    currency: "CNY",
+    valuation_mode: "detailed",
+    balance: "0",
+  };
+  for (const kind of ["bank", "cash", "wallet", "fund", "broker", "securities"])
+    assert.equal(
+      eligibleDcaTopUp({ ...account, kind }, "CNY", "debit", "space-one"),
+      true,
+    );
+  for (const change of [
+    { id: "debit" },
+    { id: undefined },
+    { tenant_id: "another-space" },
+    { currency: "USD" },
+    { archived: true },
+    { deleted_at: "2026-10-13" },
+    { valuation_mode: "snapshot" },
+    { valuation_mode: undefined },
+    { kind: "future" },
+    { kind: "loan" },
+    { kind: "money_market" },
+  ])
+    assert.equal(
+      eligibleDcaTopUp({ ...account, ...change }, "CNY", "debit", "space-one"),
+      false,
+    );
+  // Empty current balance does not block configuring a future plan: the server
+  // checks cash at the actual installment date before any transfer is written.
+  assert.equal(eligibleDcaTopUp(account, "CNY", "debit", "space-one"), true);
 });

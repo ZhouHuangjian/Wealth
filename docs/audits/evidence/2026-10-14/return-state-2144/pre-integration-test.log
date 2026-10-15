@@ -1,0 +1,71 @@
+Operations to perform:
+  Apply all migrations: auth, contenttypes, sessions, wealth
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0001_initial... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying sessions.0001_initial... OK
+  Applying wealth.0001_initial... OK
+  Applying wealth.0002_tenant_and_ledger_guards... OK
+  Applying wealth.0003_close_posted_facts... OK
+  Applying wealth.0004_transaction_epoch... OK
+  Applying wealth.0005_outbox_lease... OK
+  Applying wealth.0006_immutable_audit_history... OK
+  Applying wealth.0007_market_symbol... OK
+  Applying wealth.0008_platform_controls... OK
+  Applying wealth.0009_workspace_management_templates... OK
+  Applying wealth.0010_independent_administration... OK
+  Applying wealth.0011_scoped_business_erasure... OK
+  Applying wealth.0012_workspace_admin_access... OK
+  Applying wealth.0013_chat_assistant... OK
+  Applying wealth.0014_chat_device_credentials... OK
+  Applying wealth.0015_chat_remote_controls... OK
+FF..FF..F                                                                [100%]
+=================================== FAILURES ===================================
+___ test_domestic_holiday_and_weekend_are_closed_on_home_and_calendar[when0] ___
+tests/test_closed_returns_v2144.py:38: in test_domestic_holiday_and_weekend_are_closed_on_home_and_calendar
+    assert result["status"] == "market_closed"
+E   AssertionError: assert 'unavailable' == 'market_closed'
+E     
+E     - market_closed
+E     + unavailable
+___ test_domestic_holiday_and_weekend_are_closed_on_home_and_calendar[when1] ___
+tests/test_closed_returns_v2144.py:38: in test_domestic_holiday_and_weekend_are_closed_on_home_and_calendar
+    assert result["status"] == "market_closed"
+E   AssertionError: assert 'unavailable' == 'market_closed'
+E     
+E     - market_closed
+E     + unavailable
+______ test_mixed_market_closure_does_not_hide_missing_open_market_quote _______
+tests/test_closed_returns_v2144.py:81: in test_mixed_market_closure_does_not_hide_missing_open_market_quote
+    assert result["missing_count"] == result["market_closed_count"] == 1
+E   assert 2 == 0
+_________ test_known_return_with_closed_market_is_disclosed_as_partial _________
+tests/test_closed_returns_v2144.py:96: in test_known_return_with_closed_market_is_disclosed_as_partial
+    assert result["missing_count"] == 0
+E   assert 1 == 0
+________ test_current_holiday_reference_is_not_used_as_formal_earnings _________
+tests/test_closed_returns_v2144.py:126: in test_current_holiday_reference_is_not_used_as_formal_earnings
+    assert home["status"] == "market_closed"
+E   AssertionError: assert 'unavailable' == 'market_closed'
+E     
+E     - market_closed
+E     + unavailable
+=========================== short test summary info ============================
+FAILED tests/test_closed_returns_v2144.py::test_domestic_holiday_and_weekend_are_closed_on_home_and_calendar[when0]
+FAILED tests/test_closed_returns_v2144.py::test_domestic_holiday_and_weekend_are_closed_on_home_and_calendar[when1]
+FAILED tests/test_closed_returns_v2144.py::test_mixed_market_closure_does_not_hide_missing_open_market_quote
+FAILED tests/test_closed_returns_v2144.py::test_known_return_with_closed_market_is_disclosed_as_partial
+FAILED tests/test_closed_returns_v2144.py::test_current_holiday_reference_is_not_used_as_formal_earnings
+5 failed, 4 passed in 0.74s

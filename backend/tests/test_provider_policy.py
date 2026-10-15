@@ -41,7 +41,7 @@ def fixtures(name="index_fallback_responses.json"):
         {"url": "https://127.0.0.1"},
         {"enabled": {"custom": True}},
         {"schema_version": True},
-        {"schema_version": 4},
+        {"schema_version": 5},
         {"enabled": {"yahoo": "false"}},
         {"priority": {"fund": ["yahoo"]}},
         {"priority": {"stock": ["yahoo", "yahoo"]}},
@@ -66,6 +66,7 @@ def test_defaults_are_independent_and_capabilities_are_honest():
         "eastmoney_fund",
         *policy._NEW_PUBLIC_FUND,
         "akshare",
+        "sina",
     ]
     assert policy.provider_chain({}, "option") == ["sina", "akshare"]
     assert "yahoo" not in policy.provider_chain({}, "gold")

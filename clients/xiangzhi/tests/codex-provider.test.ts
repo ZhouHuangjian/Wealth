@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { codexCompletion, inspectCodex } from '../server/codex-provider.js';
+import { codexCompletion, codexImageCompletion, codexStructuredCompletion, inspectCodex } from '../server/codex-provider.js';
 import type { Settings } from '../shared/types.js';
 
 const settings: Settings = {
@@ -15,6 +15,8 @@ const settings: Settings = {
 };
 const synthetic = [{role: 'system', content: '只生成三条候选回复。'}, {role: 'user', content: '虚构测试上下文：今天想吃面。'}];
 const reply = JSON.stringify({replies: Array.from({length: 3}, (_, i) => ({text: `测试回复 ${i}`, label: '简短', reason: '合成测试'}))});
+const imageReply = JSON.stringify({summary: '一个红色圆形', visibleText: '测试', facts: ['背景为白色']});
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+l8lsAAAAASUVORK5CYII=', 'base64');
 
 async function withFake(action: (fake: {
   directory: string; capture: () => Promise<Record<string, any>>; configure: (mode: string) => Promise<void>;
@@ -27,7 +29,7 @@ async function withFake(action: (fake: {
   const capturePath = join(directory, 'capture.json');
   await writeFile(join(directory, 'scenario.json'), JSON.stringify({mode: 'success'}));
   await writeFile(executable, `#!${process.execPath}
-import {readFileSync,writeFileSync,readdirSync,statSync} from 'node:fs';
+import {readFileSync,writeFileSync,readdirSync,statSync,realpathSync,existsSync} from 'node:fs';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
@@ -35,10 +37,12 @@ const directory=dirname(fileURLToPath(import.meta.url));
 const mode=JSON.parse(readFileSync(join(directory,'scenario.json'),'utf8')).mode;
 let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>input+=chunk);
 process.stdin.on('end',()=>{
- const args=process.argv.slice(2), schemaIndex=args.indexOf('--output-schema');
- const capture={args,input,cwd:process.cwd(),pid:process.pid,env:process.env,
+ const args=process.argv.slice(2), schemaIndex=args.indexOf('--output-schema'), imageIndex=args.indexOf('--image');
+ const previousCapture=existsSync(join(directory,'capture.json'))?JSON.parse(readFileSync(join(directory,'capture.json'),'utf8')):null;
+ const capture={args,input,cwd:process.cwd(),pid:process.pid,env:process.env,runs:(previousCapture?.runs??0)+1,
    files:readdirSync(process.cwd()),directoryMode:statSync(process.cwd()).mode & 0o777,
-   schema:schemaIndex<0?null:JSON.parse(readFileSync(args[schemaIndex+1],'utf8'))};
+   schema:schemaIndex<0?null:JSON.parse(readFileSync(args[schemaIndex+1],'utf8')),
+   image:imageIndex<0?null:{path:realpathSync(args[imageIndex+1]),mode:statSync(args[imageIndex+1]).mode&0o777,bytes:readFileSync(args[imageIndex+1]).toString('base64')}};
  if(mode.startsWith('descendant-')){
    const child=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setInterval(()=>{},100)"],{stdio:'ignore'});
    capture.childPid=child.pid;child.unref();
@@ -65,7 +69,7 @@ process.stdin.on('end',()=>{
  if(mode==='failure'){event({type:'turn.failed',error:{message:'PRIVATE-PROMPT APPLICATION-SECRET'}});return;}
  event({type:'item.completed',item:{id:'reason',type:'reasoning',text:'PRIVATE-REASONING'}});
  event({type:'item.completed',item:{id:'old',type:'agent_message',text:'earlier commentary'}});
- event({type:'item.completed',item:{id:'final',type:'agent_message',text:${JSON.stringify(reply)}}});
+ event({type:'item.completed',item:{id:'final',type:'agent_message',text:imageIndex>=0?${JSON.stringify(imageReply)}:${JSON.stringify(reply)}}});
  if(mode==='incomplete')return;
  event({type:'turn.completed',usage:{input_tokens:1,output_tokens:1}});
  if(mode==='extra')event({type:'turn.started'});
@@ -192,9 +196,15 @@ test('Codex cancellation terminates a process that ignores SIGTERM and removes t
 
 test('Codex enforces bounded timeout and never retries the child', async () => {
   await withFake(async fake => {
-    await fake.configure('hang'); process.env.XIANZHI_CODEX_TIMEOUT_MS = '1000';
+    // Allow the fake Node process to start while the full suite has many workers;
+    // still exercise forced timeout termination instead of relying on startup speed.
+    await fake.configure('hang'); process.env.XIANZHI_CODEX_TIMEOUT_MS = '2000';
+    const started = Date.now();
     await assert.rejects(codexCompletion(settings, synthetic), /超时.*没有自动重试/);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed >= 1900 && elapsed < 6000, `timeout must remain bounded (${elapsed} ms)`);
     const capture = await fake.capture();
+    assert.equal(capture.runs, 1, 'the timed-out child must not be retried');
     assert.throws(() => process.kill(capture.pid, 0));
     assert.equal(existsSync(capture.cwd), false);
   });
@@ -232,5 +242,40 @@ test('Codex missing executable yields a safe unavailable status and safe generat
     await assert.rejects(codexCompletion(settings, synthetic), /无法启动 Codex/);
     process.env.XIANZHI_CODEX_BIN = 'relative-path';
     await assert.rejects(codexCompletion(settings, synthetic), /绝对路径/);
+  });
+});
+
+test('Codex image input uses a fixed private attachment and image schema while all tools remain disabled', async () => {
+  await withFake(async fake => {
+    const result = await codexImageCompletion({...settings, modelName: 'vision-test-model'}, synthetic, {bytes: png, mimeType: 'image/png'});
+    assert.equal(result, imageReply);
+    const capture = await fake.capture();
+    assert.deepEqual(capture.schema.required, ['summary', 'visibleText', 'facts']);
+    assert.equal(capture.schema.additionalProperties, false);
+    assert.equal(capture.schema.properties.replies, undefined);
+    assert.equal(capture.image.mode, 0o600); assert.equal(capture.image.bytes, png.toString('base64'));
+    assert.equal(capture.image.path, join(capture.cwd, 'input.png'));
+    assert.deepEqual(capture.files, ['image.schema.json', 'input.png']);
+    const imageTool = capture.args.indexOf('view_image'); assert.equal(capture.args[imageTool - 1], '--disable');
+    assert.equal(capture.args[capture.args.indexOf('--model') + 1], 'vision-test-model');
+    assert.doesNotMatch(capture.input, /APPLICATION-SECRET|input\.png/);
+    assert.equal(existsSync(capture.cwd), false);
+    await fake.configure('failure');
+    await assert.rejects(codexImageCompletion(settings, synthetic, {bytes: png, mimeType: 'image/png'}), /未能完成/);
+    assert.equal(existsSync((await fake.capture()).cwd), false);
+    await assert.rejects(codexImageCompletion(settings, synthetic, {bytes: Buffer.alloc(5 * 1024 * 1024 + 1), mimeType: 'image/png'}), /5 MB/);
+  });
+});
+
+test('Codex feature JSON uses the supplied server schema with the same isolated capability restrictions', async () => {
+  await withFake(async fake => {
+    const schema = {type: 'object', additionalProperties: false, required: ['summary'], properties: {summary: {type: 'string'}}};
+    await codexStructuredCompletion({...settings, modelName: 'analysis-test'}, synthetic, schema);
+    const capture = await fake.capture();
+    assert.deepEqual(capture.schema, schema); assert.deepEqual(capture.files, ['structured.schema.json']);
+    assert.equal(capture.args[capture.args.indexOf('--model') + 1], 'analysis-test');
+    assert.equal(capture.args[capture.args.indexOf('shell_tool') - 1], '--disable');
+    assert.doesNotMatch(capture.input, /APPLICATION-SECRET/);
+    assert.equal(existsSync(capture.cwd), false);
   });
 });

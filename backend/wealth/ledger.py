@@ -797,14 +797,17 @@ def reverse_event(space, user, event, reason):
             event__reverses__isnull=True,
         ).exists():
             raise DomainError("已有后续持仓变动，请按逆序处理依赖", "dependency", 409)
-    if event.kind == "transfer" and event.payload.get("holding_funding_transfer"):
+    if event.kind == "transfer" and (
+        event.payload.get("holding_funding_transfer")
+        or event.payload.get("dca_top_up_transfer")
+    ):
         from .institution_funding import available_funding_cash
 
         target = get_obj(Account, space, event.payload.get("target_account_id"))
         amount = dec(event.payload["amount"], nonnegative=True)
         if available_funding_cash(space, target, event.economic_date) < amount:
             raise DomainError(
-                "机构补入资金已有后续使用或冻结，请先处理后续记录后再撤销补资",
+                "补入资金已有后续使用或冻结，请先处理后续记录后再撤销补资",
                 "funding_reversal_dependency",
                 409,
             )

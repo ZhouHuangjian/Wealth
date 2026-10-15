@@ -1,0 +1,51 @@
+{
+  "scope": "2.14.1 release",
+  "application_commit": "2abad9f8d26fb14607e51bcde42c016512c30770",
+  "commands": [
+    {
+      "environment": "local isolated PostgreSQL :55443 runtime role",
+      "command": "/Volumes/mi/Wealth/.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 test",
+      "result": "stage: 1676 passed + 12 subtests before final metadata additions"
+    },
+    {
+      "environment": "local frontend",
+      "command": "node --experimental-strip-types --test tests/*.test.mjs; tsc -b --pretty false; vite build; prettier --check src tests vite.config.ts",
+      "result": "196 passed; type/build/format pass"
+    },
+    {
+      "environment": "frozen git archive frontend",
+      "command": "tsc -b --pretty false; vite build",
+      "result": "passed; source and asset hash receipts verified"
+    },
+    {
+      "environment": "Ubuntu candidate image; fixed isolated wealth_estimate_v2141_test",
+      "command": "python3 server_acceptance.py --execute --full-regression",
+      "result": "1679 passed + 12 subtests, 0 skipped, 521.83 seconds"
+    },
+    {
+      "environment": "local release guard mocks",
+      "command": "python -m unittest discover -s .runtime/estimate-repair-release -p test_release_guards.py",
+      "result": "8 passed; output contains simulated deployment states, not actual production proof"
+    },
+    {
+      "environment": "production cutover",
+      "command": "python3 cutover.py prepare; verify_local_backup.py --backup <downloaded encrypted backup>; python3 cutover.py apply",
+      "result": "see cutover/final-results proof"
+    }
+  ],
+  "corrected_attempts": [
+    "Default local Python did not support tar extraction filter; archive source directory was empty. Reran packaging with verified Python 3.12.",
+    "Initial server acceptance command omitted required --execute; argument parser exited before any DB action. Reran exact authorized isolated acceptance command.",
+    "SFTP download with quoted brace group could not find that literal filename. Retried explicit shell-expanded file arguments.",
+    "Local backup verifier was invoked before SCP completed and rejected partial bytes. Waited for completed transfer, then same verifier passed before any apply.",
+    "Local UI rebuild invalidated an old chunk; reloaded isolated web and browser, then verified final assets.",
+    "Python local CA bundle did not validate public TLS. Used system curl with normal certificate validation, no verification bypass; all 23 resources matched frozen image."
+  ],
+  "not_run": [
+    "production restore drill",
+    "production browser login or real transaction",
+    "manual production quote refresh",
+    "all live market adapter network checks",
+    "EST-003 late-session policy change"
+  ]
+}

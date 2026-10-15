@@ -75,6 +75,72 @@ export function marketTime(value: unknown, absent = "来源未提供") {
       });
 }
 
+/** The formal NAV's healthy state does not establish a usable intraday estimate. */
+export function estimatePresentation(row: Record<string, any>) {
+  const estimate = row.estimate;
+  if (!estimate || (estimate.price == null && estimate.value == null))
+    return {
+      label: "暂无盘中估值",
+      message: estimate?.message || "当前来源未提供盘中估值。",
+      warning: true,
+    };
+  if (["delayed", "stale", "previous_session"].includes(estimate.data_state))
+    return {
+      label: "历史 / 延迟报价",
+      message: "仅供查看该时刻的行情，不能据此认定当前今日收益可计算。",
+      warning: true,
+    };
+  if (estimate.status !== "ok" || !estimate.published_at)
+    return {
+      label: "估值依据待核实",
+      message: estimate.message || "报价时间或状态尚不完整。",
+      warning: true,
+    };
+  return {
+    label: "盘中参考",
+    message: "今日收益还需匹配适用份额、日期及收益基准。",
+    warning: false,
+  };
+}
+
+/** A provider reference is independently dated and never an accounting quote. */
+export function referenceEstimatePresentation(row: Record<string, any>) {
+  const reference = row.reference_estimate;
+  if (
+    !reference ||
+    reference.kind !== "reference_estimate" ||
+    reference.status !== "reference_only" ||
+    reference.code !== row.code ||
+    reference.currency !== row.currency ||
+    reference.economic_date != null ||
+    reference.usable_for_accounting !== false ||
+    reference.usable_for_daily_return !== false ||
+    typeof reference.price !== "string" ||
+    !/^\d+(?:\.\d+)?$/.test(reference.price) ||
+    !/[1-9]/.test(reference.price)
+  )
+    return null;
+  return {
+    price: reference.price,
+    currency: reference.currency,
+    source: sourcePresentation(reference).label,
+    label: ["delayed", "stale", "previous_session"].includes(
+      reference.data_state,
+    )
+      ? "来源参考 · 历史 / 延迟"
+      : "来源参考",
+    publishedAt: reference.published_at || null,
+    fetchedAt: reference.fetched_at || null,
+    baseNav: reference.base_nav ?? null,
+    baseNavDate: reference.base_nav_date || null,
+    changePercent: reference.source_change_percent ?? null,
+    windowStart: reference.observation_window_start || null,
+    windowEnd: reference.observation_window_end || null,
+    message:
+      "收益归属日与完整持仓覆盖尚未核实；这条参考报价不直接计入今日收益或资产估价。",
+  };
+}
+
 export function providerLabel(provider?: string) {
   return (
     (

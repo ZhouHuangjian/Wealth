@@ -13,6 +13,7 @@ export type Space = {
   name: string;
   role: string;
   base_currency: string;
+  timezone: string;
   administration?: boolean;
   membership_role?: string | null;
   admin_access_enabled?: boolean;

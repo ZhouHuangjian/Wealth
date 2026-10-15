@@ -1,0 +1,1298 @@
+
+> wealth-workspace@0.1.0 test
+> node --experimental-strip-types --test tests/*.test.mjs
+
+TAP version 13
+# Subtest: institution amount uses its actual equity baseline date
+ok 1 - institution amount uses its actual equity baseline date
+  ---
+  duration_ms: 0.711625
+  type: 'test'
+  ...
+# Subtest: an explicit zero remains a known amount; missing equity stays distinct
+ok 2 - an explicit zero remains a known amount; missing equity stays distinct
+  ---
+  duration_ms: 0.063833
+  type: 'test'
+  ...
+# Subtest: partial cash evidence is not labelled total equity
+ok 3 - partial cash evidence is not labelled total equity
+  ---
+  duration_ms: 0.047958
+  type: 'test'
+  ...
+# Subtest: ledger caption keeps its book amount and never embeds private amounts
+ok 4 - ledger caption keeps its book amount and never embeds private amounts
+  ---
+  duration_ms: 0.071833
+  type: 'test'
+  ...
+# Subtest: opening correction uses fetched versions and sends only the new date and reason, never a replacement balance
+ok 5 - opening correction uses fetched versions and sends only the new date and reason, never a replacement balance
+  ---
+  duration_ms: 4.788583
+  type: 'test'
+  ...
+# Subtest: missing original opening metadata cannot silently fall back to today's date
+ok 6 - missing original opening metadata cannot silently fall back to today's date
+  ---
+  duration_ms: 0.4995
+  type: 'test'
+  ...
+# Subtest: opening correction rejects impossible dates, dependency limits and missing reasons
+ok 7 - opening correction rejects impossible dates, dependency limits and missing reasons
+  ---
+  duration_ms: 0.457375
+  type: 'test'
+  ...
+# Subtest: delete and restore use independent current previews and refuse blocked or incomplete lifecycle records
+ok 8 - delete and restore use independent current previews and refuse blocked or incomplete lifecycle records
+  ---
+  duration_ms: 0.282916
+  type: 'test'
+  ...
+# Subtest: deletion blockers hide UUIDs and internal kinds, deduplicate names, and cap them at three
+ok 9 - deletion blockers hide UUIDs and internal kinds, deduplicate names, and cap them at three
+  ---
+  duration_ms: 0.848
+  type: 'test'
+  ...
+# Subtest: identifier-only blockers stay short and readable, using the server count rather than truncated item counts
+ok 10 - identifier-only blockers stay short and readable, using the server count rather than truncated item counts
+  ---
+  duration_ms: 0.213959
+  type: 'test'
+  ...
+# Subtest: administrator delegation fails closed even when workspace metadata is readable
+ok 11 - administrator delegation fails closed even when workspace metadata is readable
+  ---
+  duration_ms: 0.694834
+  type: 'test'
+  ...
+# Subtest: only an ordinary owner with fresh server permission can set consent, including explicit revocation
+ok 12 - only an ordinary owner with fresh server permission can set consent, including explicit revocation
+  ---
+  duration_ms: 0.94475
+  type: 'test'
+  ...
+# Subtest: 403 eviction is scoped to this exact workspace rather than another book or platform operations
+ok 13 - 403 eviction is scoped to this exact workspace rather than another book or platform operations
+  ---
+  duration_ms: 0.082459
+  type: 'test'
+  ...
+# Subtest: API failure observer immediately receives denial metadata without financial content and can unsubscribe
+ok 14 - API failure observer immediately receives denial metadata without financial content and can unsubscribe
+  ---
+  duration_ms: 29.045417
+  type: 'test'
+  ...
+# Subtest: a failing observer never replaces the actionable original API error
+ok 15 - a failing observer never replaces the actionable original API error
+  ---
+  duration_ms: 0.330709
+  type: 'test'
+  ...
+# Subtest: administrator sees unfamiliar entered fields without exposing system identity
+ok 16 - administrator sees unfamiliar entered fields without exposing system identity
+  ---
+  duration_ms: 1.325291
+  type: 'test'
+  ...
+# Subtest: holding evidence numbers remain exact numeric inputs
+ok 17 - holding evidence numbers remain exact numeric inputs
+  ---
+  duration_ms: 0.06775
+  type: 'test'
+  ...
+# Subtest: AKShare shows the query channel and the original data source separately
+ok 18 - AKShare shows the query channel and the original data source separately
+  ---
+  duration_ms: 1.375416
+  type: 'test'
+  ...
+# Subtest: direct sources do not repeat their label and legacy data has no inferred publisher
+ok 19 - direct sources do not repeat their label and legacy data has no inferred publisher
+  ---
+  duration_ms: 0.074125
+  type: 'test'
+  ...
+# Subtest: source group metadata explains AKShare without treating interface names as publishers
+ok 20 - source group metadata explains AKShare without treating interface names as publishers
+  ---
+  duration_ms: 0.056917
+  type: 'test'
+  ...
+# Subtest: multiple channels from one origin stay labelled as a single source
+ok 21 - multiple channels from one origin stay labelled as a single source
+  ---
+  duration_ms: 0.140708
+  type: 'test'
+  ...
+# Subtest: an old observation cannot make latest single-source data appear cross-checked
+ok 22 - an old observation cannot make latest single-source data appear cross-checked
+  ---
+  duration_ms: 0.107167
+  type: 'test'
+  ...
+# Subtest: quarantined observations and failed attempts retain their source metadata
+ok 23 - quarantined observations and failed attempts retain their source metadata
+  ---
+  duration_ms: 0.152208
+  type: 'test'
+  ...
+# Subtest: unknown night-session natural date keeps source clock separate from publication and fetch time
+ok 24 - unknown night-session natural date keeps source clock separate from publication and fetch time
+  ---
+  duration_ms: 0.124208
+  type: 'test'
+  ...
+# Subtest: return gaps locate that product's market evidence rather than another holding
+ok 25 - return gaps locate that product's market evidence rather than another holding
+  ---
+  duration_ms: 1.190917
+  type: 'test'
+  ...
+# Subtest: FX and product calendar gaps open their own correction destinations
+ok 26 - FX and product calendar gaps open their own correction destinations
+  ---
+  duration_ms: 0.315084
+  type: 'test'
+  ...
+# Subtest: late NAV and confirmation keep automatic waiting without a manual task
+ok 27 - late NAV and confirmation keep automatic waiting without a manual task
+  ---
+  duration_ms: 0.130292
+  type: 'test'
+  ...
+# Subtest: cash shortage opens the exact plan funding setting while retaining debit reconciliation
+ok 28 - cash shortage opens the exact plan funding setting while retaining debit reconciliation
+  ---
+  duration_ms: 0.190916
+  type: 'test'
+  ...
+# Subtest: homepage shortage projection navigates without selecting or enabling funding
+ok 29 - homepage shortage projection navigates without selecting or enabling funding
+  ---
+  duration_ms: 0.859958
+  type: 'test'
+  ...
+# Subtest: an invalid backup account opens its plan settings instead of nonexistent transactions
+ok 30 - an invalid backup account opens its plan settings instead of nonexistent transactions
+  ---
+  duration_ms: 0.199125
+  type: 'test'
+  ...
+# Subtest: fee and missing automation configuration open the precise plan
+ok 31 - fee and missing automation configuration open the precise plan
+  ---
+  duration_ms: 0.138667
+  type: 'test'
+  ...
+# Subtest: a retained NAV conflict routes to that product's quality evidence
+ok 32 - a retained NAV conflict routes to that product's quality evidence
+  ---
+  duration_ms: 0.094917
+  type: 'test'
+  ...
+# Subtest: a paid period on an unverified open day points to product rules
+ok 33 - a paid period on an unverified open day points to product rules
+  ---
+  duration_ms: 0.278917
+  type: 'test'
+  ...
+# Subtest: same-day debit ambiguity opens matching, never adds another debit
+ok 34 - same-day debit ambiguity opens matching, never adds another debit
+  ---
+  duration_ms: 0.3275
+  type: 'test'
+  ...
+# Subtest: share differences preserve the holding account in actual bill checking
+ok 35 - share differences preserve the holding account in actual bill checking
+  ---
+  duration_ms: 0.126167
+  type: 'test'
+  ...
+# Subtest: reversed or changed old facts point to the original event
+ok 36 - reversed or changed old facts point to the original event
+  ---
+  duration_ms: 0.056292
+  type: 'test'
+  ...
+# Subtest: holding checking retains both identities and does not select another holding
+ok 37 - holding checking retains both identities and does not select another holding
+  ---
+  duration_ms: 0.098875
+  type: 'test'
+  ...
+# Subtest: a daily-return reconciliation payload locates the original holding without holdings-only eligibility
+ok 38 - a daily-return reconciliation payload locates the original holding without holdings-only eligibility
+  ---
+  duration_ms: 0.09975
+  type: 'test'
+  ...
+# Subtest: holding without an eligible opening asks for actual transaction evidence
+ok 39 - holding without an eligible opening asks for actual transaction evidence
+  ---
+  duration_ms: 0.049541
+  type: 'test'
+  ...
+# Subtest: links encode identities and contain no amounts or statement contents
+ok 40 - links encode identities and contain no amounts or statement contents
+  ---
+  duration_ms: 0.058125
+  type: 'test'
+  ...
+# Subtest: adding a device immediately replaces the repeat-binding prompt with the connection step
+ok 41 - adding a device immediately replaces the repeat-binding prompt with the connection step
+  ---
+  duration_ms: 0.707459
+  type: 'test'
+  ...
+# Subtest: validated devices wait for drafts without claiming they are currently online
+ok 42 - validated devices wait for drafts without claiming they are currently online
+  ---
+  duration_ms: 0.078042
+  type: 'test'
+  ...
+# Subtest: revoked devices never count as connected or expose configuration actions
+ok 43 - revoked devices never count as connected or expose configuration actions
+  ---
+  duration_ms: 0.122541
+  type: 'test'
+  ...
+# Subtest: new configurations can be retrieved while legacy devices require an explicit rotation
+ok 44 - new configurations can be retrieved while legacy devices require an explicit rotation
+  ---
+  duration_ms: 0.049083
+  type: 'test'
+  ...
+# Subtest: delayed device reads cannot undo creation, rotation, or revocation
+ok 45 - delayed device reads cannot undo creation, rotation, or revocation
+  ---
+  duration_ms: 0.608542
+  type: 'test'
+  ...
+# Subtest: remote availability relies on heartbeat and opt-in, not historic device verification
+ok 46 - remote availability relies on heartbeat and opt-in, not historic device verification
+  ---
+  duration_ms: 1.773375
+  type: 'test'
+  ...
+# Subtest: only edited allowlisted fields are submitted, never credentials or model URLs
+ok 47 - only edited allowlisted fields are submitted, never credentials or model URLs
+  ---
+  duration_ms: 0.743667
+  type: 'test'
+  ...
+# Subtest: account and device changes reject stale private responses
+ok 48 - account and device changes reject stale private responses
+  ---
+  duration_ms: 0.117667
+  type: 'test'
+  ...
+# Subtest: queued and received commands are not presented as completed operations
+ok 49 - queued and received commands are not presented as completed operations
+  ---
+  duration_ms: 0.065709
+  type: 'test'
+  ...
+# Subtest: all eight three-coin outcomes follow the stated 3/2 convention
+ok 50 - all eight three-coin outcomes follow the stated 3/2 convention
+  ---
+  duration_ms: 1.624917
+  type: 'test'
+  ...
+# Subtest: yin, yang and moving lines are independent
+ok 51 - yin, yang and moving lines are independent
+  ---
+  duration_ms: 0.070834
+  type: 'test'
+  ...
+# Subtest: 64 names map to every unique six-line pattern in canonical order
+ok 52 - 64 names map to every unique six-line pattern in canonical order
+  ---
+  duration_ms: 0.591292
+  type: 'test'
+  ...
+# Subtest: lower trigram starts at the first toss, including common reproduction errors
+ok 53 - lower trigram starts at the first toss, including common reproduction errors
+  ---
+  duration_ms: 0.167
+  type: 'test'
+  ...
+# Subtest: six stable yang and yin lines have no invented changed hexagram
+ok 54 - six stable yang and yin lines have no invented changed hexagram
+  ---
+  duration_ms: 0.057042
+  type: 'test'
+  ...
+# Subtest: only moving lines flip, preserving the bottom-to-top positions
+ok 55 - only moving lines flip, preserving the bottom-to-top positions
+  ---
+  duration_ms: 0.076166
+  type: 'test'
+  ...
+# Subtest: partial, excess or invalid lines cannot produce a result
+ok 56 - partial, excess or invalid lines cannot produce a result
+  ---
+  duration_ms: 0.134791
+  type: 'test'
+  ...
+# Subtest: QDII return date stays on the NAV day, separate from publication and fetch
+ok 57 - QDII return date stays on the NAV day, separate from publication and fetch
+  ---
+  duration_ms: 16.691709
+  type: 'test'
+  ...
+# Subtest: unknown provider publication does not become local fetch time
+ok 58 - unknown provider publication does not become local fetch time
+  ---
+  duration_ms: 0.141125
+  type: 'test'
+  ...
+# Subtest: formal NAV and inferred shares are distinct from an institution-confirmed trade
+ok 59 - formal NAV and inferred shares are distinct from an institution-confirmed trade
+  ---
+  duration_ms: 0.094167
+  type: 'test'
+  ...
+# Subtest: daily return never shows missing or no-position amounts as zero
+ok 60 - daily return never shows missing or no-position amounts as zero
+  ---
+  duration_ms: 0.144708
+  type: 'test'
+  ...
+# Subtest: a partial daily return labels known money and suppresses a full portfolio rate
+ok 61 - a partial daily return labels known money and suppresses a full portfolio rate
+  ---
+  duration_ms: 0.205708
+  type: 'test'
+  ...
+# Subtest: partial known zero remains visibly partial and gaps retain distinct reasons
+ok 62 - partial known zero remains visibly partial and gaps retain distinct reasons
+  ---
+  duration_ms: 0.805792
+  type: 'test'
+  ...
+# Subtest: formal NAV availability does not hide a missing or delayed intraday quote
+ok 63 - formal NAV availability does not hide a missing or delayed intraday quote
+  ---
+  duration_ms: 0.143416
+  type: 'test'
+  ...
+# Subtest: a confirmed zero return remains a real zero, while invalid values stay missing
+ok 64 - a confirmed zero return remains a real zero, while invalid values stay missing
+  ---
+  duration_ms: 0.130167
+  type: 'test'
+  ...
+# Subtest: later years and dates lead, while source arrays keep calculation chronology
+ok 65 - later years and dates lead, while source arrays keep calculation chronology
+  ---
+  duration_ms: 16.715042
+  type: 'test'
+  ...
+# Subtest: unknown dates trail known dates, with business-date fallback and stable equal-date order
+ok 66 - unknown dates trail known dates, with business-date fallback and stable equal-date order
+  ---
+  duration_ms: 0.377542
+  type: 'test'
+  ...
+# Subtest: month and year buckets compare as ISO business dates
+ok 67 - month and year buckets compare as ISO business dates
+  ---
+  duration_ms: 0.264292
+  type: 'test'
+  ...
+# Subtest: recent range arithmetic preserves day labels across month/year boundaries
+ok 68 - recent range arithmetic preserves day labels across month/year boundaries
+  ---
+  duration_ms: 0.193583
+  type: 'test'
+  ...
+# Subtest: DCA top-up defaults use the workspace day across device timezones
+ok 69 - DCA top-up defaults use the workspace day across device timezones
+  ---
+  duration_ms: 27.4165
+  type: 'test'
+  ...
+# Subtest: DCA workspace dates handle year rollover, daylight saving and invalid metadata
+ok 70 - DCA workspace dates handle year rollover, daylight saving and invalid metadata
+  ---
+  duration_ms: 1.057125
+  type: 'test'
+  ...
+# Subtest: explicit untracked DCA and rate retain exact decimal settings
+ok 71 - explicit untracked DCA and rate retain exact decimal settings
+  ---
+  duration_ms: 0.565083
+  type: 'test'
+  ...
+# Subtest: reopening a saved plan preserves rate and funding without enabling a disabled plan
+ok 72 - reopening a saved plan preserves rate and funding without enabling a disabled plan
+  ---
+  duration_ms: 0.093375
+  type: 'test'
+  ...
+# Subtest: existing unconfigured or disabled plans are not silently backfilled from an old start
+ok 73 - existing unconfigured or disabled plans are not silently backfilled from an old start
+  ---
+  duration_ms: 0.124792
+  type: 'test'
+  ...
+# Subtest: a new plan automates once from its visible first date without changing an explicit opt-out
+ok 74 - a new plan automates once from its visible first date without changing an explicit opt-out
+  ---
+  duration_ms: 0.213333
+  type: 'test'
+  ...
+# Subtest: only OTC non-money funds default to automatic NAV-based installments
+ok 75 - only OTC non-money funds default to automatic NAV-based installments
+  ---
+  duration_ms: 0.160292
+  type: 'test'
+  ...
+# Subtest: an enabled saved configuration retains its actual start, fees and exclusions
+ok 76 - an enabled saved configuration retains its actual start, fees and exclusions
+  ---
+  duration_ms: 0.81975
+  type: 'test'
+  ...
+# Subtest: unknown costs remain unknown and stale fixed fees do not become fees under zero or unknown
+ok 77 - unknown costs remain unknown and stale fixed fees do not become fees under zero or unknown
+  ---
+  duration_ms: 0.321167
+  type: 'test'
+  ...
+# Subtest: fixed fee uses exact decimals and must be less than installment, with at most 2 decimal places
+ok 78 - fixed fee uses exact decimals and must be less than installment, with at most 2 decimal places
+  ---
+  duration_ms: 0.492458
+  type: 'test'
+  ...
+# Subtest: excluded failed dates normalize unique days and pause intervals remain exact
+ok 79 - excluded failed dates normalize unique days and pause intervals remain exact
+  ---
+  duration_ms: 0.443125
+  type: 'test'
+  ...
+# Subtest: enabling requires explicit valid start and holding account, without defaulting to historical cash
+ok 80 - enabling requires explicit valid start and holding account, without defaulting to historical cash
+  ---
+  duration_ms: 0.094834
+  type: 'test'
+  ...
+# Subtest: turning off never validates hidden drafts, preserves saved exclusions and does not copy backend identity fields
+ok 81 - turning off never validates hidden drafts, preserves saved exclusions and does not copy backend identity fields
+  ---
+  duration_ms: 0.112959
+  type: 'test'
+  ...
+# Subtest: one versioned plan payload includes automation but never copied identity or draft UI fields
+ok 82 - one versioned plan payload includes automation but never copied identity or draft UI fields
+  ---
+  duration_ms: 0.149833
+  type: 'test'
+  ...
+# Subtest: only detailed same-currency active fund or broker accounts carry automatic holdings
+ok 83 - only detailed same-currency active fund or broker accounts carry automatic holdings
+  ---
+  duration_ms: 0.060875
+  type: 'test'
+  ...
+# Subtest: human statuses distinguish automatic estimates, existing facts and missing inputs
+ok 84 - human statuses distinguish automatic estimates, existing facts and missing inputs
+  ---
+  duration_ms: 0.202459
+  type: 'test'
+  ...
+# Subtest: existing and new plans never select a top-up source without an explicit choice
+ok 85 - existing and new plans never select a top-up source without an explicit choice
+  ---
+  duration_ms: 1.13825
+  type: 'test'
+  ...
+# Subtest: explicit top-up keeps its effective date across reopen and allows deliberate unpaid historical scope
+ok 86 - explicit top-up keeps its effective date across reopen and allows deliberate unpaid historical scope
+  ---
+  duration_ms: 0.289917
+  type: 'test'
+  ...
+# Subtest: top-up requires a distinct account and an explicit valid date within automation scope
+ok 87 - top-up requires a distinct account and an explicit valid date within automation scope
+  ---
+  duration_ms: 0.3095
+  type: 'test'
+  ...
+# Subtest: clearing top-up or choosing untracked funds explicitly removes both settings
+ok 88 - clearing top-up or choosing untracked funds explicitly removes both settings
+  ---
+  duration_ms: 0.152291
+  type: 'test'
+  ...
+# Subtest: turning automation off preserves saved top-up without validating hidden edits or enabling it
+ok 89 - turning automation off preserves saved top-up without validating hidden edits or enabling it
+  ---
+  duration_ms: 0.127084
+  type: 'test'
+  ...
+# Subtest: top-up choices only include distinct same-currency account cash in the current space
+ok 90 - top-up choices only include distinct same-currency account cash in the current space
+  ---
+  duration_ms: 0.189667
+  type: 'test'
+  ...
+# Subtest: selected preview rows prefill known data, preserve provenance, and remain drafts until one explicit confirmation
+ok 91 - selected preview rows prefill known data, preserve provenance, and remain drafts until one explicit confirmation
+  ---
+  duration_ms: 5.466333
+  type: 'test'
+  ...
+# Subtest: unknown fee never becomes zero or turns before-fee theoretical units into actual units
+ok 92 - unknown fee never becomes zero or turns before-fee theoretical units into actual units
+  ---
+  duration_ms: 0.48075
+  type: 'test'
+  ...
+# Subtest: missing NAV or calendar details remain visible and unknown instead of silently disappearing or guessing
+ok 93 - missing NAV or calendar details remain visible and unknown instead of silently disappearing or guessing
+  ---
+  duration_ms: 0.34325
+  type: 'test'
+  ...
+# Subtest: forecast pending remains in transit even if today is later than the chosen historical cutoff
+ok 94 - forecast pending remains in transit even if today is later than the chosen historical cutoff
+  ---
+  duration_ms: 0.350458
+  type: 'test'
+  ...
+# Subtest: saved facts override preview estimates and a prior pending debit requires explicit confirmation
+ok 95 - saved facts override preview estimates and a prior pending debit requires explicit confirmation
+  ---
+  duration_ms: 0.660209
+  type: 'test'
+  ...
+# Subtest: explicit exclusions remain in the draft list but are omitted from the committed batch
+ok 96 - explicit exclusions remain in the draft list but are omitted from the committed batch
+  ---
+  duration_ms: 0.335292
+  type: 'test'
+  ...
+# Subtest: only one overall confirmation is needed but server readiness, versions and unchanged data remain required
+ok 97 - only one overall confirmation is needed but server readiness, versions and unchanged data remain required
+  ---
+  duration_ms: 0.447541
+  type: 'test'
+  ...
+# Subtest: rounding adjustments match ledger half-even ties at 12 places without floating point
+ok 98 - rounding adjustments match ledger half-even ties at 12 places without floating point
+  ---
+  duration_ms: 0.189042
+  type: 'test'
+  ...
+# Subtest: batch fee recalculation makes two-place draft quantities and summed adjustments preserve signs exactly
+ok 99 - batch fee recalculation makes two-place draft quantities and summed adjustments preserve signs exactly
+  ---
+  duration_ms: 0.883791
+  type: 'test'
+  ...
+# Subtest: invalid real dates, amounts and duplicated installments are blocked
+ok 100 - invalid real dates, amounts and duplicated installments are blocked
+  ---
+  duration_ms: 1.002584
+  type: 'test'
+  ...
+# Subtest: coverage separates known invested amounts from missing NAV and forecast pending without double counting
+ok 101 - coverage separates known invested amounts from missing NAV and forecast pending without double counting
+  ---
+  duration_ms: 1.677291
+  type: 'test'
+  ...
+# Subtest: product-only DCA entry never queries an undefined account and uses its unique associated account
+ok 102 - product-only DCA entry never queries an undefined account and uses its unique associated account
+  ---
+  duration_ms: 0.278042
+  type: 'test'
+  ...
+# Subtest: multiple product accounts require a choice while holding context keeps its actual account filter
+ok 103 - multiple product accounts require a choice while holding context keeps its actual account filter
+  ---
+  duration_ms: 0.118083
+  type: 'test'
+  ...
+# Subtest: historical refresh requests only the selected plan product and validated start date
+ok 104 - historical refresh requests only the selected plan product and validated start date
+  ---
+  duration_ms: 1.073042
+  type: 'test'
+  ...
+# Subtest: initial preview respects a plan that ended before today without extending into future dates
+ok 105 - initial preview respects a plan that ended before today without extending into future dates
+  ---
+  duration_ms: 0.156583
+  type: 'test'
+  ...
+# Subtest: DCA preview sends one complete date range, not invented ledger or holding fields
+ok 106 - DCA preview sends one complete date range, not invented ledger or holding fields
+  ---
+  duration_ms: 0.137625
+  type: 'test'
+  ...
+# Subtest: unknown and explicit zero fee modes omit preserved fixed fees; fixed zero remains explicit
+ok 107 - unknown and explicit zero fee modes omit preserved fixed fees; fixed zero remains explicit
+  ---
+  duration_ms: 0.152917
+  type: 'test'
+  ...
+# Subtest: daily exclusions and pauses serialize without manufacturing successful trades
+ok 108 - daily exclusions and pauses serialize without manufacturing successful trades
+  ---
+  duration_ms: 0.2185
+  type: 'test'
+  ...
+# Subtest: row exclusions toggle exact dates and retain other exclusions
+ok 109 - row exclusions toggle exact dates and retain other exclusions
+  ---
+  duration_ms: 0.282084
+  type: 'test'
+  ...
+# Subtest: known partial estimates remain labelled partial while complete zero remains meaningful
+ok 110 - known partial estimates remain labelled partial while complete zero remains meaningful
+  ---
+  duration_ms: 0.32
+  type: 'test'
+  ...
+# Subtest: positive decimal validation never converts zero or missing quantity into a tiny holding
+ok 111 - positive decimal validation never converts zero or missing quantity into a tiny holding
+  ---
+  duration_ms: 0.179084
+  type: 'test'
+  ...
+# Subtest: account, currency, date and check scope survive actual form-store destroy replay
+ok 112 - account, currency, date and check scope survive actual form-store destroy replay
+  ---
+  duration_ms: 2.387333
+  type: 'test'
+  ...
+# Subtest: closing and reopening another entity clears old identity and draft values
+ok 113 - closing and reopening another entity clears old identity and draft values
+  ---
+  duration_ms: 0.550834
+  type: 'test'
+  ...
+# Subtest: asynchronously refreshed options/default props do not overwrite a user's draft
+ok 114 - asynchronously refreshed options/default props do not overwrite a user's draft
+  ---
+  duration_ms: 0.150209
+  type: 'test'
+  ...
+# Subtest: financial display retains values beyond Number precision and source fraction
+ok 115 - financial display retains values beyond Number precision and source fraction
+  ---
+  duration_ms: 1.577292
+  type: 'test'
+  ...
+# Subtest: display precision bounds repeating market metrics without rounding source amounts
+ok 116 - display precision bounds repeating market metrics without rounding source amounts
+  ---
+  duration_ms: 0.196
+  type: 'test'
+  ...
+# Subtest: an uncertain financial command retries with the same key, then a new action receives a new key
+ok 117 - an uncertain financial command retries with the same key, then a new action receives a new key
+  ---
+  duration_ms: 58.464375
+  type: 'test'
+  ...
+# Subtest: space identity is part of command identity and amounts stay strings
+ok 118 - space identity is part of command identity and amounts stay strings
+  ---
+  duration_ms: 7.719917
+  type: 'test'
+  ...
+# Subtest: server version conflicts remain actionable errors, never empty success
+ok 119 - server version conflicts remain actionable errors, never empty success
+  ---
+  duration_ms: 1.584959
+  type: 'test'
+  ...
+# Subtest: multipart uploads leave content-type boundary to browser
+ok 120 - multipart uploads leave content-type boundary to browser
+  ---
+  duration_ms: 1.992417
+  type: 'test'
+  ...
+# Subtest: two decimal display never turns a rounding residue into a visible loss
+ok 121 - two decimal display never turns a rounding residue into a visible loss
+  ---
+  duration_ms: 0.106709
+  type: 'test'
+  ...
+# Subtest: statement NAV date remains a separate optional mapping from payment and confirmation
+ok 122 - statement NAV date remains a separate optional mapping from payment and confirmation
+  ---
+  duration_ms: 1.537666
+  type: 'test'
+  ...
+# Subtest: saved mapping must still name a real header; ambiguous aliases are not guessed
+ok 123 - saved mapping must still name a real header; ambiguous aliases are not guessed
+  ---
+  duration_ms: 0.091792
+  type: 'test'
+  ...
+# Subtest: preview whitelists fields and preserves unknown fee without creating zeros
+ok 124 - preview whitelists fields and preserves unknown fee without creating zeros
+  ---
+  duration_ms: 0.260083
+  type: 'test'
+  ...
+# Subtest: exact matches explicitly bind one source event and duplicate evidence never creates money
+ok 125 - exact matches explicitly bind one source event and duplicate evidence never creates money
+  ---
+  duration_ms: 0.190584
+  type: 'test'
+  ...
+# Subtest: ambiguous or different-day equal-amount records are not auto linked and unmatched cannot be created
+ok 126 - ambiguous or different-day equal-amount records are not auto linked and unmatched cannot be created
+  ---
+  duration_ms: 0.093875
+  type: 'test'
+  ...
+# Subtest: safe correction requires server eligibility and explicit reason; wrong version cannot be supplied
+ok 127 - safe correction requires server eligibility and explicit reason; wrong version cannot be supplied
+  ---
+  duration_ms: 0.185291
+  type: 'test'
+  ...
+# Subtest: erroneous rows only allow skip, and differences cannot be labelled exact
+ok 128 - erroneous rows only allow skip, and differences cannot be labelled exact
+  ---
+  duration_ms: 0.074084
+  type: 'test'
+  ...
+# Subtest: credential payload has only version and explicitly supplied token; removal carries no token
+ok 129 - credential payload has only version and explicitly supplied token; removal carries no token
+  ---
+  duration_ms: 0.193959
+  type: 'test'
+  ...
+# Subtest: conflicting quotes label retained safe price and keep isolation records separate
+ok 130 - conflicting quotes label retained safe price and keep isolation records separate
+  ---
+  duration_ms: 0.354542
+  type: 'test'
+  ...
+# Subtest: publication time never falls back to fetched time or NAV date
+ok 131 - publication time never falls back to fetched time or NAV date
+  ---
+  duration_ms: 0.452791
+  type: 'test'
+  ...
+# Subtest: retained quote explains unavailable sources and date regression without claiming a conflict
+ok 132 - retained quote explains unavailable sources and date regression without claiming a conflict
+  ---
+  duration_ms: 0.222875
+  type: 'test'
+  ...
+# Subtest: partial institution facts require explicit server permission and user choice; never auto confirm missing shares
+ok 133 - partial institution facts require explicit server permission and user choice; never auto confirm missing shares
+  ---
+  duration_ms: 0.28675
+  type: 'test'
+  ...
+# Subtest: latest updates retain their own interval and exact amount without altering today's total
+ok 134 - latest updates retain their own interval and exact amount without altering today's total
+  ---
+  duration_ms: 1.719667
+  type: 'test'
+  ...
+# Subtest: new formal result replaces displayed input without carrying or adding the prior estimate
+ok 135 - new formal result replaces displayed input without carrying or adding the prior estimate
+  ---
+  duration_ms: 0.404084
+  type: 'test'
+  ...
+# Subtest: missing and unavailable updates never reuse a base-currency total or a stale amount
+ok 136 - missing and unavailable updates never reuse a base-currency total or a stale amount
+  ---
+  duration_ms: 0.534834
+  type: 'test'
+  ...
+# Subtest: missing dates never become today or the source's publication day
+ok 137 - missing dates never become today or the source's publication day
+  ---
+  duration_ms: 0.174584
+  type: 'test'
+  ...
+# Subtest: optional calculation details preserve exact shares and never borrow the old fetch for a new formal NAV
+ok 138 - optional calculation details preserve exact shares and never borrow the old fetch for a new formal NAV
+  ---
+  duration_ms: 0.406292
+  type: 'test'
+  ...
+# Subtest: hiding and showing a configured term preserves its explanation, aliases and example
+ok 139 - hiding and showing a configured term preserves its explanation, aliases and example
+  ---
+  duration_ms: 2.707
+  type: 'test'
+  ...
+# Subtest: showing an unedited built-in removes only its visibility tombstone
+ok 140 - showing an unedited built-in removes only its visibility tombstone
+  ---
+  duration_ms: 0.083208
+  type: 'test'
+  ...
+# Subtest: help selects precise compound terms without losing original label text
+ok 141 - help selects precise compound terms without losing original label text
+  ---
+  duration_ms: 2.100541
+  type: 'test'
+  ...
+# Subtest: term lookup supports aliases and avoids partial Latin matches
+ok 142 - term lookup supports aliases and avoids partial Latin matches
+  ---
+  duration_ms: 1.206083
+  type: 'test'
+  ...
+# Subtest: beginner search finds explanations and filters categories
+ok 143 - beginner search finds explanations and filters categories
+  ---
+  duration_ms: 1.166208
+  type: 'test'
+  ...
+# Subtest: vocabulary aliases are unambiguous and critical concepts have explanations
+ok 144 - vocabulary aliases are unambiguous and critical concepts have explanations
+  ---
+  duration_ms: 0.327167
+  type: 'test'
+  ...
+# Subtest: configured help replaces built-in explanations and aliases without mutating defaults
+ok 145 - configured help replaces built-in explanations and aliases without mutating defaults
+  ---
+  duration_ms: 0.585042
+  type: 'test'
+  ...
+# Subtest: hidden built-in vocabulary removes its aliases from hover help and search
+ok 146 - hidden built-in vocabulary removes its aliases from hover help and search
+  ---
+  duration_ms: 2.010292
+  type: 'test'
+  ...
+# Subtest: customized labels stay plain text and collisions include unchanged built-in aliases
+ok 147 - customized labels stay plain text and collisions include unchanged built-in aliases
+  ---
+  duration_ms: 2.904709
+  type: 'test'
+  ...
+# Subtest: missing conversion FX preserves valid original-currency daily return without making a converted total
+ok 148 - missing conversion FX preserves valid original-currency daily return without making a converted total
+  ---
+  duration_ms: 1.263917
+  type: 'test'
+  ...
+# Subtest: recent formal return cannot bypass an unverified holding scope, but valid native FX results remain visible
+ok 149 - recent formal return cannot bypass an unverified holding scope, but valid native FX results remain visible
+  ---
+  duration_ms: 0.103125
+  type: 'test'
+  ...
+# Subtest: holding display settings are separately keyed by real user and workspace, without anonymous fallback
+ok 150 - holding display settings are separately keyed by real user and workspace, without anonymous fallback
+  ---
+  duration_ms: 0.101625
+  type: 'test'
+  ...
+# Subtest: default columns are compact and versioned preferences preserve required actions while discarding unknown keys
+ok 151 - default columns are compact and versioned preferences preserve required actions while discarding unknown keys
+  ---
+  duration_ms: 4.30675
+  type: 'test'
+  ...
+# Subtest: column order honors separate left/right fixed regions and allows hidden columns to return
+ok 152 - column order honors separate left/right fixed regions and allows hidden columns to return
+  ---
+  duration_ms: 0.135334
+  type: 'test'
+  ...
+# Subtest: search covers names, codes, accounts and labels with multiple words and derivative kind aliases
+ok 153 - search covers names, codes, accounts and labels with multiple words and derivative kind aliases
+  ---
+  duration_ms: 0.223208
+  type: 'test'
+  ...
+# Subtest: pins are stable per account-product or reference row and stay above the selected sort
+ok 154 - pins are stable per account-product or reference row and stay above the selected sort
+  ---
+  duration_ms: 0.931584
+  type: 'test'
+  ...
+# Subtest: monetary sorting never compares HKD to CNY and uses exact decimal precision with unknowns last
+ok 155 - monetary sorting never compares HKD to CNY and uses exact decimal precision with unknowns last
+  ---
+  duration_ms: 9.144292
+  type: 'test'
+  ...
+# Subtest: top overview stays in separate currencies, excludes references and scope-unconfirmed amounts
+ok 156 - top overview stays in separate currencies, excludes references and scope-unconfirmed amounts
+  ---
+  duration_ms: 0.423917
+  type: 'test'
+  ...
+# Subtest: missing values are never fabricated as zero while recorded zero is retained
+ok 157 - missing values are never fabricated as zero while recorded zero is retained
+  ---
+  duration_ms: 0.395542
+  type: 'test'
+  ...
+# Subtest: daily estimates require today's explicit amount and never use cumulative profit or stale/foreign currency data
+ok 158 - daily estimates require today's explicit amount and never use cumulative profit or stale/foreign currency data
+  ---
+  duration_ms: 0.135916
+  type: 'test'
+  ...
+# Subtest: summary decimal addition is exact across large totals and 36-place valuation products
+ok 159 - summary decimal addition is exact across large totals and 36-place valuation products
+  ---
+  duration_ms: 0.07875
+  type: 'test'
+  ...
+# Subtest: filtering recomputes the overview and deleted pins never create ghost rows or totals
+ok 160 - filtering recomputes the overview and deleted pins never create ghost rows or totals
+  ---
+  duration_ms: 0.1475
+  type: 'test'
+  ...
+# Subtest: remaining debits stay separate from confirmed value and do not become profit or quantities
+ok 161 - remaining debits stay separate from confirmed value and do not become profit or quantities
+  ---
+  duration_ms: 0.161875
+  type: 'test'
+  ...
+# Subtest: a pending-only product is visible without inventing zero holdings or missing daily-return data
+ok 162 - a pending-only product is visible without inventing zero holdings or missing daily-return data
+  ---
+  duration_ms: 0.1465
+  type: 'test'
+  ...
+# Subtest: unpaid schedules, zero, negative and cross-currency pending values never masquerade as recorded assets
+ok 163 - unpaid schedules, zero, negative and cross-currency pending values never masquerade as recorded assets
+  ---
+  duration_ms: 0.075625
+  type: 'test'
+  ...
+# Subtest: partial confirmation displays only the projected remainder, deduplicates details and preserves source facts
+ok 164 - partial confirmation displays only the projected remainder, deduplicates details and preserves source facts
+  ---
+  duration_ms: 1.090708
+  type: 'test'
+  ...
+# Subtest: pending sums and sorting are exact by currency and react to filtering and settlement
+ok 165 - pending sums and sorting are exact by currency and react to filtering and settlement
+  ---
+  duration_ms: 0.736042
+  type: 'test'
+  ...
+# Subtest: legacy column preferences keep the new pending column hidden until explicitly enabled
+ok 166 - legacy column preferences keep the new pending column hidden until explicitly enabled
+  ---
+  duration_ms: 0.2505
+  type: 'test'
+  ...
+# Subtest: institution allocation preserves current market value, not historic cost
+ok 167 - institution allocation preserves current market value, not historic cost
+  ---
+  duration_ms: 1.41675
+  type: 'test'
+  ...
+# Subtest: only shortfall is assigned to the selected source without binary rounding
+ok 168 - only shortfall is assigned to the selected source without binary rounding
+  ---
+  duration_ms: 0.074542
+  type: 'test'
+  ...
+# Subtest: loss and large high precision values retain decimal accuracy
+ok 169 - loss and large high precision values retain decimal accuracy
+  ---
+  duration_ms: 0.144292
+  type: 'test'
+  ...
+# Subtest: unknown or impossible values never produce a zero balance claim
+ok 170 - unknown or impossible values never produce a zero balance claim
+  ---
+  duration_ms: 0.065833
+  type: 'test'
+  ...
+# Subtest: reported profit conflict is explicit and never changes captured market value, cost or shares
+ok 171 - reported profit conflict is explicit and never changes captured market value, cost or shares
+  ---
+  duration_ms: 1.792042
+  type: 'test'
+  ...
+# Subtest: profit entry mode still detects a different NAV and quantity scope
+ok 172 - profit entry mode still detects a different NAV and quantity scope
+  ---
+  duration_ms: 0.125625
+  type: 'test'
+  ...
+# Subtest: two-cent tolerance is inclusive and uses precise decimals without rounding away a conflict
+ok 173 - two-cent tolerance is inclusive and uses precise decimals without rounding away a conflict
+  ---
+  duration_ms: 0.123041
+  type: 'test'
+  ...
+# Subtest: optional zero reported profit remains an intentional observation, blank checks are omitted
+ok 174 - optional zero reported profit remains an intentional observation, blank checks are omitted
+  ---
+  duration_ms: 0.31475
+  type: 'test'
+  ...
+# Subtest: auto mode never posts hidden manual observations or stale valuation fields
+ok 175 - auto mode never posts hidden manual observations or stale valuation fields
+  ---
+  duration_ms: 0.141291
+  type: 'test'
+  ...
+# Subtest: correction changes only the allowed original fields and does not reallocate cash
+ok 176 - correction changes only the allowed original fields and does not reallocate cash
+  ---
+  duration_ms: 0.1375
+  type: 'test'
+  ...
+# Subtest: pending creation requires an explicit choice and preserves reported facts instead of inventing a balance
+ok 177 - pending creation requires an explicit choice and preserves reported facts instead of inventing a balance
+  ---
+  duration_ms: 0.226
+  type: 'test'
+  ...
+# Subtest: hidden or obsolete pending flags cannot bypass strict corrections or label reconciled values as unresolved
+ok 178 - hidden or obsolete pending flags cannot bypass strict corrections or label reconciled values as unresolved
+  ---
+  duration_ms: 0.08575
+  type: 'test'
+  ...
+# Subtest: return ratios display as percentages without losing financial precision
+ok 179 - return ratios display as percentages without losing financial precision
+  ---
+  duration_ms: 0.813167
+  type: 'test'
+  ...
+# Subtest: profit calendar requests correct bounds across leap years
+ok 180 - profit calendar requests correct bounds across leap years
+  ---
+  duration_ms: 1.30125
+  type: 'test'
+  ...
+# Subtest: bank and futures cash movements receive unambiguous labels
+ok 181 - bank and futures cash movements receive unambiguous labels
+  ---
+  duration_ms: 0.073334
+  type: 'test'
+  ...
+# Subtest: mainland exchange selectors search the CN catalog without changing overseas markets
+ok 182 - mainland exchange selectors search the CN catalog without changing overseas markets
+  ---
+  duration_ms: 0.0665
+  type: 'test'
+  ...
+# Subtest: switching dividend mode cannot post hidden cash amounts or tax as reinvestment
+ok 183 - switching dividend mode cannot post hidden cash amounts or tax as reinvestment
+  ---
+  duration_ms: 0.185166
+  type: 'test'
+  ...
+# Subtest: navigation order tolerates retired keys and keeps newly added entries
+ok 184 - navigation order tolerates retired keys and keeps newly added entries
+  ---
+  duration_ms: 1.364625
+  type: 'test'
+  ...
+# Subtest: hidden direct links remain accessible and override stale controlled tab state
+ok 185 - hidden direct links remain accessible and override stale controlled tab state
+  ---
+  duration_ms: 0.140959
+  type: 'test'
+  ...
+# Subtest: hidden groups have no implicit tab, but an explicit route remains usable
+ok 186 - hidden groups have no implicit tab, but an explicit route remains usable
+  ---
+  duration_ms: 0.109292
+  type: 'test'
+  ...
+# Subtest: navigation recovery settings cannot be hidden and legacy route mappings still work
+ok 187 - navigation recovery settings cannot be hidden and legacy route mappings still work
+  ---
+  duration_ms: 0.055958
+  type: 'test'
+  ...
+# Subtest: personal admin chat remains first and visible under pre-existing or hidden navigation preferences
+ok 188 - personal admin chat remains first and visible under pre-existing or hidden navigation preferences
+  ---
+  duration_ms: 0.123875
+  type: 'test'
+  ...
+# Subtest: option creation includes a single nested payload only while explicitly enabled
+ok 189 - option creation includes a single nested payload only while explicitly enabled
+  ---
+  duration_ms: 1.500083
+  type: 'test'
+  ...
+# Subtest: zero settlement and its actual date survive serialization without replacing market value
+ok 190 - zero settlement and its actual date survive serialization without replacing market value
+  ---
+  duration_ms: 0.094291
+  type: 'test'
+  ...
+# Subtest: clearing optional settlement drops a preserved date on create and explicitly clears it on edit
+ok 191 - clearing optional settlement drops a preserved date on create and explicitly clears it on edit
+  ---
+  duration_ms: 0.307542
+  type: 'test'
+  ...
+# Subtest: gross reference profit respects long or short direction and never implies a return rate
+ok 192 - gross reference profit respects long or short direction and never implies a return rate
+  ---
+  duration_ms: 0.156542
+  type: 'test'
+  ...
+# Subtest: contract units must be supplied and fractional lots or negative values are rejected
+ok 193 - contract units must be supplied and fractional lots or negative values are rejected
+  ---
+  duration_ms: 0.158083
+  type: 'test'
+  ...
+# Subtest: large prices and decimal multipliers use decimal precision for the preview
+ok 194 - large prices and decimal multipliers use decimal precision for the preview
+  ---
+  duration_ms: 0.180291
+  type: 'test'
+  ...
+# Subtest: merging reference rows for display preserves the separate accounting collection
+ok 195 - merging reference rows for display preserves the separate accounting collection
+  ---
+  duration_ms: 0.141833
+  type: 'test'
+  ...
+# Subtest: pending summary uses the converted server amount and hides empty summaries
+ok 196 - pending summary uses the converted server amount and hides empty summaries
+  ---
+  duration_ms: 3.173209
+  type: 'test'
+  ...
+# Subtest: missing FX keeps unknown amounts distinct from confirmed zero
+ok 197 - missing FX keeps unknown amounts distinct from confirmed zero
+  ---
+  duration_ms: 0.210625
+  type: 'test'
+  ...
+# Subtest: replacing an option with an ordinary fund drops the previous exchange, calendar and contract units
+ok 198 - replacing an option with an ordinary fund drops the previous exchange, calendar and contract units
+  ---
+  duration_ms: 1.380709
+  type: 'test'
+  ...
+# Subtest: changing only a fund code drops inherited QDII confirmation rules
+ok 199 - changing only a fund code drops inherited QDII confirmation rules
+  ---
+  duration_ms: 0.072625
+  type: 'test'
+  ...
+# Subtest: explicit manual rules and user labels survive replacing an automatic identity
+ok 200 - explicit manual rules and user labels survive replacing an automatic identity
+  ---
+  duration_ms: 0.108791
+  type: 'test'
+  ...
+# Subtest: freshly selected catalog metadata is retained even when the previous form held another identity
+ok 201 - freshly selected catalog metadata is retained even when the previous form held another identity
+  ---
+  duration_ms: 0.062167
+  type: 'test'
+  ...
+# Subtest: legacy specifications without identity tracking are cleared on a form identity change
+ok 202 - legacy specifications without identity tracking are cleared on a form identity change
+  ---
+  duration_ms: 0.0545
+  type: 'test'
+  ...
+# Subtest: a delayed product resolution cannot replace a newer code, classification or manual rule
+ok 203 - a delayed product resolution cannot replace a newer code, classification or manual rule
+  ---
+  duration_ms: 0.156292
+  type: 'test'
+  ...
+# Subtest: editing a product restores currency-only and exchange-only manual overrides
+ok 204 - editing a product restores currency-only and exchange-only manual overrides
+  ---
+  duration_ms: 0.129292
+  type: 'test'
+  ...
+# Subtest: overnight reference retains source price, baseline and timestamps without replacing an estimate
+ok 205 - overnight reference retains source price, baseline and timestamps without replacing an estimate
+  ---
+  duration_ms: 1.486417
+  type: 'test'
+  ...
+# Subtest: reference never borrows another product, currency or accounting identity
+ok 206 - reference never borrows another product, currency or accounting identity
+  ---
+  duration_ms: 0.112666
+  type: 'test'
+  ...
+# Subtest: missing source metadata stays missing and zero percent is not lost
+ok 207 - missing source metadata stays missing and zero percent is not lost
+  ---
+  duration_ms: 0.071916
+  type: 'test'
+  ...
+# Subtest: explicit appearance overrides system changes while automatic appearance follows them
+ok 208 - explicit appearance overrides system changes while automatic appearance follows them
+  ---
+  duration_ms: 0.674583
+  type: 'test'
+  ...
+# Subtest: appearance preferences are separated by user and anonymous session
+ok 209 - appearance preferences are separated by user and anonymous session
+  ---
+  duration_ms: 0.086042
+  type: 'test'
+  ...
+# Subtest: both themes supply identical complete tokens including chart and feedback colors
+ok 210 - both themes supply identical complete tokens including chart and feedback colors
+  ---
+  duration_ms: 0.891417
+  type: 'test'
+  ...
+# Subtest: financial text and secondary information keep readable contrast in either theme
+ok 211 - financial text and secondary information keep readable contrast in either theme
+  ---
+  duration_ms: 0.415625
+  type: 'test'
+  ...
+# Subtest: buy and sell preview use fees in opposite directions
+ok 212 - buy and sell preview use fees in opposite directions
+  ---
+  duration_ms: 0.757125
+  type: 'test'
+  ...
+# Subtest: shares and unit NAV are retained before rounding the cash amount
+ok 213 - shares and unit NAV are retained before rounding the cash amount
+  ---
+  duration_ms: 0.078208
+  type: 'test'
+  ...
+# Subtest: missing or invalid trade data does not show a zero-cost trade
+ok 214 - missing or invalid trade data does not show a zero-cost trade
+  ---
+  duration_ms: 0.055625
+  type: 'test'
+  ...
+1..214
+# tests 214
+# suites 0
+# pass 214
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 803.807208

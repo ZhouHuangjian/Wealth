@@ -1,0 +1,271 @@
+{
+  "audit_date": "2026-10-13",
+  "scope": "Public endpoints and open-source implementation only; no account/holding data.",
+  "project": {
+    "url": "https://github.com/hzm0321/real-time-fund",
+    "commit": "85e1237f0f3dc266d4d021b67612654c15f84e80",
+    "license": "AGPL-3.0",
+    "implementation_code_copied": false,
+    "files": [
+      {
+        "path": "app/api/fund.js",
+        "sha256": "36e67ebccfc4386c7124f7e1802658830d1eab782cdc3c2e851a884ab6da6960"
+      },
+      {
+        "path": "app/lib/fundHelpers.js",
+        "sha256": "898e7089e42c1281942ce603eb0ed01cd3b6773b5e7f2f789adca0392949e36f"
+      },
+      {
+        "path": "app/hooks/useHoldingProfit.js",
+        "sha256": "2945704666837c51e9f47c5f894d8e6e734be2a122a80558565a0ab7503ab8c1"
+      },
+      {
+        "path": "app/lib/dailyEarnings.js",
+        "sha256": "f21bc2a53cc26cdcf5d7445d4f40ea42e909d9904253cf097ba2d89bb7361119"
+      },
+      {
+        "path": "LICENSE",
+        "sha256": "4df3c306dddaaf4baffdff5ca820cc679ac8cd6dc263c6a74517783e42fa7a3b"
+      },
+      {
+        "path": "app/hooks/useRefreshManager.js",
+        "sha256": "d5a2d8db44c16e96d444086d6d8b9a340780af5d688274c7749a53b54cd393c8"
+      }
+    ]
+  },
+  "source_paths": [
+    {
+      "path": "app/api/fund.js:1066-1116",
+      "meaning": "Sources 2/3 call the Sina original endpoint."
+    },
+    {
+      "path": "app/api/fund.js:1134-1154",
+      "meaning": "Source4 reads community Supabase gztime/gszzl/gzstatus only; baseline and calculation method are not provided there."
+    },
+    {
+      "path": "app/api/fund.js:1484-1489",
+      "meaning": "That app derives missing reference price from latest NAV and source rate; this approach is not imported."
+    },
+    {
+      "path": "app/lib/fundHelpers.js:176-192",
+      "meaning": "NAV freshness is inferred using subscription confirmation days and trading-day lag; this inference is not imported."
+    },
+    {
+      "path": "app/hooks/useHoldingProfit.js:22-38",
+      "meaning": "Today reference detection uses Beijing date prefix; overnight QDII session is not distinguished from the next economic NAV date."
+    },
+    {
+      "path": "app/hooks/useHoldingProfit.js:182-240",
+      "meaning": "Today return and holding return use different price bases. Current holdings use formal NAV; estimated return uses source rate."
+    },
+    {
+      "path": "app/hooks/useRefreshManager.js:177-207,382-490,535-542",
+      "meaning": "Actual fundDailyEarnings writes use latestNavDate=data.jzrq or historical NAV row dates. The current module-local record helper writes those dates; the exported recordDailyEarnings helper is not called by the current refresh path. Displaying a latest update under today does not move stored formal earnings into today."
+    }
+  ],
+  "observations": [
+    {
+      "code": "017641",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=017641",
+      "fetched_at": "2026-10-13T10:41:22.660698+00:00",
+      "http_status": "200",
+      "sha256": "cf50ac82424737ec4214cf6abf6a5b4748b8c2a3344e3b23714af828146bde7b",
+      "result_status": {
+        "code": 0
+      },
+      "count": 455,
+      "baseline": {
+        "nav": "1.7251",
+        "date": "20261009"
+      },
+      "first_observation": {
+        "pre_date": "2026-10-12",
+        "min_time": "21:30:00"
+      },
+      "last_observation": {
+        "symbol": "017641",
+        "min_time": "05:04:00",
+        "pre_nav": "1.7203",
+        "nav_pct": "-0.2788",
+        "pre_nav2": "1.7199",
+        "nav2_pct": "-0.3038",
+        "pre_date": "2026-10-13",
+        "growthrate": -0.002788,
+        "growthrate2": "-0.003038"
+      },
+      "response_warning_summary": "来源称前十大重仓加权表现存在持仓披露滞后，不能代表完整基金单位净值走势。"
+    },
+    {
+      "code": "019305",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=019305",
+      "fetched_at": "2026-10-13T10:41:22.660903+00:00",
+      "http_status": "200",
+      "sha256": "252ea8ece1652ffeefedc7ce1f0ecbe46cefb3b41706c9c4ebb83390969f8fdb",
+      "result_status": {
+        "code": 0
+      },
+      "count": 455,
+      "baseline": {
+        "nav": "1.7083",
+        "date": "20261009"
+      },
+      "first_observation": {
+        "pre_date": "2026-10-12",
+        "min_time": "21:30:00"
+      },
+      "last_observation": {
+        "symbol": "019305",
+        "min_time": "05:04:00",
+        "pre_nav": "1.7035",
+        "nav_pct": "-0.2797",
+        "pre_nav2": "1.7031",
+        "nav2_pct": "-0.3038",
+        "pre_date": "2026-10-13",
+        "growthrate": -0.002797,
+        "growthrate2": "-0.003038"
+      },
+      "response_warning_summary": "来源称前十大重仓加权表现存在持仓披露滞后，不能代表完整基金单位净值走势。"
+    },
+    {
+      "code": "019172",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=019172",
+      "fetched_at": "2026-10-13T10:41:22.660976+00:00",
+      "http_status": "200",
+      "sha256": "5c4804b88173ad2beeec19bd77b34b603e5e8b8651e22f3a5b1ad95287c4c38f",
+      "result_status": {
+        "code": 0
+      },
+      "count": 455,
+      "baseline": {
+        "nav": "1.8179",
+        "date": "20261009"
+      },
+      "first_observation": {
+        "pre_date": "2026-10-12",
+        "min_time": "21:30:00"
+      },
+      "last_observation": {
+        "symbol": "019172",
+        "min_time": "05:04:00",
+        "pre_nav": "1.8066",
+        "nav_pct": "-0.6202",
+        "pre_nav2": "1.8003",
+        "nav2_pct": "-0.9663",
+        "pre_date": "2026-10-13",
+        "growthrate": -0.006202,
+        "growthrate2": "-0.009663"
+      },
+      "response_warning_summary": "来源称前十大重仓加权表现存在持仓披露滞后，不能代表完整基金单位净值走势。"
+    },
+    {
+      "code": "021778",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=021778",
+      "fetched_at": "2026-10-13T10:41:22.661930+00:00",
+      "http_status": "200",
+      "sha256": "ae7919f789a6f988aee37bc3d29b08dd9dfa8de1d747f24421b3d227a9a4d03c",
+      "result_status": {
+        "code": 0
+      },
+      "count": 455,
+      "baseline": {
+        "nav": "8.4426",
+        "date": "20261009"
+      },
+      "first_observation": {
+        "pre_date": "2026-10-12",
+        "min_time": "21:30:00"
+      },
+      "last_observation": {
+        "symbol": "021778",
+        "min_time": "05:04:00",
+        "pre_nav": "8.4560",
+        "nav_pct": "0.1586",
+        "pre_nav2": "8.4378",
+        "nav2_pct": "-0.0565",
+        "pre_date": "2026-10-13",
+        "growthrate": 0.001586,
+        "growthrate2": "-0.000565"
+      },
+      "response_warning_summary": "来源称前十大重仓加权表现存在持仓披露滞后，不能代表完整基金单位净值走势。"
+    },
+    {
+      "code": "270042",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=270042",
+      "fetched_at": "2026-10-13T10:41:23.112249+00:00",
+      "http_status": "200",
+      "sha256": "9361a09aaf732088faa5d295bf64c53fc01d3a4873afee214c65abe6638f6a45",
+      "result_status": {
+        "code": 0
+      },
+      "count": 455,
+      "baseline": {
+        "nav": "8.4745",
+        "date": "20261009"
+      },
+      "first_observation": {
+        "pre_date": "2026-10-12",
+        "min_time": "21:30:00"
+      },
+      "last_observation": {
+        "symbol": "270042",
+        "min_time": "05:04:00",
+        "pre_nav": "8.4880",
+        "nav_pct": "0.1589",
+        "pre_nav2": "8.4697",
+        "nav2_pct": "-0.0565",
+        "pre_date": "2026-10-13",
+        "growthrate": 0.001589,
+        "growthrate2": "-0.000565"
+      },
+      "response_warning_summary": "来源称前十大重仓加权表现存在持仓披露滞后，不能代表完整基金单位净值走势。"
+    },
+    {
+      "code": "000307",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=000307",
+      "fetched_at": "2026-10-13T10:41:23.225218+00:00",
+      "http_status": "200",
+      "sha256": "6d62921315baf7d8a05bc04df4facdf5fc7688411c0d4862b40cc1acae6b3483",
+      "result_status": {
+        "code": 0
+      },
+      "count": 103,
+      "baseline": {
+        "nav": "2.9585",
+        "date": "20261012"
+      },
+      "first_observation": {
+        "pre_date": "2026-10-13",
+        "min_time": "09:30:00"
+      },
+      "last_observation": {
+        "symbol": "000307",
+        "min_time": "16:04:00",
+        "pre_nav": "2.9628",
+        "nav_pct": "0.1451",
+        "pre_nav2": "2.9638",
+        "nav2_pct": "0.1784",
+        "pre_date": "2026-10-13",
+        "growthrate": 0.001451,
+        "growthrate2": "0.001784"
+      },
+      "response_warning_summary": "来源称前十大重仓加权表现存在持仓披露滞后，不能代表完整基金单位净值走势。"
+    }
+  ],
+  "decision": {
+    "adapter": "sina_fund_estimate",
+    "primary_reference_field": "pre_nav",
+    "alternative_pre_nav2": "Not combined with primary reference.",
+    "baseline_fields": [
+      "worth",
+      "worth_date"
+    ],
+    "publication_fields": [
+      "pre_date",
+      "min_time"
+    ],
+    "economic_nav_date": "Unknown; no inferred NAV economic date and no Price insertion.",
+    "official_nav_vote": false,
+    "community_supabase_used": false,
+    "source_growth_handling": "Retained as reference only; original price is never reconstructed by multiplying growth by a refreshed NAV."
+  }
+}

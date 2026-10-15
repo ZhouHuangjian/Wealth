@@ -42,10 +42,23 @@ _DATA_CACHE = {}
 _IN_FLIGHT = {}
 _DATA_LOCK = threading.Lock()
 _DATA_CACHE_BYTES = 16 * 1024 * 1024
+INTRADAY_CACHE_TTL = 60
+FORMAL_CACHE_TTL = 600
+
+
+def _data_cache_ttl(provider, operation):
+    # Eastmoney's latest response includes intraday estimates, even when a
+    # particular response has none. Do not hide the next tick behind the NAV
+    # cache. Formal-only feeds and historical observations keep their longer TTL.
+    return (
+        INTRADAY_CACHE_TTL
+        if provider in {"eastmoney_fund", "sina"} and operation == "quote"
+        else FORMAL_CACHE_TTL
+    )
 
 
 def _cached_provider_call(provider, inst, operation, start=None, end=None):
-    """Ten-minute public data cache, sharing concurrent identical refreshes.
+    """Public data cache, sharing concurrent identical refreshes.
 
     Keys never include user names/tenant IDs or plaintext credentials. Normalize
     from public product identity only so one user's custom display label cannot
@@ -72,7 +85,7 @@ def _cached_provider_call(provider, inst, operation, start=None, end=None):
     now = time.monotonic()
     with _DATA_LOCK:
         cached = _DATA_CACHE.get(key)
-        if cached and now - cached[0] < 600:
+        if cached and now - cached[0] < _data_cache_ttl(provider, operation):
             return deepcopy(cached[1])
         pending = _IN_FLIGHT.get(key)
         creator = pending is None
@@ -93,7 +106,10 @@ def _cached_provider_call(provider, inst, operation, start=None, end=None):
             else md._provider_history(provider, public_inst, start, end)
         )
         valid = (
-            _valid(value, public_inst)
+            (
+                _valid(value, public_inst)
+                or _valid_reference(value.get("reference_estimate"), public_inst)
+            )
             if operation == "quote"
             else bool(value) and all(_valid(row, public_inst) for row in value)
         )
@@ -102,7 +118,9 @@ def _cached_provider_call(provider, inst, operation, start=None, end=None):
             if size <= 2_000_000:
                 with _DATA_LOCK:
                     for stale in [
-                        k for k, v in _DATA_CACHE.items() if now - v[0] >= 600
+                        k
+                        for k, v in _DATA_CACHE.items()
+                        if now - v[0] >= _data_cache_ttl(k[0], k[4])
                     ]:
                         _DATA_CACHE.pop(stale)
                     while _DATA_CACHE and (
@@ -623,6 +641,27 @@ def _valid(row, inst):
     )
 
 
+def _valid_reference(row, inst):
+    return (
+        isinstance(row, dict)
+        and row.get("kind") == "reference_estimate"
+        and row.get("code") == inst["code"]
+        and row.get("currency") == inst["currency"] == "CNY"
+        and row.get("economic_date") is None
+        and row.get("usable_for_daily_return") is False
+        and row.get("usable_for_accounting") is False
+        and md._number(row.get("price"), positive=True) is not None
+        and md._timestamp(row.get("published_at")) is not None
+    )
+
+
+def _current_estimate(row):
+    if not isinstance(row, dict) or md._number(row.get("price"), positive=True) is None:
+        return False
+    stamp = md._timestamp(row.get("published_at"))
+    return bool(stamp and 0 <= (md._now() - stamp).total_seconds() <= 600)
+
+
 def _failed_quality(inst, attempts, error):
     row = md._failed(inst, error)
     row.update(
@@ -645,15 +684,34 @@ def compare_quote(inst, providers):
     from .provider_policy import provider_provenance
 
     attempts, rows, estimate, first_error = [], [], None, None
+    reference_estimate = None
     try:
         _identity(inst)
     except md.MarketDataError as exc:
         return _failed_quality(inst, attempts, exc)
     for provider in providers:
+        if provider == "sina" and _current_estimate(estimate):
+            continue
         try:
             row = _cached_provider_call(provider, inst, "quote")
             row["provider_id"] = provider
             row.update(provider_provenance(provider))
+            if provider == "sina":
+                reference = row.get("reference_estimate")
+                if not _valid_reference(reference, inst):
+                    _error("estimate_unavailable", "新浪本次未提供可用基金参考估值")
+                reference_estimate = {**reference, **provider_provenance(provider)}
+                attempts.append(
+                    {
+                        "provider": provider,
+                        "status": "reference_only",
+                        "error_code": None,
+                        **provider_provenance(provider),
+                    }
+                )
+                # The source's NAV baseline is not another independent formal
+                # NAV observation, even when it agrees with the official feeds.
+                continue
             if row.get("estimate"):
                 estimate = row["estimate"]
             if _valid(row, inst):
@@ -706,6 +764,8 @@ def compare_quote(inst, providers):
         result = _reconcile(rows, attempts)
     if estimate is not None:
         result["estimate"] = estimate
+    if reference_estimate is not None:
+        result["reference_estimate"] = reference_estimate
     return result
 
 

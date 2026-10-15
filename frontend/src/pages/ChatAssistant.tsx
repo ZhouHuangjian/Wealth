@@ -37,6 +37,7 @@ import {
 } from "../chat-device-model";
 import type { ChatDevice as Device } from "../chat-device-model";
 import DeviceRemoteControl from "./DeviceRemoteControl";
+import RemoteConversationDashboard from "./RemoteConversationDashboard";
 import "./chat-assistant.css";
 
 type AccountResponse = { user_id: string | number };
@@ -117,12 +118,13 @@ export default function ChatAssistant({
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<string | undefined>();
-  const [tab, setTab] = useState("drafts");
+  const [tab, setTab] = useState("current");
   const [trash, setTrash] = useState(false);
   const [adding, setAdding] = useState(false);
   const [createError, setCreateError] = useState("");
   const [binding, setBinding] = useState<Binding | null>(null);
   const [remoteDeviceId, setRemoteDeviceId] = useState<string | null>(null);
+  const [remoteProfileId, setRemoteProfileId] = useState<string | null>(null);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [history, setHistory] = useState(false);
   const [form] = Form.useForm();
@@ -149,6 +151,7 @@ export default function ChatAssistant({
     setCursor(null);
     setBinding(null);
     setRemoteDeviceId(null);
+    setRemoteProfileId(null);
     setAdding(false);
     setConversation(undefined);
     setHistory(false);
@@ -329,7 +332,7 @@ export default function ChatAssistant({
   }
   function switchTab(next: string) {
     setTab(next);
-    if (next === "devices") return;
+    if (next === "devices" || next === "current") return;
     const deleted = next === "trash";
     if (deleted === trashMode.current) return;
     trashMode.current = deleted;
@@ -372,6 +375,7 @@ export default function ChatAssistant({
         setRemoteDeviceId((selected) =>
           selected === key.slice(7) ? null : selected,
         );
+        if (remoteDeviceId === key.slice(7)) setRemoteProfileId(null);
         if (action === "permanent") {
           draftRevision.current++;
           setDevices((items) =>
@@ -761,7 +765,7 @@ export default function ChatAssistant({
         <PageTitle
           eyebrow=""
           title="聊天助手"
-          description={`${user.username} 的个人会话 · 在 Mac 生成，随时查看回复草稿`}
+          description={`${user.username} 的个人会话 · 随时查看消息、分析与回复草稿`}
           actions={
             <Button
               icon={<RefreshCw size={16} />}
@@ -821,7 +825,10 @@ export default function ChatAssistant({
         <>
           <div className="chat-status-line">
             <Tag icon={<MessageCircle size={13} />}>个人专属</Tag>
-            <span>草稿由绑定的 Mac 上传，网页可查看和复制，不会发送微信。</span>
+            <span>
+              会话动态由绑定的 Mac
+              同步，随时查看分析和草稿，复制回复后由你发送。
+            </span>
             <span>
               上次检查：{checkedAt ? chatTime(checkedAt) : "正在读取"}
             </span>
@@ -830,6 +837,27 @@ export default function ChatAssistant({
             activeKey={tab}
             onChange={switchTab}
             items={[
+              {
+                key: "current",
+                label: "会话动态",
+                destroyOnHidden: true,
+                children: (
+                  <RemoteConversationDashboard
+                    userId={String(user.id)}
+                    devices={devices}
+                    onConfigure={(deviceId, profileId) => {
+                      setRemoteProfileId(profileId ?? null);
+                      setRemoteDeviceId(deviceId);
+                    }}
+                    onPrivateError={() => {
+                      clearPrivate();
+                      setAccess(null);
+                      void refreshAuth.current();
+                    }}
+                    onAccessError={rejectAccess}
+                  />
+                ),
+              },
               {
                 key: "drafts",
                 label: "回复草稿",
@@ -929,9 +957,10 @@ export default function ChatAssistant({
                                   <>
                                     <Button
                                       disabled={!!busy}
-                                      onClick={() =>
-                                        setRemoteDeviceId(device.id)
-                                      }
+                                      onClick={() => {
+                                        setRemoteProfileId(null);
+                                        setRemoteDeviceId(device.id);
+                                      }}
                                     >
                                       远程管理
                                     </Button>
@@ -1007,10 +1036,14 @@ export default function ChatAssistant({
       )}
       {remoteDevice && access?.enabled && (
         <DeviceRemoteControl
+          initialProfileId={remoteProfileId ?? undefined}
           key={`${user.id}:${remoteDevice.id}`}
           userId={String(user.id)}
           device={remoteDevice}
-          onClose={() => setRemoteDeviceId(null)}
+          onClose={() => {
+            setRemoteDeviceId(null);
+            setRemoteProfileId(null);
+          }}
           onAccessError={rejectAccess}
           onPrivateError={() => {
             clearPrivate();

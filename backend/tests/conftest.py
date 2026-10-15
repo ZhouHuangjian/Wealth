@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 import pytest
 from django.conf import settings
 
@@ -29,3 +31,24 @@ def no_live_akshare(monkeypatch):
 
     akshare_provider._CACHE.clear()
     monkeypatch.setattr(akshare_provider, "_invoke", unavailable)
+
+
+@pytest.fixture(autouse=True)
+def no_live_sina_fund(monkeypatch):
+    """Default fallback must not depend on today's public fund responses.
+
+    Dedicated adapter scenarios override _get with their deterministic samples;
+    the existing security/response-limit tests retain their captured real helper.
+    """
+    from wealth import market_data
+
+    original = market_data._get
+
+    def offline(url, **kwargs):
+        if urlsplit(url).hostname == "stock.finance.sina.com.cn":
+            raise market_data.MarketDataError(
+                "provider_unavailable", "测试中不请求新浪实时基金参考行情"
+            )
+        return original(url, **kwargs)
+
+    monkeypatch.setattr(market_data, "_get", offline)

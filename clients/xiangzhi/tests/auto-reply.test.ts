@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AppState, Draft, Message } from '../shared/types.js';
-import { AutoReplyEngine } from '../server/auto-reply.js';
+import { AutoReplyEngine, replyContextFingerprint } from '../server/auto-reply.js';
 import { latestConversationMessage } from '../server/generation.js';
+import { messageEvidenceHash } from '../server/contact-evidence.js';
 
 function fixture(): AppState {
   return {version: 1, settings: {autoReplyEnabled: true, autoReplyMode: 'send', provider: 'demo', modelUrl: 'http://localhost:11434', modelName: '', apiKey: '',
@@ -28,6 +29,106 @@ function deferred<T>() {
   const promise = new Promise<T>(res => {resolve = res;});
   return {promise, resolve};
 }
+
+function addRecipientContext(state: AppState, conversationId = 'a') {
+  const conversation = state.conversations.find(item => item.id === conversationId)!;
+  const peer = state.messages.find(item => item.conversationId === conversationId && item.role === 'peer')!;
+  conversation.basisFacts = [{id: 'basis-1', category: 'current_status', content: '对方正在学习摄影', sourceNote: '手动输入', createdAt: '', updatedAt: ''}];
+  conversation.processing = {memoryEnabled: true};
+  conversation.memory = {summary: '未确认模型回顾', openTopics: ['下次摄影活动'], throughSequence: peer.sequence, sourceDigest: 'source-digest',
+    provider: 'qwen', modelName: 'summary-model', updatedAt: '', entries: [{id: 'memory-1', kind: 'event', text: '用户审核的摄影话题',
+      sourceMessageIds: [peer.id], sourceMessageHashes: {[peer.id]: messageEvidenceHash(peer)}, status: 'approved', createdAt: ''}]};
+}
+
+test('same-contact foundation, reviewed memory and memory switch changes invalidate an in-flight draft', async () => {
+  for (const change of ['basis', 'basis-origin', 'approved-memory', 'manual-memory', 'summary', 'manual-summary', 'disable-memory', 'clear-memory', 'account'] as const) {
+    const store = new MemoryStore(); add(store, 'm1');
+    store.update(state => {state.settings.autoReplyMode = 'draft'; addRecipientContext(state); state.conversations[0].wechat = {
+      enabled: true, initialized: true, cursor: null, accountFingerprint: 'account-before', lastCheckedAt: null, status: 'ready', detail: ''};});
+    const gate = deferred<Draft[]>(); let sends = 0;
+    const engine = new AutoReplyEngine(store, {send: async () => {sends++;}}, {generate: async () => gate.promise});
+    engine.enqueue('a', 'm1'); const tick = engine.tick(); const oldDrafts = await generate(store.read(), 'a');
+    store.update(state => {
+      const conversation = state.conversations[0];
+      if (change === 'basis') conversation.basisFacts![0].content = '对方最近学习烹饪';
+      if (change === 'basis-origin') Object.assign(conversation.basisFacts![0], {origin: 'model', sourceMessageIds: ['m1'],
+        sourceMessageHashes: {m1: messageEvidenceHash(state.messages.find(message => message.id === 'm1')!)}});
+      if (change === 'approved-memory') conversation.memory!.entries[0].text = '用户修订了摄影话题';
+      if (change === 'manual-memory') Object.assign(conversation.memory!.entries[0], {origin: 'manual', sourceMessageIds: [], sourceMessageHashes: undefined});
+      if (change === 'summary') conversation.memory!.summary = '更新的未确认回顾';
+      if (change === 'manual-summary') conversation.memory!.summaryOrigin = 'manual';
+      if (change === 'disable-memory') conversation.processing!.memoryEnabled = false;
+      if (change === 'clear-memory') delete conversation.memory;
+      if (change === 'account') {conversation.wechat!.accountFingerprint = 'account-after'; delete conversation.memory;}
+    });
+    gate.resolve(oldDrafts); await tick;
+    assert.equal(sends, 0, change); assert.equal(store.read().drafts.length, 0, change);
+    assert.equal(store.read().jobs[0].status, 'cancelled', change);
+  }
+});
+
+test('other contact context and unused analysis estimates do not invalidate a reply', async () => {
+  const store = new MemoryStore(); add(store, 'b-message', 'peer', 'manual', 'b'); add(store, 'a-message');
+  store.update(state => {state.settings.autoReplyMode = 'draft'; addRecipientContext(state, 'a'); addRecipientContext(state, 'b');});
+  const before = replyContextFingerprint(store.read(), 'a');
+  const gate = deferred<Draft[]>(); let sends = 0;
+  const engine = new AutoReplyEngine(store, {send: async () => {sends++;}}, {generate: async () => gate.promise});
+  engine.enqueue('a', 'a-message'); const tick = engine.tick(); const drafts = await generate(store.read(), 'a');
+  store.update(state => {
+    const other = state.conversations[1]; other.basisFacts![0].content = '其他联系人的新爱好';
+    other.memory!.summary = '其他联系人的新摘要'; other.memory!.entries[0].text = '其他联系人的新记忆';
+    Object.assign(state.conversations[0].processing!, {intentEnabled: true, affinityEnabled: true, autoAnalyzeMessages: true,
+      autoCompressMemory: true, analysisModel: {id: 'new-analysis-model', provider: 'compatible', modelName: 'analysis-v2'},
+      memoryModel: {id: 'new-memory-model', provider: 'compatible', modelName: 'memory-v2'}});
+    state.settings.analysis = {provider: 'compatible', modelUrl: 'http://127.0.0.1:1234/v1', modelName: 'analysis-v2', useReplyApiKey: false, allowRemoteModel: false};
+    state.settings.memory = {provider: 'compatible', modelUrl: 'http://127.0.0.1:1234/v1', modelName: 'memory-v2', useReplyApiKey: false, allowRemoteModel: false};
+    state.claims.push({id: 'other-claim', category: 'fact', statement: '另一会话范围的本人声明', status: 'approved', scope: 'b',
+      evidenceIds: [], createdAt: ''});
+    state.messages.find(message => message.id === 'a-message')!.insights = {conversationId: 'a', messageId: 'a-message',
+      intents: [{label: '关心', percentage: 20}, {label: '质问', percentage: 80}], affinity: {score: 60, confidence: 30, evidence: []},
+      uncertainty: '不能验证真实心理', provider: 'qwen', modelName: 'analysis-model', analyzedAt: ''};
+  });
+  assert.equal(replyContextFingerprint(store.read(), 'a'), before);
+  gate.resolve(drafts); await tick;
+  assert.equal(sends, 0); assert.equal(store.read().jobs[0].status, 'drafted'); assert.equal(store.read().drafts.length, 1);
+});
+
+test('fingerprints omit disabled memory changes and invalidate approved entries when old evidence changes beyond recent messages', () => {
+  const state = fixture(); state.settings.autoReplyMode = 'draft';
+  state.messages.push({id: 'old-source', conversationId: 'a', role: 'peer', source: 'manual', text: '最初的事实', sentAt: null,
+    sequence: 0, externalId: null, aiAssisted: false});
+  for (let i = 1; i <= 25; i++) state.messages.push({id: `later-${i}`, conversationId: 'a', role: 'peer', source: 'manual',
+    text: `后来的消息${i}`, sentAt: null, sequence: i, externalId: null, aiAssisted: false});
+  addRecipientContext(state);
+  const enabled = replyContextFingerprint(state, 'a'); state.messages[0].text = '修正的旧事实';
+  assert.notEqual(replyContextFingerprint(state, 'a'), enabled, 'changed old evidence removes its approved memory from the projection');
+  state.conversations[0].processing!.memoryEnabled = false; const disabled = replyContextFingerprint(state, 'a');
+  state.conversations[0].memory!.summary = '停用状态下新的摘要'; state.conversations[0].memory!.entries[0].text = '停用状态下新的记忆';
+  assert.equal(replyContextFingerprint(state, 'a'), disabled);
+});
+
+test('first-time analysis configuration does not change an otherwise unconfigured contact reply context', () => {
+  const state = fixture();
+  const before = replyContextFingerprint(state, 'a');
+  state.conversations[0].processing = {intentEnabled: true, affinityEnabled: true,
+    analysisModel: {id: 'analysis-only', provider: 'compatible', modelName: 'analysis-model'}};
+  assert.equal(replyContextFingerprint(state, 'a'), before);
+});
+
+test('automatic sending checks the contact model list rather than another contact or global defaults', async () => {
+  const store=new MemoryStore();let sends=0,generates=0;
+  store.update(s=>{
+    s.settings.replyModels=[{id:'global-a',provider:'demo',modelName:''},{id:'global-b',provider:'demo',modelName:''}];
+    s.conversations[0].processing={replyModels:[]};
+    s.conversations[1].processing={replyModels:[{id:'b-a',provider:'demo',modelName:''},{id:'b-b',provider:'demo',modelName:''}]};
+  });
+  add(store,'a-message','peer','manual','a');add(store,'b-message','peer','manual','b');
+  const engine=new AutoReplyEngine(store,{send:async()=>{sends++;}},{generate:async(s,cid)=>{generates++;assert.deepEqual(s.settings.replyModels,[]);return generate(s,cid);}});
+  engine.enqueue('a','a-message');engine.enqueue('b','b-message');await engine.tick();
+  assert.equal(sends,1);assert.equal(generates,1);
+  assert.equal(store.read().jobs.find(j=>j.conversationId==='a')?.status,'sent');
+  assert.equal(store.read().jobs.find(j=>j.conversationId==='b')?.status,'blocked');
+});
 
 test('global switch, contact whitelist and historical imports never enter sending', async () => {
   for (const mode of ['global', 'contact', 'import', 'self'] as const) {

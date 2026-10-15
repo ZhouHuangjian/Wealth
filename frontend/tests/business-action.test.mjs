@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   dcaNextAction,
+  dcaCashReconciliationAction,
+  dailyReturnNextAction,
   holdingForAction,
   holdingNextAction,
 } from "../src/business-action.ts";
@@ -13,6 +15,53 @@ const plan = {
   automation: { holding_account_id: "holding-one" },
 };
 const url = (action) => new URL(action.to, "https://synthetic.invalid");
+
+test("return gaps locate that product's market evidence rather than another holding", () => {
+  const action = dailyReturnNextAction("space/one", {
+    instrument_id: "fund?one",
+    missing_reason_code: "no_estimate",
+    to: "https://untrusted.invalid",
+    amount: "123.45",
+  });
+  assert.equal(url(action).pathname, "/spaces/space%2Fone/analytics");
+  assert.equal(url(action).searchParams.get("tab"), "settlement");
+  assert.equal(url(action).searchParams.get("section"), "quotes");
+  assert.equal(url(action).searchParams.get("instrument_id"), "fund?one");
+  assert.ok(!action.to.includes("123.45"));
+  assert.ok(!action.to.includes("untrusted"));
+  assert.equal(dailyReturnNextAction("space", {}), null);
+});
+
+test("FX and product calendar gaps open their own correction destinations", () => {
+  const fx = dailyReturnNextAction("space", {
+    missing_reason_code: "fx_missing",
+    instrument_id: "fund",
+  });
+  assert.equal(url(fx).pathname, "/spaces/space/manage");
+  assert.equal(url(fx).searchParams.get("tab"), "fx");
+  const calendar = dailyReturnNextAction("space", {
+    missing_reason_code: "calendar_unverified",
+    instrument_id: "fund",
+  });
+  assert.equal(url(calendar).searchParams.get("action"), "edit-product");
+  assert.equal(url(calendar).searchParams.get("instrument_id"), "fund");
+  const account = dailyReturnNextAction("space", { account_id: "institution" });
+  assert.equal(url(account).searchParams.get("section"), "reconcile");
+  assert.equal(url(account).searchParams.get("account_id"), "institution");
+  const trade = dailyReturnNextAction("space", {
+    account_id: "actual-account",
+    instrument_id: "fund",
+    missing_reason_code: "trade_date_unverified",
+  });
+  assert.equal(url(trade).searchParams.get("tab"), "investments");
+  assert.equal(url(trade).searchParams.get("account_id"), "actual-account");
+  const snapshot = dailyReturnNextAction("space", {
+    account_id: "actual-account",
+    instrument_id: "future",
+    missing_reason_code: "account_snapshot_needed",
+  });
+  assert.equal(url(snapshot).searchParams.get("section"), "reconcile");
+});
 
 test("late NAV and confirmation keep automatic waiting without a manual task", () => {
   for (const status of [
@@ -27,16 +76,85 @@ test("late NAV and confirmation keep automatic waiting without a manual task", (
     assert.equal(dcaNextAction("space-one", { status }, plan), null);
 });
 
-test("cash shortage points to the actual debit account rather than a fund bill", () => {
+test("cash shortage opens the exact plan funding setting while retaining debit reconciliation", () => {
   const action = dcaNextAction(
     "space-one",
     { automation: { status: "waiting_cash" } },
     plan,
   );
-  assert.equal(action.kind, "cash");
-  assert.equal(url(action).searchParams.get("account_id"), "bank-one");
-  assert.equal(url(action).searchParams.get("section"), "reconcile");
-  assert.match(action.description, /不自动向其他账户补款/);
+  assert.equal(action.kind, "plan");
+  assert.equal(url(action).searchParams.get("plan_id"), "plan-one");
+  assert.equal(url(action).searchParams.get("action"), "edit-plan");
+  assert.equal(url(action).searchParams.get("focus"), "funding");
+  assert.match(action.description, /明确选择来源账户及生效日期/);
+  assert.ok(!url(action).searchParams.has("top_up_account_id"));
+  assert.ok(!url(action).searchParams.has("top_up_start_date"));
+  const reconcile = dcaCashReconciliationAction("space-one", {}, plan);
+  assert.equal(reconcile.kind, "cash");
+  assert.equal(url(reconcile).searchParams.get("account_id"), "bank-one");
+  assert.equal(url(reconcile).searchParams.get("section"), "reconcile");
+  assert.match(reconcile.description, /仅补录真实遗漏/);
+});
+
+test("homepage shortage projection navigates without selecting or enabling funding", () => {
+  const row = {
+    id: "period-old",
+    plan_id: "plan?correct",
+    account_id: "debit-correct",
+    instrument_id: "fund-correct",
+    due_date: "2026-10-08",
+    automation: { status: "waiting_cash" },
+  };
+  const before = structuredClone(row);
+  const action = dcaNextAction("space/one", row);
+  assert.equal(url(action).pathname, "/spaces/space%2Fone/assets");
+  assert.equal(url(action).searchParams.get("plan_id"), "plan?correct");
+  assert.equal(url(action).searchParams.get("instrument_id"), "fund-correct");
+  assert.deepEqual(row, before);
+  assert.ok(!action.to.includes("2026-10-08"));
+  const fallback = dcaNextAction("space-one", {
+    status: "waiting_cash",
+    account_id: "debit-correct",
+  });
+  assert.equal(url(fallback).searchParams.get("account_id"), "debit-correct");
+  assert.equal(dcaNextAction("space-one", { status: "waiting_cash" }), null);
+  assert.equal(dcaCashReconciliationAction("space-one", {}), null);
+});
+
+test("an invalid backup account opens its plan settings instead of nonexistent transactions", () => {
+  for (const row of [
+    { status: "needs_review", reason_code: "dca_top_up_account_invalid" },
+    {
+      automation: { status: "needs_review", message: "请核对" },
+      details: { automation: { reason_code: "dca_top_up_account_invalid" } },
+    },
+  ]) {
+    const action = dcaNextAction("space-one", row, plan);
+    assert.equal(action.kind, "plan");
+    assert.equal(url(action).searchParams.get("plan_id"), plan.id);
+    assert.equal(url(action).searchParams.get("action"), "edit-plan");
+    assert.equal(url(action).searchParams.get("focus"), "funding");
+    assert.ok(!url(action).searchParams.has("event_id"));
+    assert.match(action.description, /尚未转入或扣款/);
+  }
+  assert.equal(
+    dcaNextAction("space", {
+      status: "needs_review",
+      reason_code: "dca_top_up_account_invalid",
+    }),
+    null,
+  );
+  const unrelated = dcaNextAction(
+    "space",
+    {
+      status: "needs_review",
+      reason_code: "invalid",
+      debit_event_id: "existing",
+    },
+    plan,
+  );
+  assert.equal(unrelated.kind, "transaction");
+  assert.equal(url(unrelated).searchParams.get("event_id"), "existing");
 });
 
 test("fee and missing automation configuration open the precise plan", () => {
@@ -130,6 +248,32 @@ test("holding checking retains both identities and does not select another holdi
   assert.equal(url(action).searchParams.get("action"), "check-holding");
 });
 
+test("a daily-return reconciliation payload locates the original holding without holdings-only eligibility", () => {
+  // The home/calendar return API supplies reconciliation evidence, while the
+  // destination holdings API supplies current reconciliation_eligibility.
+  const row = {
+    account_id: "holding-account",
+    instrument_id: "fund-one",
+    kind: "fund",
+    date: "2026-10-12",
+    amount: null,
+    status: "unavailable",
+    missing_reason_code: "holding_reconciliation",
+    message: "原持仓金额、成本或收益范围待核对，暂不确认该日收益",
+    reconciliation: { status: "unresolved", opening_event_id: "opening-one" },
+  };
+  const original = structuredClone(row);
+  const action = dailyReturnNextAction("space-one", row);
+  assert.equal(action.kind, "holding");
+  assert.equal(url(action).pathname, "/spaces/space-one/assets");
+  assert.equal(url(action).searchParams.get("tab"), "holdings");
+  assert.equal(url(action).searchParams.get("action"), "check-holding");
+  assert.equal(url(action).searchParams.get("account_id"), "holding-account");
+  assert.equal(url(action).searchParams.get("instrument_id"), "fund-one");
+  assert.equal(url(action).searchParams.has("opening_event_id"), false);
+  assert.deepEqual(row, original);
+});
+
 test("holding without an eligible opening asks for actual transaction evidence", () => {
   const action = holdingNextAction("space-one", {
     account_id: "account-one",
@@ -152,4 +296,15 @@ test("links encode identities and contain no amounts or statement contents", () 
   assert.equal(url(action).searchParams.get("plan_id"), "plan?one");
   assert.ok(!action.to.includes("123.45"));
   assert.ok(!action.to.includes("private fact"));
+});
+test("market closure is informational and never routes to a corrective task", () => {
+  assert.equal(
+    dailyReturnNextAction("space", {
+      status: "market_closed",
+      account_id: "account",
+      instrument_id: "fund",
+      missing_reason_code: null,
+    }),
+    null,
+  );
 });

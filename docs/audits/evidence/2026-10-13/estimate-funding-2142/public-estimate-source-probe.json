@@ -1,0 +1,222 @@
+{
+  "scope": "Public product quote coverage only; no account, balance, position, credential or production database data",
+  "observed_date": "2026-10-13",
+  "timezone": "Asia/Shanghai",
+  "live_probe": {
+    "url": "https://fundcomapi.tiantianfunds.com/mm/newCore/FundValuationLast?FCODES=017641%2C019305%2C019172%2C021778%2C270042%2C000307&FIELDS=FCODE%2CSHORTNAME%2CGSZZL%2CGZTIME%2CGSZ%2CNAV%2CPDATE%2CFUNDTYPE",
+    "fetched_at": "2026-10-13T10:25:17.451391+00:00",
+    "http_status": "200",
+    "body_sha256": "2f9134948ad8d102ac7288a435f47b9f9e996c1e3b0c2cde1af0491df814201c"
+  },
+  "missing_products": [
+    {
+      "code": "017641",
+      "public_name": "摩根标普500指数(QDII)人民币A",
+      "currency": "CNY",
+      "provider_fund_type": "007",
+      "formal_nav_date": "2026-10-09",
+      "formal_nav_present": true,
+      "estimate_fields_present": {
+        "GSZ": false,
+        "GZTIME": false,
+        "GSZZL": false
+      },
+      "product_page": {
+        "url": "https://fund.eastmoney.com/017641.html",
+        "fetched_at": "2026-10-13T10:25:17.762818+00:00",
+        "http_status": "200",
+        "body_sha256": "e3967e33cac02474caec7b8834fa3856fb1f8c68a175ea281ce8b7c912b9665e",
+        "page_generated_at": "2026-10-13 18:10:05",
+        "estimate_withdrawal_notice_present": true,
+        "notice_excerpt": "下线指数基金净值估算功能",
+        "page_generation_time_is_not_quote_publication_time": true
+      },
+      "legacy_estimate_endpoint": {
+        "url": "https://fundgz.1234567.com.cn/js/017641.js",
+        "fetched_at": "2026-10-13T10:25:17.859424+00:00",
+        "http_status": "200",
+        "body_sha256": "3b20843aa013c7a0a70a1482b5d467b1d4df60b762e335b29ce99103ed1d17e2",
+        "format": "HTML error page",
+        "valid_jsonp": false,
+        "body_bytes": 3924
+      }
+    },
+    {
+      "code": "019305",
+      "public_name": "摩根标普500指数(QDII)人民币C",
+      "currency": "CNY",
+      "provider_fund_type": "007",
+      "formal_nav_date": "2026-10-09",
+      "formal_nav_present": true,
+      "estimate_fields_present": {
+        "GSZ": false,
+        "GZTIME": false,
+        "GSZZL": false
+      },
+      "product_page": {
+        "url": "https://fund.eastmoney.com/019305.html",
+        "fetched_at": "2026-10-13T10:25:18.030465+00:00",
+        "http_status": "200",
+        "body_sha256": "ac3f8b208a905251ea9820d3310e40c64af56689aa137720d344534dd6b24d0d",
+        "page_generated_at": "2026-10-13 18:14:09",
+        "estimate_withdrawal_notice_present": true,
+        "notice_excerpt": "下线指数基金净值估算功能",
+        "page_generation_time_is_not_quote_publication_time": true
+      },
+      "legacy_estimate_endpoint": {
+        "url": "https://fundgz.1234567.com.cn/js/019305.js",
+        "fetched_at": "2026-10-13T10:25:18.116417+00:00",
+        "http_status": "200",
+        "body_sha256": "3b20843aa013c7a0a70a1482b5d467b1d4df60b762e335b29ce99103ed1d17e2",
+        "format": "HTML error page",
+        "valid_jsonp": false,
+        "body_bytes": 3924
+      }
+    },
+    {
+      "code": "019172",
+      "public_name": "摩根纳斯达克100指数(QDII)人民币A",
+      "currency": "CNY",
+      "provider_fund_type": "007",
+      "formal_nav_date": "2026-10-09",
+      "formal_nav_present": true,
+      "estimate_fields_present": {
+        "GSZ": false,
+        "GZTIME": false,
+        "GSZZL": false
+      },
+      "product_page": {
+        "url": "https://fund.eastmoney.com/019172.html",
+        "fetched_at": "2026-10-13T10:25:18.370068+00:00",
+        "http_status": "200",
+        "body_sha256": "022a2a949b5b2c0eb5d5ea3ae2d92006593b6e2a9dc4da67e769be7e85ff8e82",
+        "page_generated_at": "2026-10-13 18:13:47",
+        "estimate_withdrawal_notice_present": true,
+        "notice_excerpt": "下线指数基金净值估算功能",
+        "page_generation_time_is_not_quote_publication_time": true
+      },
+      "legacy_estimate_endpoint": {
+        "url": "https://fundgz.1234567.com.cn/js/019172.js",
+        "fetched_at": "2026-10-13T10:25:18.458959+00:00",
+        "http_status": "200",
+        "body_sha256": "3b20843aa013c7a0a70a1482b5d467b1d4df60b762e335b29ce99103ed1d17e2",
+        "format": "HTML error page",
+        "valid_jsonp": false,
+        "body_bytes": 3924
+      }
+    },
+    {
+      "code": "021778",
+      "public_name": "广发纳指100ETF联接(QDII)人民币F",
+      "currency": "CNY",
+      "provider_fund_type": "007",
+      "formal_nav_date": "2026-10-09",
+      "formal_nav_present": true,
+      "estimate_fields_present": {
+        "GSZ": false,
+        "GZTIME": false,
+        "GSZZL": false
+      },
+      "product_page": {
+        "url": "https://fund.eastmoney.com/021778.html",
+        "fetched_at": "2026-10-13T10:25:18.516739+00:00",
+        "http_status": "200",
+        "body_sha256": "7298ce482726dc3238f0c7c327c717c232e7b9010c21bc4510a14d6d50fd15ee",
+        "page_generated_at": "2026-10-13 18:09:47",
+        "estimate_withdrawal_notice_present": true,
+        "notice_excerpt": "下线指数基金净值估算功能",
+        "page_generation_time_is_not_quote_publication_time": true
+      },
+      "legacy_estimate_endpoint": {
+        "url": "https://fundgz.1234567.com.cn/js/021778.js",
+        "fetched_at": "2026-10-13T10:25:18.872339+00:00",
+        "http_status": "200",
+        "body_sha256": "3b20843aa013c7a0a70a1482b5d467b1d4df60b762e335b29ce99103ed1d17e2",
+        "format": "HTML error page",
+        "valid_jsonp": false,
+        "body_bytes": 3924
+      }
+    },
+    {
+      "code": "270042",
+      "public_name": "广发纳斯达克100ETF联接人民币(QDII)A",
+      "currency": "CNY",
+      "provider_fund_type": "007",
+      "formal_nav_date": "2026-10-09",
+      "formal_nav_present": true,
+      "estimate_fields_present": {
+        "GSZ": false,
+        "GZTIME": false,
+        "GSZZL": false
+      },
+      "product_page": {
+        "url": "https://fund.eastmoney.com/270042.html",
+        "fetched_at": "2026-10-13T10:25:18.872557+00:00",
+        "http_status": "200",
+        "body_sha256": "90b56bada2cca3798fe9d652dc2a3f4a2609f0b8aeb90cd48f9da01f2a169faa",
+        "page_generated_at": "2026-10-13 18:16:26",
+        "estimate_withdrawal_notice_present": true,
+        "notice_excerpt": "下线指数基金净值估算功能",
+        "page_generation_time_is_not_quote_publication_time": true
+      },
+      "legacy_estimate_endpoint": {
+        "url": "https://fundgz.1234567.com.cn/js/270042.js",
+        "fetched_at": "2026-10-13T10:25:18.876759+00:00",
+        "http_status": "200",
+        "body_sha256": "3b20843aa013c7a0a70a1482b5d467b1d4df60b762e335b29ce99103ed1d17e2",
+        "format": "HTML error page",
+        "valid_jsonp": false,
+        "body_bytes": 3924
+      }
+    }
+  ],
+  "control": {
+    "code": "000307",
+    "name": "易方达黄金ETF联接A",
+    "estimate_present": true,
+    "quoted_at": "2026-10-13 15:30",
+    "formal_nav_date": "2026-10-12",
+    "interpretation": "Confirms endpoint returns estimates for a supported product; its after-close quote is not a current intraday return"
+  },
+  "conclusion": "For these five products the current provider supplies formal NAV but no intraday estimate. No reliable backup has been established; this observation does not establish a universal rule for all index funds or QDII funds.",
+  "changes_to_provider_configuration": false,
+  "qdii_list_endpoint": {
+    "url": "https://api.fund.eastmoney.com/FundGuZhi/GetFundGZList?type=6&sort=3&orderType=desc&canbuy=0&pageIndex=1&pageSize=20000",
+    "fetched_at": "2026-10-13T10:29:14.278596+00:00",
+    "status": "200",
+    "exit_code": 0,
+    "error": "",
+    "body_sha256": "a122a12e7b8884a9899b5a07fe6650628490b10be737c643e16430c60b43a31c",
+    "data_present": false,
+    "total_count": 0,
+    "upstream_message": "暂无数据"
+  },
+  "akshare_primary_reference": {
+    "documentation_url": "https://github.com/akfamily/akshare/blob/main/docs/data/fund/fund_public.md",
+    "source_url": "https://github.com/akfamily/akshare/blob/main/akshare/fund/fund_em.py",
+    "source_sha256": "83ecb3e3677752af75a271636ef85d643ee2945581fa62649e061fded27ffc23",
+    "repository_adapter_uses": "fund_etf_fund_info_em (formal NAV only)",
+    "optional_sdk_estimate_method": "fund_value_estimation_em",
+    "observation": "SDK QDII route uses the same GetFundGZList type=6 endpoint observed empty; SDK currently has an index-only static-page fallback for all/index selections, not a verified substitute for these five QDII share classes."
+  },
+  "separate_adapter_regression": {
+    "condition": "Latest endpoint provides a matching-code estimate but omits NAV or NAV date",
+    "impact": "Previously history fallback replaced or dropped that estimate. This does not explain the five observed null GSZ responses.",
+    "fixture": "backend/tests/test_fund_estimate_fallback.py",
+    "before": "4 failed, 3 passed",
+    "after": "10 regression cases passed in the related 185-case run",
+    "live_network_in_unit_tests": false,
+    "database_used_in_unit_tests": false,
+    "related_regression": "185 passed in 0.37s",
+    "related_scope": [
+      "test_fund_estimate_fallback.py",
+      "test_market_data.py",
+      "test_fund_sources_v2100.py",
+      "test_akshare_provider.py",
+      "test_akshare_integration_v211.py"
+    ],
+    "database_connection_guard": "Database URL points to unreachable localhost port 1; these tests have no django_db marker",
+    "synthetic_before_log_sha256": "cd6d8144c6dfc9e971a11ec70492555d7a188692ca4075911682cb5b4a6d87c7",
+    "synthetic_after_log_sha256": "7e1e214d98fd93eb8d1dcf2f4cd44bf7c71de1aee30fb0e1add3cffed7c7a094"
+  }
+}

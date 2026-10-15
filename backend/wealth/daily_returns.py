@@ -7,7 +7,7 @@ investment earnings. Dates remain market dates, including lagged QDII NAVs.
 
 from collections import defaultdict
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.db.models import Q
 from django.utils import timezone
@@ -47,7 +47,7 @@ def _continuous_baseline(start, end, calendar_id):
     return True
 
 
-def _unavailable(item, message):
+def _unavailable(item, message, reason=None):
     return {
         **item,
         "amount": None,
@@ -55,7 +55,36 @@ def _unavailable(item, message):
         "basis": None,
         "status": "unavailable",
         "message": message,
+        "missing_reason_code": reason,
     }
+
+
+def _matching_reference_quote(state, instrument, reference):
+    """A multi-source NAV's fetch time is not its intraday estimate's fetch time.
+
+    Only bind metadata to the exact persisted observation. Another/newer tick
+    must never lend its fresh timestamps to an older reference Price.
+    """
+    quote = state.get("quote") or {}
+    candidate = quote.get("estimate") or quote
+    try:
+        published = parse_datetime(candidate.get("published_at") or "")
+        if published is not None and timezone.is_naive(published):
+            published = timezone.make_aware(published)
+        matches = (
+            candidate.get("code") == instrument.code
+            and candidate.get("kind") in {"reference", "estimate", "market"}
+            and candidate.get("currency") == instrument.currency
+            and candidate.get("economic_date") == str(reference.economic_date)
+            and str(candidate.get("source") or "public_market")[:120]
+            == reference.source
+            and Decimal(str(candidate.get("price"))) == reference.value
+            and published is not None
+            and published == reference.published_at
+        )
+    except (TypeError, ValueError, InvalidOperation):
+        matches = False
+    return candidate if matches else None
 
 
 class ReturnEvidence:
@@ -64,6 +93,7 @@ class ReturnEvidence:
         from .investments import _corporate_actions, _selected_rows
 
         self.space, self.when = space, when
+        self.recording_modes = {}
         self.accounts, self.instruments = _selected_rows(
             space, account_id, instrument_id, kind
         )
@@ -314,11 +344,14 @@ class ReturnEvidence:
             when,
             self.actions.get(iid, []),
             check_reader=self.read_check,
+            blocked_dates=self.nav_quarantines.get(iid, {}),
         )
         if item is None:
             return None
         if str(when) in self.nav_quarantines.get(iid, {}):
-            return _unavailable(item, "本日正式净值来源存在差异，暂停收益计算")
+            return _unavailable(
+                item, "本日正式净值来源存在差异，暂停收益计算", "nav_conflict"
+            )
         item.update(
             observation_kind="reference" if reference else "formal",
             price_basis="estimate" if reference else "formal",
@@ -342,8 +375,29 @@ class ReturnEvidence:
             and not move["reconstructed"]
             for move in self.movements[key]
         ):
-            return _unavailable(item, "本日仅录入期初持仓，尚缺可核对的前一日持仓基准")
+            return _unavailable(
+                item,
+                "本日仅录入期初持仓，尚缺可核对的前一日持仓基准",
+                "opening_baseline",
+            )
         if item["amount"] is None:
+            # Only replace the price-gap explanation. A reconciliation, missing
+            # cost or corporate-action problem must retain its own next step.
+            if estimated and item.get("missing_reason_code") == "no_current_price":
+                state = self.states.get(iid, {})
+                if state.get("refresh_status") == "failed":
+                    return _unavailable(
+                        item,
+                        "行情刷新失败，尚未取得该日可用价格；查看行情详情",
+                        "refresh_failed",
+                    )
+                return _unavailable(
+                    item,
+                    "未取得该日估值或正式净值；可查看行情来源和更新时间"
+                    if instrument.kind == "fund"
+                    else "未取得该日估值或收盘价；可查看行情来源和更新时间",
+                    "no_estimate",
+                )
             return item
         if item.get("interval_start") and not _continuous_baseline(
             day(item["interval_start"]),
@@ -351,55 +405,105 @@ class ReturnEvidence:
             return_calendar(instrument, estimated=bool(reference)),
         ):
             return _unavailable(
-                item, "上一报价与本日之间缺少交易日行情，不能当作单日收益"
+                item,
+                "上一报价与本日之间缺少交易日行情，不能当作单日收益",
+                "missing_baseline",
             )
         if reference:
+            from .investments import _closed_calendar_item
             from .trading_calendar import is_trading_day
+
+            previous = next(
+                (q for q in reversed(formal) if q.economic_date < when), None
+            )
+            closed = _closed_calendar_item(
+                instrument,
+                when,
+                item,
+                previous,
+                self.movements[key],
+                self.dividends[key],
+                corporate_actions=self.actions.get(iid, []),
+                blocked_dates=self.nav_quarantines.get(iid, {}),
+            )
+            if closed:
+                return closed
 
             if is_trading_day(when, _calendar_id(instrument)) is not True:
                 return _unavailable(
-                    item, "本日休市或交易日历未核实，估值不作为今日收益"
+                    item,
+                    "本日休市或交易日历未核实，估值不作为今日收益",
+                    "calendar_unverified",
                 )
             state = self.states.get(iid, {})
+            matching_quote = _matching_reference_quote(state, instrument, reference)
+            is_today = when == timezone.localdate()
+            if is_today and state.get("quote") and matching_quote is None:
+                return _unavailable(
+                    item,
+                    "估值与当前行情记录不匹配，等待对应报价更新",
+                    "quote_metadata_mismatch",
+                )
             if (
                 state.get("refresh_status") == "failed"
-                or (state.get("quote") or {}).get("status") == "stale"
+                or (matching_quote or state.get("quote") or {}).get("status") == "stale"
             ):
-                return _unavailable(item, "行情刷新失败或已经过期，待更新")
-            stamp = state.get("fetched_at")
+                return _unavailable(
+                    item, "行情刷新失败或已经过期，待更新", "refresh_failed"
+                )
+            stamp = (
+                matching_quote.get("fetched_at")
+                if matching_quote
+                else state.get("fetched_at")
+                if not state.get("quote")
+                else None
+            )
             try:
                 observed = parse_datetime(stamp) if isinstance(stamp, str) else None
             except (TypeError, ValueError):
                 observed = None
             if observed and timezone.is_naive(observed):
                 observed = timezone.make_aware(observed)
+            item["fetched_at"] = observed
+            if is_today and matching_quote and observed is None:
+                return _unavailable(
+                    item,
+                    "估值缺少获取时间，等待对应报价更新",
+                    "quote_metadata_mismatch",
+                )
             if (
                 when == timezone.localdate()
                 and observed
-                and (timezone.now() - observed).total_seconds() > 600
+                and not 0 <= (timezone.now() - observed).total_seconds() <= 600
             ):
-                return _unavailable(item, "盘中行情超过更新时间，待更新")
+                return _unavailable(
+                    item, "盘中行情超过更新时间，待更新", "fetch_expired"
+                )
             if when == timezone.localdate():
                 # A fresh fetch does not make an old/undated observation current.
                 published = reference.published_at
                 if published is None:
-                    return _unavailable(item, "估值缺少报价时间，不能核实今日收益")
+                    return _unavailable(
+                        item, "估值缺少报价时间，不能核实今日收益", "quote_time_missing"
+                    )
                 if timezone.is_naive(published):
                     published = timezone.make_aware(published)
                 age = (timezone.now() - published).total_seconds()
-                quote = state.get("quote") or {}
-                indicative = quote.get("estimate") or quote
+                indicative = matching_quote or {}
                 if (
                     age < 0
                     or age > 1200
                     or indicative.get("data_state") in {"delayed", "stale"}
                 ):
-                    return _unavailable(item, "估值报价已经延迟或时间异常，待更新")
+                    return _unavailable(
+                        item, "估值报价已经延迟或时间异常，待更新", "quote_delayed"
+                    )
             item["status"] = "estimated"
         return item
 
-    def snapshot(self, aid, when, *, estimated=False):
-        account, rows = self.snapshot_accounts[aid], self.snapshots[aid]
+    def snapshot(self, aid, when, *, estimated=False, allow_cash_carry_forward=True):
+        account = self.snapshot_accounts[aid]
+        rows = [row for row in self.snapshots[aid] if row.economic_date <= when]
         base = {
             "account_id": aid,
             "account_name": account.name,
@@ -421,7 +525,9 @@ class ReturnEvidence:
         }
         from .recording_coverage import coverage
 
-        if coverage(self.space, account)["recording_mode"] == "balance":
+        if aid not in self.recording_modes:
+            self.recording_modes[aid] = coverage(self.space, account)["recording_mode"]
+        if self.recording_modes[aid] == "balance":
             return _unavailable(
                 base, "此账户只记录余额；余额变化可能包含追加资金，不能认定为收益"
             )
@@ -442,72 +548,61 @@ class ReturnEvidence:
                 None,
             )
         previous = next((s for s in reversed(formal) if s.economic_date < when), None)
-        if not current and previous and rows[-1].pk == previous.pk:
-            # A verified, cash-only account needs no invented daily settlement.
-            # Reuse the same exposure/flow checks as the account valuation; this
-            # is explicitly an assumption, not an institution's new statement.
-            from .availability import RESTRICTED_KEYS, _zero
-            from .portfolio import _institution_value
+        if allow_cash_carry_forward:
+            from .return_account_state import cash_only_daily_return
 
-            unrestricted = not account.frozen and all(
-                _zero(previous.details.get(key)) for key in RESTRICTED_KEYS
+            cash_only = cash_only_daily_return(
+                self.space, account, when, snapshots=rows, cash_flows=self.flows[aid]
             )
-            if unrestricted and previous.currency == account.currency:
-                carried = _institution_value(self.space, account, when)
-                if carried.get("cash_only_carry_forward") and not carried["gaps"]:
-                    changes = [
-                        line
-                        for line in self.flows[aid]
-                        if line.event.economic_date == when
-                    ]
-                    capital = sum(
-                        (
-                            line.amount
-                            for line in changes
-                            if line.event.kind in EXTERNAL_FLOWS
-                        ),
-                        ZERO,
+            if cash_only:
+                return {**base, **cash_only}
+        if not current and previous and rows[-1].pk == previous.pk:
+            from .return_sessions import closed_return_state
+            from .valuation_basis import settled_market_remained_closed
+
+            has_activity = (
+                any(
+                    previous.economic_date < move["date"] <= when
+                    for (account_id, _), moves in self.movements.items()
+                    if account_id == aid
+                    for move in moves
+                )
+                or any(
+                    previous.economic_date < line.event.economic_date <= when
+                    and line.event.kind not in EXTERNAL_FLOWS
+                    for line in self.flows[aid]
+                )
+                or any(
+                    previous.economic_date < day(value) <= when
+                    for versions in self.option_versions[aid]
+                    for _, data in versions
+                    for value in (
+                        data.get("purchase_date"),
+                        data.get("as_of"),
+                        data.get("closed_date"),
                     )
-                    dividends = sum(
-                        (
-                            line.amount
-                            for line in changes
-                            if line.event.kind == "dividend"
-                        ),
-                        ZERO,
-                    )
-                    opening = carried["local_value"] - sum(
-                        (line.amount for line in changes), ZERO
-                    )
-                    basis = opening + sum(
-                        (
-                            max(line.amount, ZERO)
-                            for line in changes
-                            if line.event.kind in EXTERNAL_FLOWS
-                        ),
-                        ZERO,
-                    )
+                    if value
+                )
+            )
+            if (
+                not has_activity
+                and not (
+                    previous.includes_options is False and self.option_active(aid, when)
+                )
+                and settled_market_remained_closed(previous, when)
+                and not self._snapshot_scope_error(aid, previous, rows)
+            ):
+                closed = closed_return_state(
+                    None,
+                    when,
+                    item=base,
+                    calendar_id=previous.details.get("calendar_id"),
+                )
+                if closed:
                     return {
                         **base,
-                        "amount": dividends,
-                        "basis": basis,
-                        "return_rate": dividends / basis if basis > ZERO else None,
-                        "capital_flow": capital,
-                        "dividends": dividends,
-                        "status": "estimated",
-                        "source": "cash_only_carry_forward",
-                        "price_basis": "estimate",
-                        "observation_kind": "reference",
-                        "quantity_source": "no_recorded_positions",
-                        "cash_only_carry_forward": True,
-                        "settlement_pnl": ZERO,
-                        "published_at": None,
-                        "observed_at": previous.details.get("valuation_observed_at")
-                        or previous.created_at,
-                        "interval_start": when - timedelta(days=1),
-                        "message": "无已记录持仓，按资金流水延续；结算盈亏按 0 推算"
-                        if not dividends
-                        else "仅含已记录分红；无持仓期间的结算盈亏按 0 推算",
+                        **closed,
+                        "message": f"相关市场休市，保留 {previous.economic_date} 的结算权益；不新增该日收益",
                     }
         if not current or not previous:
             return base
@@ -527,31 +622,9 @@ class ReturnEvidence:
         if not _continuous_baseline(previous.economic_date, when, calendar_id):
             return _unavailable(base, "结算权益之间缺少交易日记录，不能当作单日收益")
         for snapshot in (previous, current):
-            if (
-                not snapshot.complete
-                or snapshot.currency != account.currency
-                or snapshot.includes_options is None
-                or (
-                    snapshot.includes_options is False
-                    and (
-                        snapshot.details.get("no_option_positions") is not True
-                        or self.option_active(aid, snapshot.economic_date)
-                    )
-                )
-            ):
-                return _unavailable(base, "机构权益包含范围尚未核实")
-            relevant = [
-                line
-                for line in self.flows[aid]
-                if rows[0].economic_date
-                <= line.event.economic_date
-                <= snapshot.economic_date
-            ]
-            if any(
-                str(line.event_id) not in snapshot.included_event_ids
-                for line in relevant
-            ):
-                return _unavailable(base, "机构权益未核对实际资金流水的包含范围")
+            error = self._snapshot_scope_error(aid, snapshot, rows)
+            if error:
+                return _unavailable(base, error)
         period = [
             line
             for line in self.flows[aid]
@@ -573,57 +646,94 @@ class ReturnEvidence:
             else "confirmed",
         }
 
-    def convert(self, item, currency):
-        if item is None:
-            return None
-        item = dict(item)
-        item["instrument_name"] = item["name"] if item.get("instrument_id") else None
-        when, native = day(item["date"]), item["currency"]
-        chosen, inverse = None, False
-        if native == currency:
-            rate, fx_date, source = Decimal(1), when, "same_currency"
-        else:
-            for base, quote, reverse in [
-                (native, currency, False),
-                (currency, native, True),
-            ]:
-                chosen = next(
-                    (
-                        r
-                        for r in self.fx_rows
-                        if r.base == base
-                        and r.quote == quote
-                        and r.economic_date <= when
-                        and r.rate > 0
-                    ),
-                    None,
+    def _snapshot_scope_error(self, aid, snapshot, rows):
+        account = self.snapshot_accounts[aid]
+        if (
+            not snapshot.complete
+            or snapshot.currency != account.currency
+            or snapshot.includes_options is None
+            or (
+                snapshot.includes_options is False
+                and (
+                    snapshot.details.get("no_option_positions") is not True
+                    or self.option_active(aid, snapshot.economic_date)
                 )
-                if chosen:
-                    inverse = reverse
-                    break
-            rate = (
-                (Decimal(1) / chosen.rate if inverse else chosen.rate)
-                if chosen
-                else None
             )
-            fx_date, source = (
-                (chosen.economic_date, chosen.source) if chosen else (None, None)
+        ):
+            return "机构权益包含范围尚未核实"
+        if any(
+            str(line.event_id) not in snapshot.included_event_ids
+            for line in self.flows[aid]
+            if rows[0].economic_date
+            <= line.event.economic_date
+            <= snapshot.economic_date
+        ):
+            return "机构权益未核对实际资金流水的包含范围"
+        return None
+
+    def convert(self, item, currency):
+        return convert_return_currency(item, currency, self.fx_rows)
+
+
+def convert_return_currency(item, currency, fx_rows):
+    """Convert a dated return using preloaded, newest-first valuation FX rows.
+
+    Native observations stay intact. A missing/old conversion rate affects only
+    the requested display-currency total and never turns a known return to zero.
+    """
+    if item is None:
+        return None
+    item = dict(item)
+    item["instrument_name"] = item["name"] if item.get("instrument_id") else None
+    when, native = day(item["date"]), item["currency"]
+    chosen, inverse = None, False
+    if native == currency:
+        rate, fx_date, source = Decimal(1), when, "same_currency"
+    else:
+        for base, quote, reverse in [
+            (native, currency, False),
+            (currency, native, True),
+        ]:
+            chosen = next(
+                (
+                    row
+                    for row in fx_rows
+                    if row.base == base
+                    and row.quote == quote
+                    and row.economic_date <= when
+                    and row.rate > 0
+                ),
+                None,
             )
-        item.update(
-            base_currency=currency,
-            fx_date=fx_date,
-            fx_source=source,
-            base_amount=None,
-            base_basis=None,
+            if chosen:
+                inverse = reverse
+                break
+        rate = (
+            (Decimal(1) / chosen.rate if inverse else chosen.rate) if chosen else None
         )
-        if item["amount"] is not None:
-            if rate is None or (when - fx_date).days > 7:
-                item["status"] = "unavailable"
-                item["message"] = "缺少可用折算汇率；原币收益保留"
-            else:
-                item["base_amount"] = item["amount"] * rate
-                item["base_basis"] = item.get("basis", ZERO) * rate
-        return item
+        fx_date, source = (
+            (chosen.economic_date, chosen.source) if chosen else (None, None)
+        )
+    item.update(
+        native_status=item["status"],
+        native_message=item.get("message", ""),
+        base_currency=currency,
+        fx_date=fx_date,
+        fx_source=source,
+        base_amount=None,
+        base_basis=None,
+    )
+    if item["amount"] is not None:
+        if rate is None or (when - fx_date).days > 7:
+            item["status"] = "unavailable"
+            item["message"] = "缺少可用折算汇率；原币收益保留"
+            item["missing_reason_code"] = "fx_missing"
+        else:
+            item["base_amount"] = item["amount"] * rate
+            item["base_basis"] = (
+                item["basis"] * rate if item.get("basis") is not None else None
+            )
+    return item
 
 
 def daily_return_overview(
@@ -691,6 +801,7 @@ def daily_return_overview(
                     }
                 )
     known = [item for item in items if item["base_amount"] is not None]
+    closed = [item for item in items if item["status"] == "market_closed"]
     complete = bool(items) and len(known) == len(items)
     amount = sum((item["base_amount"] for item in known), ZERO) if known else None
     basis = sum((item.get("base_basis") or ZERO for item in known), ZERO)
@@ -708,15 +819,23 @@ def daily_return_overview(
         if complete
         else "partial"
         if known
+        else "market_closed"
+        if items and len(closed) == len(items)
         else "unavailable"
         if items
         else "no_position",
         "known_count": len(known),
         "total_count": len(items),
-        "missing_count": len(items) - len(known),
+        "missing_count": len(items) - len(known) - len(closed),
+        "market_closed_count": len(closed),
         "items": items,
         "currency_policy": CURRENCY_POLICY,
         "knowledge_basis": "currently_recorded_facts",
         "message": "按今日有效行情与上一有效收盘或结算记录计算，扣除实际净投入；不含家庭收支、申购在途本金和独立汇兑损益。缺失行情不按零收益处理。",
     }
+    from .fund_return_updates import latest_fund_updates
+
+    summary["latest_fund_updates"] = latest_fund_updates(
+        evidence, when, currency, holding_items
+    )
     return serial(summary), {key: serial(value) for key, value in holding_items.items()}

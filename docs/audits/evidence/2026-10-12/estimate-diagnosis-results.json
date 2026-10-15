@@ -1,0 +1,114 @@
+{
+  "diagnosis_date": "2026-10-12",
+  "client_timezone": "Asia/Shanghai",
+  "source_main_commit": "f2b0b87ac72a95cce5cb46f6a8a41670b128d7b9",
+  "diagnostic_branch": "codex/estimate-return-diagnosis-20261012",
+  "runtime_version": "2.14.0",
+  "runtime_image": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf",
+  "live_financial_sources_match_main": true,
+  "live_financial_source_sha256": {
+    "wealth/daily_returns.py": "4537915ec57b261efda7f86370bafc5c222d880f7b1e3fd5d7817276a55e752c",
+    "wealth/market_sync.py": "f86d5f87baf018be9562b73261c2c419aa5aabee69a1319afc3a5991ede2c1e0",
+    "wealth/market_data.py": "04b48ed573af6936596e468b0d684e84bf09c48d8af4e9d44362306aacf4ec05",
+    "wealth/fund_sources.py": "fc2a1b993af6c2a51841e3025e6aefe2f7237def6d2ff8901d968dfbe79ff183",
+    "wealth/market_quality.py": "4cfa4843ef4b618a99b3768bf43a80af3c803b0b32984c33c2bb27990d4c244b",
+    "wealth/portfolio.py": "9ded78208c362feba8677200be1dad3d163240ddc687d1b68e2256b129cb51a3"
+  },
+  "observations": [
+    {
+      "checked_at": "2026-10-12T04:23:41.957281+00:00",
+      "known_count": 1,
+      "total_count": 8,
+      "no_current_estimate_funds": 5,
+      "time_rejected_estimate_funds": 2,
+      "enforced_read_only": true,
+      "isolation": "read_committed"
+    },
+    {
+      "checked_at": "2026-10-12T04:26:15.401584+00:00",
+      "known_count": 2,
+      "total_count": 8,
+      "recovery_without_manual_refresh": true,
+      "enforced_read_only": true,
+      "isolation": "read_committed"
+    },
+    {
+      "checked_at": "2026-10-12T04:29:16.698896+00:00",
+      "route": "net-worth-comparison",
+      "http_status": 200,
+      "status": "partial",
+      "known_count": 2,
+      "total_count": 8,
+      "complete_amount_available": false,
+      "known_amount_available": true,
+      "known_amount_is_zero": false,
+      "enforced_read_only": true,
+      "isolation": "repeatable_read"
+    }
+  ],
+  "private_financial_numbers_and_identity_published": false,
+  "private_ticker_mapping_published": false,
+  "production_browser_login_performed": false,
+  "sessions_created": false,
+  "production_refresh_triggered": false,
+  "production_writes_triggered": false,
+  "business_code_modified": false,
+  "deployed_a_fix": false,
+  "scheduled_background_work_continued_normally": true,
+  "findings": {
+    "EST-001": "confirmed_refresh_cadence_and_cache_lifetime_gap_unfixed",
+    "EST-002": "confirmed_generic_missing_reason_and_detail_only_explanation_unfixed",
+    "EST-003": "session_sensitive_freshness_display_policy_requires_evidence_decision"
+  },
+  "verification": {
+    "fixed_clock_diagnostic_total": 6,
+    "expected_business_failed": 2,
+    "properties_and_controls_passed": 4,
+    "diagnostic_seconds": 0.45,
+    "skipped": 0,
+    "xfail": 0,
+    "financial_facts_equal_before_after": true,
+    "existing_observation_and_cache_protection_passed": 5,
+    "existing_protection_seconds": 1.47,
+    "existing_frontend_regression_passed": 5,
+    "synthetic_frontend_display_scenarios_passed": 5,
+    "static_frontend_checks": 3,
+    "react_mounted": false
+  },
+  "environment": {
+    "local_os": "macOS arm64",
+    "backend_python": "3.12.3",
+    "postgresql": "18.6",
+    "test_port": 55443,
+    "test_database": "wealth_test",
+    "migration": "0015_chat_remote_controls",
+    "node": "22.22.1",
+    "market_network": "disabled in isolated tests"
+  },
+  "actual_commands": [
+    "/Volumes/mi/Wealth/.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 init",
+    "/Volumes/mi/Wealth/.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 test audit_scenarios/test_estimate_refresh_cadence_20261012.py -o addopts= -vv -s",
+    "/Volumes/mi/Wealth/.venv/bin/python scripts/audit_local.py --pg-port 55443 --web-port 18093 test tests/test_audit_repairs_20261009.py::test_today_estimate_requires_observation_time_even_after_fresh_fetch tests/test_fund_sources_v2100.py::test_public_cache_ttl_does_not_cache_user_labels_or_rewrite_fetch_time -o addopts= -q",
+    "/opt/homebrew/opt/node@22/bin/node --experimental-strip-types --test frontend/tests/daily-return.test.mjs",
+    "/opt/homebrew/opt/node@22/bin/node --experimental-strip-types .runtime/estimate-diagnosis-20261012/diagnose-display.mjs"
+  ],
+  "proof_sha256": {
+    "cadence-20261012.log": "c91ad426e5d4bde0819b8d109baf5ef1701a1415aa359284cf0e4bd8e5bd6e32",
+    "frontend-display.log": "abced1df84fbc07061217dee3caa10e2cbd0ee3a245cf38bc4a0f1bcd78e95d4",
+    "existing-protections.log": "752e1e2df154ba0ec296a925a71963b3cbd6e2803c0d7d7e7fa3d5c7d613a8cd",
+    "display-diagnosis.log": "94d84b19e4a20d9ff101bf6eadd1371dc8e7a73f5e1d2387158b53e6245a3dfb",
+    "display-diagnosis-results.json": "9c24d9bd278e90befc24362800b63eaf1990c8a46405c5f7e03d44c1855569b6"
+  },
+  "unverified": [
+    "user actual browser hidden state, selected date/currency, client response and frontend resources",
+    "real provider network response independent of existing stored quote",
+    "all products/calendar/session-specific estimate policy",
+    "all 1598 backend tests this round",
+    "production fix or deployment"
+  ],
+  "cleanup": {
+    "isolated_postgresql_stopped": true,
+    "temporary_readonly_ssh_connection_closed": true,
+    "original_main_and_manual_unchanged": true
+  }
+}
