@@ -37,12 +37,14 @@ export class Store {
       error TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL, acknowledged INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY(scope,id))`);
     this.db.exec('CREATE TABLE IF NOT EXISTS remote_control_meta (id INTEGER PRIMARY KEY CHECK(id=1), pause_pending INTEGER NOT NULL)');
+    this.db.exec('CREATE TABLE IF NOT EXISTS local_cache (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(namespace,key))');
     this.db.prepare("UPDATE remote_commands SET status='failed', error=? WHERE status='running'")
       .run('本机在执行期间重启，结果未确认；请核对当前配置后重新操作。');
     this.db.prepare('INSERT OR IGNORE INTO app_state (id, value) VALUES (1, ?)').run(JSON.stringify(initialState()));
     this.update((state) => {
       state.settings.autoReplyEnabled = false;
       for (const c of state.conversations) if (c.wechat) {
+        if(c.wechat.history?.status==='running'){c.wechat.history.status='pending';c.wechat.history.detail='已暂停，恢复读取后从已保存位置继续。';}
         c.wechat.enabled = false; c.wechat.status = 'paused';
         c.wechat.detail = '服务重新启动，采集已暂停；恢复后先补齐上下文，不自动回复补读消息。';
       }
@@ -109,6 +111,15 @@ export class Store {
   }
 
   close(): void { this.db.close(); }
+
+  cacheGet(namespace:string,key:string):unknown {
+    const row=this.db.prepare('SELECT value FROM local_cache WHERE namespace=? AND key=?').get(namespace,key) as {value:string}|undefined;
+    return row?JSON.parse(row.value):undefined;
+  }
+  cacheSet(namespace:string,key:string,value:unknown):void {
+    this.db.prepare('INSERT INTO local_cache(namespace,key,value) VALUES(?,?,?) ON CONFLICT(namespace,key) DO UPDATE SET value=excluded.value').run(namespace,key,JSON.stringify(value));
+  }
+  cacheDelete(namespace:string):void {this.db.prepare('DELETE FROM local_cache WHERE namespace=?').run(namespace);}
 
   remoteClaim(scope: string, id: string, expiresAt: number): boolean {
     return this.db.prepare("INSERT OR IGNORE INTO remote_commands(scope,id,status,expires_at) VALUES (?,?,'running',?)")

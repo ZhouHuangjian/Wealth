@@ -2,14 +2,17 @@ export type Item = { id: string; version?: number; [key: string]: any };
 export class ApiError extends Error {
   status: number;
   fields: Record<string, any>;
+  code?: string;
   constructor(
     message: string,
     status: number,
     fields: Record<string, any> = {},
+    code?: string,
   ) {
     super(message);
     this.status = status;
     this.fields = fields;
+    this.code = code;
   }
 }
 let csrf = "";
@@ -105,6 +108,7 @@ export async function api<T = any>(
       result.message || result.detail || `请求未成功 (${response.status})`,
       response.status,
       result.fields,
+      result.code,
     );
   }
   return result as T;

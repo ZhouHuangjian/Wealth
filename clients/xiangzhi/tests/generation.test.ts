@@ -115,13 +115,14 @@ test('recipient context is bounded and remote direct identifiers are masked, wit
     summary: `summary@example.com 13612345678 ${'字'.repeat(3000)}`,
     openTopics: Array.from({length: 16}, (_, i) => `话题${i} topic@example.com 13512345678 ${'字'.repeat(800)}`),
     sourceDigest: 'private-source-digest', modelName: 'private-recap-model'};
-  let body: any;
+  const storedContact=JSON.stringify(contact);let body: any;
   t.mock.method(globalThis, 'fetch', async (_url: URL, init: RequestInit) => {body = JSON.parse(init.body as string); return response();});
   await generateDrafts(state, 'a');
   const context = JSON.parse(body.messages[1].content);
-  assert.equal(context.confirmedContactFacts.length, 40); assert.match(context.confirmedContactFacts[0].content, /^资料4 /);
-  assert.equal(context.reviewedConversationMemory.confirmedEntries.length, 32);
-  assert.match(context.reviewedConversationMemory.confirmedEntries[0].text, /^回顾4 /);
+  assert.ok(context.confirmedContactFacts.length>0&&context.confirmedContactFacts.length<=40);assert.match(context.confirmedContactFacts.at(-1).content,/^资料43 /);
+  assert.ok(context.reviewedConversationMemory.confirmedEntries.length>0&&context.reviewedConversationMemory.confirmedEntries.length<=32);
+  assert.match(context.reviewedConversationMemory.confirmedEntries.at(-1).text,/^回顾35 /);
+  assert.ok(Buffer.byteLength(JSON.stringify(body.messages))<=128_000);assert.equal(JSON.stringify(contact),storedContact,'request budgeting never changes stored notes');
   assert.ok(context.confirmedContactFacts.every((fact: any) => fact.content.length <= 1200 && fact.sourceNote.length <= 300));
   assert.ok(context.reviewedConversationMemory.confirmedEntries.every((entry: any) => entry.text.length <= 1200));
   assert.ok(context.reviewedConversationMemory.unconfirmedModelRecap.summary.length <= 1500);
@@ -276,7 +277,7 @@ test('generation isolates conversation context, approved self claims and non-AI 
   assert.ok(data.communicationReferences.every((reference: any) => reference.summary && reference.application && reference.limitation && reference.source));
 });
 
-test('generation only passes the last twenty messages as conversation context', async t => {
+test('generation keeps a recent-message preview while also supplying every earlier message in full history', async t => {
   const state = fixture();
   state.messages = Array.from({length: 35}, (_, i) => message(`m${i}`, 'a', 'peer', `消息${i}`, i));
   let context: any;
@@ -284,6 +285,44 @@ test('generation only passes the last twenty messages as conversation context', 
   await generateDrafts(state, 'a');
   assert.equal(context.recentMessages.length, 20);
   assert.equal(context.recentMessages[0].text, '消息15');
+  assert.equal(context.fullHistory.mode,'full');assert.equal(context.fullHistory.totalMessages,35);
+  assert.deepEqual(context.fullHistory.messages.map((item:any)=>item.id),state.messages.map(item=>item.id));
+  assert.equal(context.fullHistory.messages[0].text,'消息0');
+});
+
+test('reply generation summarizes every long historical message before the final draft and reuses stored segments',async t=>{
+  const state=fixture();state.messages=Array.from({length:150},(_,index)=>message(`history-${index}`,'a','peer',`BEGIN-${index} ${'长历史内容'.repeat(500)} END-${index}`,index+1));
+  const readIds=new Set<string>(),saved=new Map<string,unknown>();let summaries=0,finals=0;
+  t.mock.method(globalThis,'fetch',async(_url:URL,init:RequestInit)=>{
+    const request=JSON.parse(String(init.body)),context=JSON.parse(request.messages[1].content);
+    assert.ok(Buffer.byteLength(JSON.stringify(request.messages))<128_000);
+    if(context.level!==undefined){summaries++;for(const row of context.messages??[])readIds.add(row.id);return response(JSON.stringify({summary:'本段已逐条读取的合成摘要'}));}
+    finals++;assert.equal(context.fullHistory.coveredMessages,150);assert.equal(context.fullHistory.mode,'hierarchical');
+    assert.equal(context.recentMessages.at(-1).text,state.messages.at(-1)!.text.slice(0,2000));return response();
+  });
+  const dependencies={historyCache:{get:(ns:string,key:string)=>saved.get(`${ns}:${key}`),set:(ns:string,key:string,value:unknown)=>{saved.set(`${ns}:${key}`,value);}}};
+  assert.equal((await generateDrafts(state,'a','',undefined,dependencies)).length,3);
+  assert.deepEqual(readIds,new Set(state.messages.map(row=>row.id)));assert.ok(summaries>1);
+  const paidSegments=summaries;await generateDrafts(state,'a','',undefined,dependencies);assert.equal(summaries,paidSegments);assert.equal(finals,2);
+});
+
+test('Codex long-history summaries use the summary schema while final replies retain their own transport',async()=>{
+  const state=fixture();state.settings={...state.settings,provider:'codex',modelName:'codex-history-model',allowRemoteModel:true};
+  state.messages=Array.from({length:90},(_,index)=>message(`codex-history-${index}`,'a','peer',`合成历史 ${index} ${'较长的发言'.repeat(400)}`,index+1));
+  const observed=new Set<string>();let summaries=0,replies=0;
+  const drafts=await generateDrafts(state,'a','',undefined,{
+    structuredCodex:async(chosen,messages,schema)=>{
+      assert.equal(chosen.modelName,'codex-history-model');const shape=schema as {properties?:Record<string,unknown>;required?:string[]};
+      assert.deepEqual(shape.required,['summary']);assert.ok(shape.properties?.summary);assert.equal(shape.properties?.replies,undefined);
+      const context=JSON.parse(messages[1].content);summaries++;for(const row of context.messages??[])observed.add(row.id);
+      return JSON.stringify({summary:'Codex 已完整读取本段合成内容'});
+    },
+    codex:async(chosen,messages)=>{
+      replies++;assert.equal(chosen.modelName,'codex-history-model');assert.equal(JSON.parse(messages[1].content).fullHistory.coveredMessages,90);return validContent();
+    },
+  });
+  assert.ok(summaries>1);assert.equal(replies,1);assert.deepEqual(observed,new Set(state.messages.map(row=>row.id)));
+  assert.equal(drafts.length,3);assert.ok(drafts.every(row=>row.provider==='codex'));
 });
 
 test('demo and send-mode stop-contact responses are labeled as local rules and use no network', async t => {
@@ -417,6 +456,8 @@ test('generation forwards cancellation and refuses a conversation already answer
     return new Promise<Response>((_resolve, reject) => observed!.addEventListener('abort', () => reject(new Error('aborted')), {once: true}));
   });
   const pending = generateDrafts(state, 'a', '', controller.signal);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(observed,'the transport is reached after preparing complete history');
   controller.abort();
   await assert.rejects(pending, /取消/);
   assert.equal(observed?.aborted, true);
@@ -553,6 +594,7 @@ test('multiple reply models run concurrently and retain three separately identif
     assert.equal(chosen.modelName, 'codex-test-model'); assert.equal(JSON.parse(messages[1].content).learnedStyleProfile.version, '1.8'); contexts++;
     return new Promise<string>(resolve => {resolveCodex = resolve;});
   }});
+  await new Promise(resolve=>setImmediate(resolve));
   assert.equal(contexts, 2, 'both providers start before either has finished');
   state.settings.modelName = 'changed-after-start';
   resolveCodex!(validContent()); resolveCompatible!(response());

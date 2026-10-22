@@ -39,7 +39,7 @@ export function InsightModelFields({ kind, model, onChange, disabled, canReuseRe
         </details>
         {model.provider === 'qwen' && <label className="checkbox-label"><input type="checkbox" disabled={disabled} checked={!!model.thinkingEnabled} onChange={event => change('thinkingEnabled', event.target.checked)} /><span><strong>{name}启用思考模式</strong><small>默认关闭；需模型支持，可能增加等待和 tokens。</small></span></label>}
       </>}
-      <label className="checkbox-label"><input type="checkbox" disabled={disabled} checked={model.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许向此模型发送必要的对话片段</strong><small>仅为开启功能的联系人分析或整理信息，结果保存在本机。</small></span></label>
+      <label className="checkbox-label"><input type="checkbox" disabled={disabled} checked={model.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许此模型参考完整会话</strong><small>仅为开启功能的联系人处理；较长历史分段整理，结果与分段缓存保存在本机。</small></span></label>
     </>}
   </div>;
 }

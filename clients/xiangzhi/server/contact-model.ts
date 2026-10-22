@@ -3,7 +3,7 @@ import { codexStructuredCompletion } from './codex-provider.js';
 import { assertModelName, isLoopback, isQwenHost, modelEndpoint, readModelResponse, replyEndpoint } from './model-config.js';
 
 /** Shared transport only; each feature supplies its own fixed JSON schema. */
-export interface ContactModelDependencies {fetch?: typeof fetch; codex?: typeof codexStructuredCompletion}
+export interface ContactModelDependencies {fetch?: typeof fetch; codex?: typeof codexStructuredCompletion; historyCache?:import('./full-history-context.js').HistoryCache; onHistoryProgress?:import('./full-history-context.js').HistoryDependencies['onHistoryProgress']}
 export interface ContactModelCompletion {
   content: string; provider: 'qwen' | 'compatible' | 'codex'; modelName: string;
   usage?: {promptTokens: number; completionTokens: number; totalTokens: number};

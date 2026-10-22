@@ -73,6 +73,8 @@ export interface ContactInsights {
   affinity: {score: number | null; confidence: number; evidence: string[]} | null;
   uncertainty: string; provider: 'qwen' | 'compatible' | 'codex'; modelName: string; analyzedAt: string;
   inputDigest?: string;
+  /** Derived UI flag; saved evidence is retained when context has changed. */
+  stale?: boolean;
   usage?: {promptTokens: number; completionTokens: number; totalTokens: number};
 }
 export interface ContactProcessing {
@@ -119,6 +121,12 @@ export interface Conversation {
   wechat?: {
     enabled: boolean; initialized: boolean; cursor: string | null; accountFingerprint: string | null;
     lastCheckedAt: string | null; status: 'paused' | 'reading' | 'ready' | 'error'; detail: string;
+    history?: {
+      status:'pending'|'running'|'complete'|'error';cursor:string;offset:number;
+      scanned:number;added:number;lastCheckedAt:string|null;detail:string;
+      /** Private continuation for incremental paging; not part of cloud snapshots. */
+      tail?:{cursor:string;offset:number};
+    };
   };
 }
 export type MessageKind = 'text' | 'image' | 'voice' | 'video' | 'emoji' | 'file' | 'link' | 'system' | 'unknown';
@@ -217,6 +225,8 @@ export interface PublicState extends Omit<AppState, 'settings' | 'messages' | 'i
     codexAvailable: boolean; codexVersion: string | null; codexStatus: string;
     draftSyncConfigured: boolean; draftInboxConfigured: boolean;
     draftSyncConnection?: DraftSyncConnectionStatus;
+    contactAnalysis?:{conversationId:string;feature:'analysis'|'memory'|'basis';total:number;processed:number;stage:'reading'|'summarizing'|'generating';updatedAt:string}[];
+    historySync?: {status:'waiting'|'syncing'|'connected'|'error'|'disabled';detail:string;syncedAt:string|null};
     remoteManagement?: {status: 'disabled' | 'waiting' | 'connected' | 'error'; lastConnectedAt: string | null; detail: string};
     wechatAvailable: boolean; wechatStatus: string;
   };

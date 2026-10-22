@@ -45,7 +45,7 @@ test('incremental memory keeps confirmed entries only with unchanged source and 
   const app = state(); const confirmed = {id: 'confirmed', kind: 'preference' as const, text: '对方说自己喜欢跑步。', sourceMessageIds: ['a1'],
     sourceMessageHashes: {a1: messageEvidenceHash(app.messages[0])}, status: 'approved' as const, createdAt: 'original-date'};
   app.conversations[0].memory = {summary: 'OLD-CONFIRMED-SUMMARY', entries: [confirmed], openTopics: [], throughSequence: 1,
-    sourceDigest: 'old', provider: 'qwen', modelName: 'old-model', updatedAt: ''};
+    compressedMessageHashes:{a1:messageEvidenceHash(app.messages[0])},sourceDigest: 'old', provider: 'qwen', modelName: 'old-model', updatedAt: ''};
   const compressed = await compressContactMemory(app, 'A', undefined, {fetch: async (_url, init) => {
     const context = JSON.parse(JSON.parse(String(init!.body)).messages[1].content);
     assert.deepEqual(context.messages.map((item: any) => item.id), ['a2', 'a3']); assert.equal(context.previousMemory.entries[0].confirmedByUser, true);
@@ -98,15 +98,20 @@ test('memory selection processes the first chronological batch and never skips o
   assert.equal(calls, 0);
 });
 
-test('large memory inputs remain bounded and truncation preserves sequential progress', async () => {
+test('large memory batches read complete long messages and leave later batches available for continuation', async () => {
   const app = state(); app.messages = Array.from({length: 150}, (_, index) => message(`a${index + 1}`, 'A', index + 1, '很长的合成内容'.repeat(1000)));
+  const readIds=new Set<string>();let selectedIds:string[]=[],summaryCalls=0;
   const compressed = await compressContactMemory(app, 'A', undefined, {fetch: async (_url, init) => {
     const body = JSON.parse(String(init!.body)); const context = JSON.parse(body.messages[1].content);
-    assert.ok(Buffer.byteLength(JSON.stringify(body.messages)) < 128_000); assert.equal(context.messages[0].sequence, 1);
-    assert.ok(context.messages.length < 120);
-    return response({summary: '有多条合成内容', entries: [{kind: 'event', text: '合成测试', sourceMessageIds: [context.messages.at(-1).id]}], openTopics: []});
+    assert.ok(Buffer.byteLength(JSON.stringify(body.messages)) < 128_000);
+    if(context.level!==undefined){summaryCalls++;for(const item of context.messages??[])readIds.add(item.id);return response({summary:'已读取本段完整长消息'});}
+    selectedIds=context.allowedSourceMessageIds;assert.ok(selectedIds.length<120);assert.equal(selectedIds[0],'a1');
+    assert.equal(context.fullHistory.coveredMessages,selectedIds.length);
+    return response({summary: '有多条合成内容', entries: [{kind: 'event', text: '合成测试', sourceMessageIds: [selectedIds.at(-1)!]}], openTopics: []});
   }});
   assert.ok(compressed.throughSequence > 0 && compressed.throughSequence < 120);
+  assert.ok(summaryCalls>1);assert.deepEqual(readIds,new Set(selectedIds));assert.deepEqual(Object.keys(compressed.compressedMessageHashes!),selectedIds);
+  app.conversations[0].memory=compressed;assert.equal(memoryRemainingCount(app,'A'),150-selectedIds.length);
 });
 
 test('memory digest includes source evidence changes, config and contact basis but ignores other contacts', () => {

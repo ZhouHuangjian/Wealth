@@ -108,209 +108,265 @@ function SettingsForm({
         这里显示 Mac
         最近上报的配置。提交后以执行记录和更新后的配置为准。自动回复只生成草稿。
       </p>
-      <div className="chat-remote-form-grid">
-        <Form.Item
-          name="autoReplyEnabled"
-          label="收到消息自动生成草稿"
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-        <Form.Item
-          name="syncDraftsEnabled"
-          label="同步草稿到云端"
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-        <Form.Item
-          name="provider"
-          label="回复模型来源"
-          rules={[{ required: true }]}
-        >
-          <Select
-            onChange={(value) => {
-              if (value !== selectedProvider)
-                form.setFieldValue("modelName", "");
-              if (value !== "compatible")
-                form.setFieldValue("modelPreset", "custom");
-            }}
-            options={[
-              { value: "codex", label: "Codex" },
-              { value: "ollama", label: "Ollama" },
-              { value: "compatible", label: "兼容 AI 接口" },
-              { value: "demo", label: "演示模式" },
-            ]}
-          />
-        </Form.Item>
-        {snapshot.version === 2 && selectedProvider === "compatible" && (
-          <Form.Item name="modelPreset" label="回复接口类型">
-            <Select
-              onChange={(value) => {
-                if (value === "qwen" && !form.getFieldValue("modelName"))
-                  form.setFieldValue("modelName", "qwen3.8-flash");
-              }}
-              options={[
-                { value: "custom", label: "本地已配置的接口" },
-                { value: "qwen", label: "阿里千问" },
-              ]}
-            />
-          </Form.Item>
-        )}
-        <Form.Item name="modelName" label="模型名称" rules={[{ max: 200 }]}>
-          {snapshot.version === 2 ? (
-            <RemoteModelNameField
-              provider={
-                selectedProvider === "compatible" && selectedPreset === "qwen"
-                  ? "qwen"
-                  : (selectedProvider ?? snapshot.settings.provider)
-              }
-              label="模型名称"
-            />
-          ) : (
-            <Input maxLength={200} placeholder="使用本地已配置的模型" />
-          )}
-        </Form.Item>
-        <Form.Item
-          name="replyDelaySeconds"
-          label="生成前等待（秒）"
-          rules={[{ required: true }]}
-        >
-          <InputNumber min={1} max={300} precision={0} />
-        </Form.Item>
-        <Form.Item
-          name="cooldownSeconds"
-          label="连续生成间隔（秒）"
-          rules={[{ required: true }]}
-        >
-          <InputNumber min={0} max={3600} precision={0} />
-        </Form.Item>
-        <Form.Item
-          name="dailyLimit"
-          label="每日自动回复上限"
-          rules={[{ required: true }]}
-        >
-          <InputNumber min={1} max={200} precision={0} />
-        </Form.Item>
-        <Form.Item
-          name="quietHoursEnabled"
-          label="启用免打扰时段"
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-        <Form.Item
-          name="quietStart"
-          label="免打扰开始"
-          rules={[
-            { required: true },
+      <section className="chat-remote-model-center" aria-label="模型中心">
+        <h3>模型中心</h3>
+        <p className="chat-remote-note">
+          在同一处选择各项功能的模型。各项独立保存；联系人可以跟随默认，也可以单独选择回复、分析和记忆模型。
+        </p>
+        <Tabs
+          defaultActiveKey="reply"
+          items={[
             {
-              pattern: /^([01]\d|2[0-3]):[0-5]\d$/,
-              message: "请输入 HH:mm，例如 23:00",
-            },
-          ]}
-        >
-          <Input type="time" />
-        </Form.Item>
-        <Form.Item
-          name="quietEnd"
-          label="免打扰结束"
-          rules={[
-            { required: true },
-            {
-              pattern: /^([01]\d|2[0-3]):[0-5]\d$/,
-              message: "请输入 HH:mm，例如 08:00",
-            },
-          ]}
-        >
-          <Input type="time" />
-        </Form.Item>
-      </div>
-      {snapshot.version === 2 && (
-        <>
-          <h3>回复比较模型</h3>
-          <Form.Item name="replyModels">
-            <RemoteReplyModelsField disabled={disabled} />
-          </Form.Item>
-          <h3>独立模型配置</h3>
-          {(
-            [
-              { key: "vision", name: "图片识别" },
-              { key: "audio", name: "语音转写" },
-              { key: "analysis", name: "意图与好感度分析" },
-              { key: "memory", name: "档案与记忆整理" },
-            ] as const
-          ).map((kind) => (
-            <div className="chat-remote-model-section" key={kind.key}>
-              <h4>{kind.name}</h4>
-              {kind.key === "audio" && (
-                <p className="chat-remote-note">
-                  Codex 当前接入支持文字和图片，不能直接转写语音。
-                </p>
-              )}
-              <div className="chat-remote-form-grid">
-                <Form.Item
-                  name={[kind.key, "provider"]}
-                  label={`${kind.name}来源`}
-                >
-                  <Select
-                    onChange={(provider) =>
-                      form.setFieldValue(
-                        [kind.key, "modelName"],
-                        provider === "qwen"
-                          ? kind.key === "audio"
-                            ? "qwen3.8-omni-flash"
-                            : "qwen3.8-flash"
-                          : "",
-                      )
-                    }
-                    options={[
-                      { value: "disabled", label: "关闭此模型服务" },
-                      { value: "qwen", label: "阿里千问" },
-                      { value: "compatible", label: "兼容 AI 接口" },
-                      ...(kind.key === "audio"
-                        ? []
-                        : [{ value: "codex", label: "Codex" }]),
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item
-                  noStyle
-                  shouldUpdate={(before, after) =>
-                    before[kind.key]?.provider !== after[kind.key]?.provider
-                  }
-                >
-                  {() => (
+              key: "reply",
+              label: "回复与比较",
+              forceRender: true,
+              children: (
+                <>
+                  <div className="chat-remote-form-grid">
+                    {" "}
                     <Form.Item
-                      name={[kind.key, "modelName"]}
-                      label={`${kind.name}模型名称`}
-                      rules={[{ max: 200 }]}
+                      name="provider"
+                      label="回复模型来源"
+                      rules={[{ required: true }]}
                     >
-                      <RemoteModelNameField
-                        provider={
-                          form.getFieldValue([kind.key, "provider"]) ??
-                          "disabled"
-                        }
-                        role={kind.key}
-                        label={`${kind.name}模型名称`}
+                      <Select
+                        onChange={(value) => {
+                          if (value !== selectedProvider)
+                            form.setFieldValue("modelName", "");
+                          if (value !== "compatible")
+                            form.setFieldValue("modelPreset", "custom");
+                        }}
+                        options={[
+                          { value: "codex", label: "Codex" },
+                          { value: "ollama", label: "Ollama" },
+                          { value: "compatible", label: "兼容 AI 接口" },
+                          { value: "demo", label: "演示模式" },
+                        ]}
                       />
                     </Form.Item>
+                    {snapshot.version === 2 &&
+                      selectedProvider === "compatible" && (
+                        <Form.Item name="modelPreset" label="回复接口类型">
+                          <Select
+                            onChange={(value) => {
+                              if (
+                                value === "qwen" &&
+                                !form.getFieldValue("modelName")
+                              )
+                                form.setFieldValue(
+                                  "modelName",
+                                  "qwen3.8-flash",
+                                );
+                            }}
+                            options={[
+                              { value: "custom", label: "本地已配置的接口" },
+                              { value: "qwen", label: "阿里千问" },
+                            ]}
+                          />
+                        </Form.Item>
+                      )}
+                    <Form.Item
+                      name="modelName"
+                      label="模型名称"
+                      rules={[{ max: 200 }]}
+                    >
+                      {snapshot.version === 2 ? (
+                        <RemoteModelNameField
+                          provider={
+                            selectedProvider === "compatible" &&
+                            selectedPreset === "qwen"
+                              ? "qwen"
+                              : (selectedProvider ?? snapshot.settings.provider)
+                          }
+                          label="模型名称"
+                        />
+                      ) : (
+                        <Input
+                          maxLength={200}
+                          placeholder="使用本地已配置的模型"
+                        />
+                      )}
+                    </Form.Item>
+                  </div>
+                  {snapshot.version === 2 && (
+                    <>
+                      {" "}
+                      <h3>回复比较模型</h3>
+                      <Form.Item name="replyModels">
+                        <RemoteReplyModelsField disabled={disabled} />
+                      </Form.Item>
+                    </>
                   )}
-                </Form.Item>
-                {kind.key !== "audio" && (
-                  <Form.Item
-                    name={[kind.key, "thinkingEnabled"]}
-                    label="启用思考模式"
-                    valuePropName="checked"
-                  >
-                    <Switch />
-                  </Form.Item>
-                )}
-              </div>
-            </div>
-          ))}
-        </>
-      )}
+                </>
+              ),
+            },
+            ...(snapshot.version === 2
+              ? (
+                  [
+                    { key: "vision", name: "图片识别" },
+                    { key: "audio", name: "语音转写" },
+                    { key: "analysis", name: "意图与好感度分析" },
+                    { key: "memory", name: "档案与记忆整理" },
+                  ] as const
+                ).map((kind) => ({
+                  key: kind.key,
+                  label: kind.name,
+                  forceRender: true,
+                  children: (
+                    <>
+                      <div className="chat-remote-model-section" key={kind.key}>
+                        <h4>{kind.name}</h4>
+                        {kind.key === "audio" && (
+                          <p className="chat-remote-note">
+                            Codex 当前接入支持文字和图片，不能直接转写语音。
+                          </p>
+                        )}
+                        <div className="chat-remote-form-grid">
+                          <Form.Item
+                            name={[kind.key, "provider"]}
+                            label={`${kind.name}来源`}
+                          >
+                            <Select
+                              onChange={(provider) =>
+                                form.setFieldValue(
+                                  [kind.key, "modelName"],
+                                  provider === "qwen"
+                                    ? kind.key === "audio"
+                                      ? "qwen3.8-omni-flash"
+                                      : "qwen3.8-flash"
+                                    : "",
+                                )
+                              }
+                              options={[
+                                { value: "disabled", label: "关闭此模型服务" },
+                                { value: "qwen", label: "阿里千问" },
+                                { value: "compatible", label: "兼容 AI 接口" },
+                                ...(kind.key === "audio"
+                                  ? []
+                                  : [{ value: "codex", label: "Codex" }]),
+                              ]}
+                            />
+                          </Form.Item>
+                          <Form.Item
+                            noStyle
+                            shouldUpdate={(before, after) =>
+                              before[kind.key]?.provider !==
+                              after[kind.key]?.provider
+                            }
+                          >
+                            {() => (
+                              <Form.Item
+                                name={[kind.key, "modelName"]}
+                                label={`${kind.name}模型名称`}
+                                rules={[{ max: 200 }]}
+                              >
+                                <RemoteModelNameField
+                                  provider={
+                                    form.getFieldValue([
+                                      kind.key,
+                                      "provider",
+                                    ]) ?? "disabled"
+                                  }
+                                  role={kind.key}
+                                  label={`${kind.name}模型名称`}
+                                />
+                              </Form.Item>
+                            )}
+                          </Form.Item>
+                          {kind.key !== "audio" && (
+                            <Form.Item
+                              name={[kind.key, "thinkingEnabled"]}
+                              label="启用思考模式"
+                              valuePropName="checked"
+                            >
+                              <Switch />
+                            </Form.Item>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  ),
+                }))
+              : []),
+          ]}
+        />
+      </section>
+      <details className="chat-remote-operation-settings">
+        <summary>自动草稿与运行节奏</summary>
+        <p className="chat-remote-note">
+          这些开关控制何时自动处理，不会改变上面选择的模型。
+        </p>
+        <div className="chat-remote-form-grid">
+          <Form.Item
+            name="autoReplyEnabled"
+            label="收到消息自动生成草稿"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name="syncDraftsEnabled"
+            label="同步草稿到云端"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name="replyDelaySeconds"
+            label="生成前等待（秒）"
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={1} max={300} precision={0} />
+          </Form.Item>
+          <Form.Item
+            name="cooldownSeconds"
+            label="连续生成间隔（秒）"
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={0} max={3600} precision={0} />
+          </Form.Item>
+          <Form.Item
+            name="dailyLimit"
+            label="每日自动回复上限"
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={1} max={200} precision={0} />
+          </Form.Item>
+          <Form.Item
+            name="quietHoursEnabled"
+            label="启用免打扰时段"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name="quietStart"
+            label="免打扰开始"
+            rules={[
+              { required: true },
+              {
+                pattern: /^([01]\d|2[0-3]):[0-5]\d$/,
+                message: "请输入 HH:mm，例如 23:00",
+              },
+            ]}
+          >
+            <Input type="time" />
+          </Form.Item>
+          <Form.Item
+            name="quietEnd"
+            label="免打扰结束"
+            rules={[
+              { required: true },
+              {
+                pattern: /^([01]\d|2[0-3]):[0-5]\d$/,
+                message: "请输入 HH:mm，例如 08:00",
+              },
+            ]}
+          >
+            <Input type="time" />
+          </Form.Item>
+        </div>
+      </details>
       <p className="chat-remote-note">
         模型服务地址和凭据沿用 Mac 本地配置。切换模型来源前，需在 Mac
         完成对应服务的配置。
@@ -818,7 +874,7 @@ export default function DeviceRemoteControl({
                 },
                 {
                   key: "settings",
-                  label: "本地配置",
+                  label: "模型中心与运行",
                   children: snapshot ? (
                     <SettingsForm
                       snapshot={snapshot}
@@ -1013,28 +1069,34 @@ export default function DeviceRemoteControl({
                 <p className="chat-remote-note">
                   好感度显示在姓名旁；意图名称和百分比显示在“会话动态”的对应消息下方。
                 </p>
-                <Form.Item
-                  name={["processing", "analysisModel"]}
-                  label="此人的分析模型"
-                >
-                  <RemoteModelChoiceField />
-                </Form.Item>
-                <Form.Item
-                  name={["processing", "memoryModel"]}
-                  label="此人的档案与记忆模型"
-                >
-                  <RemoteModelChoiceField role="memory" />
-                </Form.Item>
-                <Form.Item
-                  name={["processing", "replyModels"]}
-                  label="此人的回复比较模型"
-                >
-                  <RemoteReplyModelsField allowInherit />
-                </Form.Item>
+                <details className="chat-remote-contact-models">
+                  <summary>模型设置 · 默认或为此人单独选择</summary>
+                  <p className="chat-remote-note">
+                    所有可覆盖的模型集中在这里。图片识别与语音转写使用模型中心的全局型号，自动处理开关仍按人设置。
+                  </p>
+                  <Form.Item
+                    name={["processing", "analysisModel"]}
+                    label="此人的分析模型"
+                  >
+                    <RemoteModelChoiceField />
+                  </Form.Item>
+                  <Form.Item
+                    name={["processing", "memoryModel"]}
+                    label="此人的档案与记忆模型"
+                  >
+                    <RemoteModelChoiceField role="memory" />
+                  </Form.Item>
+                  <Form.Item
+                    name={["processing", "replyModels"]}
+                    label="此人的回复比较模型"
+                  >
+                    <RemoteReplyModelsField allowInherit />
+                  </Form.Item>
+                </details>
               </>
             )}
             <p className="chat-remote-note">
-              自动生成还需在“本地配置”开启全局自动草稿；不会代发微信。
+              自动生成还需在“模型中心与运行”开启全局自动草稿；不会代发微信。
             </p>
             <Button type="primary" htmlType="submit" loading={busy}>
               提交会话更改

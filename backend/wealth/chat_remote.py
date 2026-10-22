@@ -21,7 +21,7 @@ from .chat import (
     text_field,
     uuid_value,
 )
-from .chat_models import ChatDevice, ChatDeviceCommand
+from .chat_models import ChatDevice, ChatDeviceCommand, ChatHistoryConversation
 from .common import DomainError, digest
 from .platform_admin import log_admin
 
@@ -902,16 +902,30 @@ def command_record(command):
     }
 
 
+def synced_conversation_ids(device, snapshot):
+    """History can outgrow the current-view window; tombstones override old snapshots."""
+    ids = {
+        item.get("id")
+        for item in (snapshot or {}).get("conversations", [])
+        if isinstance(item, dict)
+    }
+    archived = ChatHistoryConversation.objects.filter(
+        stream__device=device
+    ).values_list("conversation_id", "deleted_at")
+    for ident, deleted_at in archived:
+        if deleted_at is None:
+            ids.add(str(ident))
+        else:
+            ids.discard(str(ident))
+    return ids
+
+
 def remote_command_records(device, snapshot):
     """Keep status history while exposing only a bounded latest current view."""
     records = []
     current_ids = set()
     remaining = MAX_CURRENT_VIEW_BYTES
-    configured_ids = {
-        item.get("id")
-        for item in (snapshot or {}).get("conversations", [])
-        if isinstance(item, dict)
-    }
+    configured_ids = synced_conversation_ids(device, snapshot)
     current_available = bool(snapshot and snapshot.get("remoteEnabled"))
     for command in device.commands.order_by("-created_at", "-id")[:100]:
         record = command_record(command)
@@ -1019,9 +1033,9 @@ def dispatch_remote(request, device_id, action, body):
                 "remote_capability_required",
                 409,
             )
-        if body["type"] in CURRENT_COMMAND_TYPES and body["payload"]["id"] not in {
-            item["id"] for item in device.remote_snapshot.get("conversations", [])
-        }:
+        if body["type"] in CURRENT_COMMAND_TYPES and body["payload"][
+            "id"
+        ] not in synced_conversation_ids(device, device.remote_snapshot):
             raise DomainError(
                 "该联系人尚未同步，请先刷新 Mac 连接。",
                 "remote_conversation_unavailable",

@@ -31,12 +31,18 @@ import {
 } from "../chat-remote-model";
 import type { RemoteCommand, RemoteStatus } from "../chat-remote-model";
 import {
-  currentConversation,
   currentDraftsAreStale,
   currentIntentLabels,
   currentKindLabels,
   reconcileCurrentStatus,
 } from "../chat-current-model";
+
+import { useChatHistory } from "../use-chat-history";
+import {
+  historyCurrent,
+  historyPeople,
+  historyReadLabel,
+} from "../chat-history-model";
 
 function time(value: string | null | undefined) {
   if (!value) return "尚未记录";
@@ -86,6 +92,7 @@ export default function RemoteConversationDashboard({
   const feed = useRef<HTMLElement>(null),
     feedAtBottom = useRef(true),
     lastFeedPerson = useRef("");
+  const olderScroll = useRef<{ height: number; top: number } | null>(null);
   callbacks.current = { onPrivateError, onAccessError };
   useEffect(() => {
     if (!usable.some((device) => device.id === deviceId)) {
@@ -133,15 +140,6 @@ export default function RemoteConversationDashboard({
       if (!accept(result, current) || revision !== mutation.current) return;
       setStatus((previous) => reconcileCurrentStatus(previous, result));
       setError("");
-      setConversationId((previous) =>
-        !result.snapshot?.remoteEnabled
-          ? undefined
-          : result.snapshot.conversations.some(
-                (person) => person.id === previous,
-              )
-            ? previous
-            : result.snapshot.conversations[0]?.id,
-      );
     } catch (reason) {
       handleError(reason, current);
     } finally {
@@ -224,12 +222,57 @@ export default function RemoteConversationDashboard({
       }
     }
   };
-  const snapshot = status?.snapshot;
-  const person = snapshot?.remoteEnabled
-    ? snapshot.conversations.find((item) => item.id === conversationId)
-    : undefined;
-  const current = currentConversation(snapshot?.currentView, person);
-  const connection = status ? remoteConnectionState(status) : "unconfigured";
+  const selectedStatus =
+    status &&
+    deviceId &&
+    usable.some((device) => device.id === deviceId) &&
+    remoteResponseMatches(status, userId, deviceId)
+      ? status
+      : null;
+  const snapshot = selectedStatus?.snapshot;
+  const archive = useChatHistory({
+    userId,
+    deviceId,
+    conversationId,
+    enabled: !!snapshot?.remoteEnabled,
+    onPrivateError,
+    onAccessError,
+  });
+  const archiveReady =
+    archive.directory.mode === "ready" ||
+    (archive.directory.mode === "error" &&
+      !!archive.directory.progress?.streamId);
+  const people = !snapshot?.remoteEnabled
+    ? []
+    : archiveReady
+      ? historyPeople(archive.directory.contacts, snapshot.conversations)
+      : snapshot.conversations;
+  const person = people.find((item) => item.id === conversationId);
+  const current = historyCurrent(selectedStatus, person, archive.page);
+  const historyContact = archive.directory.contacts.find(
+    (item) => item.id === person?.id,
+  );
+  const canConfigurePerson =
+    !!person && !!snapshot?.conversations.some((item) => item.id === person.id);
+  const personIds = people.map((item) => item.id).join(":");
+  useEffect(() => {
+    if (!snapshot?.remoteEnabled) {
+      setConversationId(undefined);
+      return;
+    }
+    // An archive directory is authoritative, including its deletion tombstones.
+    if (archive.directory.mode === "loading" && conversationId) return;
+    if (!people.some((item) => item.id === conversationId))
+      setConversationId(people[0]?.id);
+  }, [
+    personIds,
+    archive.directory.mode,
+    snapshot?.remoteEnabled,
+    conversationId,
+  ]);
+  const connection = selectedStatus
+    ? remoteConnectionState(selectedStatus)
+    : "unconfigured";
   const online = connection === "online";
   const supported = (type: RemoteCommand["type"]) =>
     supportsRemoteCommand(snapshot, type);
@@ -243,12 +286,18 @@ export default function RemoteConversationDashboard({
     );
   const latest = current?.messages.at(-1);
   useEffect(() => {
-    if (person?.id !== lastFeedPerson.current || feedAtBottom.current) {
+    if (olderScroll.current && feed.current) {
+      feed.current.scrollTop =
+        olderScroll.current.top +
+        feed.current.scrollHeight -
+        olderScroll.current.height;
+      olderScroll.current = null;
+    } else if (person?.id !== lastFeedPerson.current || feedAtBottom.current) {
       if (feed.current) feed.current.scrollTop = feed.current.scrollHeight;
       feedAtBottom.current = true;
     }
     lastFeedPerson.current = person?.id ?? "";
-  }, [person?.id, current?.syncedAt]);
+  }, [person?.id, current?.syncedAt, current?.messages]);
   const latestOperation = status?.commands.find(
     (command) =>
       [
@@ -307,18 +356,21 @@ export default function RemoteConversationDashboard({
           value={snapshot?.remoteEnabled ? conversationId : undefined}
           placeholder="选择联系人"
           onChange={setConversationId}
-          options={(snapshot?.remoteEnabled ? snapshot.conversations : []).map(
-            (item) => ({
-              value: item.id,
-              label: `${item.name}${item.processing?.affinityEnabled && item.affinity !== null && item.affinity !== undefined ? ` · ${item.affinity}%` : ""}`,
-            }),
-          )}
+          showSearch
+          optionFilterProp="label"
+          options={people.map((item) => ({
+            value: item.id,
+            label: `${item.name}${item.processing?.affinityEnabled && item.affinity !== null && item.affinity !== undefined ? ` · ${item.affinity}%` : ""}`,
+          }))}
         />
         <Button
           icon={<RefreshCw size={15} />}
           loading={loading}
           disabled={!deviceId || busy}
-          onClick={() => void read()}
+          onClick={() => {
+            void read();
+            archive.refresh();
+          }}
         >
           刷新网页
         </Button>
@@ -331,8 +383,13 @@ export default function RemoteConversationDashboard({
           </Button>
         )}
       </div>
-      {error && (
-        <Alert className="form-alert" type="error" showIcon message={error} />
+      {(error || archive.error) && (
+        <Alert
+          className="form-alert"
+          type="error"
+          showIcon
+          message={error || archive.error}
+        />
       )}
       {!usable.length ? (
         <div className="chat-empty">
@@ -365,7 +422,18 @@ export default function RemoteConversationDashboard({
           </div>
           {snapshot.remoteEnabled && (
             <p className="chat-current-note">
-              显示这台 Mac 已配置的微信会话，最多同步 8 人的近期动态。
+              {archiveReady
+                ? `已归档 ${archive.directory.progress?.totalConversations ?? 0} 位联系人、${archive.directory.progress?.totalMessages ?? 0} 条消息。已读取的完整历史会逐批上传，可查看更早消息。`
+                : archive.directory.mode === "legacy"
+                  ? "服务器尚未支持完整历史，当前仅展示旧版近况；更新服务器和 Mac 后可完整归档。"
+                  : "等待 Mac 上传完整历史，当前先展示已同步的近况。"}
+              {archiveReady &&
+                archive.directory.progress?.phase === "backfill" &&
+                " 历史仍在补齐，当前数量会继续增加。"}
+              {archiveReady &&
+                (archive.directory.progress?.expectedMessages ?? 0) >
+                  (archive.directory.progress?.totalMessages ?? 0) &&
+                ` 正在同步本机已读取的 ${archive.directory.progress?.expectedMessages} 条记录。`}
             </p>
           )}
           {connection === "disabled" && (
@@ -392,10 +460,10 @@ export default function RemoteConversationDashboard({
               type="info"
               showIcon
               message="更新 Mac 相知后可查看会话动态"
-              description="当前 Mac 版本仍可通过“配置与档案”管理已支持的设置。更新后可同步最近 30 条消息、逐条分析和回复草稿。"
+              description="当前 Mac 版本仍可通过“配置与档案”管理已支持的设置。更新后可同步完整消息历史、逐条分析和回复草稿。"
             />
           )}
-          {!snapshot.currentView ? (
+          {!snapshot.currentView && !archiveReady ? (
             <div className="chat-empty">
               <Empty
                 description={
@@ -405,8 +473,8 @@ export default function RemoteConversationDashboard({
                 }
               />
               <p>
-                保持 Mac 运行并开启同步后，可在这里查看最近 30
-                条消息、逐条分析、回复草稿、对方档案和记忆。
+                保持 Mac
+                运行并开启同步后，可在这里查看完整消息历史、逐条分析、回复草稿、对方档案和记忆。
               </p>
             </div>
           ) : !person ? (
@@ -441,6 +509,9 @@ export default function RemoteConversationDashboard({
                     {current?.wechat &&
                       ` · 最近读取 ${time(current.wechat.lastCheckedAt)}`}
                   </p>
+                  {archiveReady && (
+                    <p>{historyReadLabel(historyContact?.history)}</p>
+                  )}
                 </div>
                 <Space wrap>
                   {supported("conversation.refresh") && (
@@ -451,7 +522,7 @@ export default function RemoteConversationDashboard({
                       }
                       onClick={() => actions("conversation.refresh")}
                     >
-                      读取最新消息
+                      继续读取消息
                     </Button>
                   )}
                   {supported("conversation.drafts.generate") && (
@@ -488,7 +559,7 @@ export default function RemoteConversationDashboard({
                 <div className="chat-current-grid">
                   <section
                     className="chat-current-feed paper-panel"
-                    aria-label={`${person.name}的近期消息`}
+                    aria-label={`${person.name}的聊天记录`}
                     ref={feed}
                     onScroll={(event) => {
                       const element = event.currentTarget;
@@ -500,11 +571,49 @@ export default function RemoteConversationDashboard({
                     }}
                   >
                     <h3>
-                      近期消息<span>{current.messages.length} 条</span>
+                      聊天记录
+                      <span>
+                        {archive.page
+                          ? `已展开 ${current.messages.length} / ${archive.page.total} 条`
+                          : `${current.messages.length} 条`}
+                      </span>
                     </h3>
                     <p className="chat-current-note">
-                      显示此人最近同步的至多 30 条消息；完整记录保留在 Mac。
+                      {archive.page
+                        ? "分页仅影响网页展示；分析会读取本机可用的全部历史，长对话按段整理并保存在本地。"
+                        : "完整历史尚未归档，当前显示最近同步的近况。"}
                     </p>
+                    {archive.notice && (
+                      <p className="chat-current-note" role="status">
+                        {archive.notice}
+                      </p>
+                    )}
+                    {archive.page?.next_cursor && (
+                      <Button
+                        block
+                        loading={archive.loadingOlder}
+                        onClick={() => {
+                          if (feed.current) {
+                            olderScroll.current = {
+                              height: feed.current.scrollHeight,
+                              top: feed.current.scrollTop,
+                            };
+                            feedAtBottom.current = false;
+                          }
+                          void archive.loadOlder();
+                        }}
+                      >
+                        查看更早消息
+                      </Button>
+                    )}
+                    {archive.loading && !archive.page && <Spin size="small" />}
+                    {archive.page &&
+                      !archive.page.next_cursor &&
+                      current.messages.length > 0 && (
+                        <p className="chat-current-note">
+                          已到服务器已保存历史的开头
+                        </p>
+                      )}
                     {current.truncated && (
                       <p className="chat-current-note">
                         显示最近同步的部分消息，较早记录保留在 Mac。
@@ -565,6 +674,11 @@ export default function RemoteConversationDashboard({
                             >
                               <Sparkles size={13} />
                               <span>可能的意图（模型估计）</span>
+                              {item.analysis?.stale && (
+                                <Tag color="orange">
+                                  历史或模型有变化，待更新
+                                </Tag>
+                              )}
                               <div className="chat-current-intents">
                                 {currentIntentLabels(item).map(
                                   (intent, index) => (
@@ -811,12 +925,19 @@ export default function RemoteConversationDashboard({
                         </p>
                       )}
                       <Button
+                        disabled={!canConfigurePerson}
                         onClick={() =>
                           deviceId && onConfigure(deviceId, person.id)
                         }
                       >
                         修改档案、记忆与个人配置
                       </Button>
+                      {!canConfigurePerson && (
+                        <p className="chat-current-note">
+                          此人的消息已进入历史归档。个人配置尚未进入设备配置快照，可先在
+                          Mac 修改；读取、识别、分析和生成草稿仍可在本页操作。
+                        </p>
+                      )}
                     </section>
                   </aside>
                 </div>

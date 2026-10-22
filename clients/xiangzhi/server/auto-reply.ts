@@ -1,3 +1,4 @@
+import {fullHistoryDigest} from './full-history-context.js';
 import { randomUUID } from 'node:crypto';
 import type { AppState, AutoJob, Conversation, Settings } from '../shared/types.js';
 import { contactUsesDemo, effectiveContactSettings } from '../shared/contact-processing.js';
@@ -53,7 +54,7 @@ export function replyContextFingerprint(state: AppState, conversationId: string)
   return JSON.stringify([modelFingerprint(effectiveContactSettings(state.settings, conversation)), state.learnedProfile?.digest ?? null,
     approvedSelfReplyClaims(state, conversationId), state.feedback?.filter(item => item.conversationId === conversationId) ?? [],
     contactReplyMemoryContext(state, conversationId),
-    configuration,
+    configuration,fullHistoryDigest(state.messages.filter(m=>m.conversationId===conversationId&&m.role!=='system').sort((a,b)=>a.sequence-b.sequence||a.id.localeCompare(b.id))),
     recentConversationMessages(state, conversationId).map(message => [message.id, message.sequence, message.role, message.text,
       message.kind ?? 'text', message.mediaStatus ?? null,message.imageRecognition??null,message.audioRecognition??null])]);
 }

@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {messageEvidenceHash} from './contact-evidence.js';
 import type {Express,Request} from 'express';
 import {z} from 'zod';
 import type {AppState,ContactInsights,ContactMemory,Conversation,Settings} from '../shared/types.js';
@@ -6,6 +7,7 @@ import {analyzeContactMessage,insightsInputDigest} from './contact-insights.js';
 import {compressContactMemory,memoryInputDigest,memoryRemainingCount} from './contact-memory.js';
 import {effectiveContactModelSettings} from './contact-model.js';
 import {basisInputDigest,generateContactBasis} from './contact-basis.js';
+import {assertFullHistoryReady,type HistoryDependencies} from './full-history-context.js';
 import type {Store} from './store.js';
 
 const basisSchema=z.object({category:z.enum(['current_status','interest','preference','fact','boundary','plan']),content:z.string().trim().min(1).max(1000),sourceNote:z.string().trim().max(500).default('')}).strict();
@@ -41,23 +43,51 @@ export function validateContactFeatures(settings:Settings,c:Conversation,scope:{
 }
 
 /** Bounded, opt-in analysis and local memory; it never sends a chat message. */
+export interface ContactAnalysisProgress {
+  conversationId:string;
+  feature:'analysis'|'memory'|'basis';
+  total:number;
+  processed:number;
+  stage:'reading'|'summarizing'|'generating';
+  updatedAt:string;
+}
 export class ContactInsightService {
   private closed=false;
   private timer:ReturnType<typeof setInterval>|null=null;
   private active=new Map<string,{controller:AbortController;kind:'analysis'|'memory';cid:string}>();
   private pending=new Map<string,string>();
+  private progress=new Map<string,ContactAnalysisProgress>();
+  private memoryRuns=new Set<string>();
   private running:Promise<void>|null=null;
   constructor(private readonly store:Store,private readonly options:{
     analyze?:typeof analyzeContactMessage;compress?:typeof compressContactMemory;
     generateBasis?:typeof generateContactBasis;
     onContextChanged:(conversationId:string)=>void;
   }){}
+  status():ContactAnalysisProgress[]{return [...this.progress.values()].map(value=>({...value}));}
+  private historyDependencies(key:string,id:string,feature:ContactAnalysisProgress['feature']):HistoryDependencies {
+    return {
+      historyCache:{get:(namespace,cacheKey)=>this.store.cacheGet(namespace,cacheKey),set:(namespace,cacheKey,value)=>this.store.cacheSet(namespace,cacheKey,value)},
+      onHistoryProgress:progress=>{
+        if(this.closed||this.active.get(key)?.controller.signal.aborted||!this.active.has(key))return;
+        let total=progress.total,processed=progress.processed;
+        if(feature==='memory'){
+          const state=this.store.read();
+          total=state.messages.filter(m=>m.conversationId===id&&m.role!=='system').length;
+          processed=Math.min(total,total-memoryRemainingCount(state,id)+progress.processed);
+        }
+        this.progress.set(key,{conversationId:id,feature,total,processed,
+          stage:progress.stage==='complete'?'generating':progress.stage,updatedAt:new Date().toISOString()});
+      },
+    };
+  }
   private record(id:string,title:string,detail:string,kind:'info'|'success'|'warning'='success'){
     if(this.closed)return;
     this.store.update(s=>{s.activity.unshift({id:randomUUID(),conversationId:id,kind,title,detail,createdAt:new Date().toISOString()});s.activity=s.activity.slice(0,300);});
   }
   changed(id?:string,kind?:'analysis'|'memory'){
     for(const entry of this.active.values())if((!id||entry.cid===id)&&(!kind||entry.kind===kind))entry.controller.abort();
+    for(const [key,value] of this.progress)if((!id||value.conversationId===id)&&(!kind||(value.feature==='analysis'?'analysis':'memory')===kind))this.progress.delete(key);
     if(id)this.pending.delete(id);else this.pending.clear();
   }
   invalidateCached(id?:string){
@@ -107,6 +137,7 @@ export class ContactInsightService {
     signal?.throwIfAborted();
     if(this.closed)throw new Error('分析服务已停止。');
     const before=this.store.read(),c=conversation(before,id);
+    assertFullHistoryReady(before,id);
     if(!c.processing?.intentEnabled&&!c.processing?.affinityEnabled)throw new Error('请先为此人开启意图或好感分析。');
     const target=targetId?before.messages.find(m=>m.id===targetId&&m.conversationId===id):before.messages.filter(m=>m.conversationId===id&&m.role==='peer').sort((a,b)=>a.sequence-b.sequence).at(-1);
     if(!target)throw new Error('请先选择这段对话中的一句话。');
@@ -117,7 +148,7 @@ export class ContactInsightService {
     const controller=new AbortController(),configuration=modelConfiguration(before,id,'analysis'),unlink=linkAbort(controller,signal);
     this.active.set(key,{cid:id,kind:'analysis',controller});
     try{
-      const result=await (this.options.analyze??analyzeContactMessage)(before,id,target.id,controller.signal);
+      const result=await (this.options.analyze??analyzeContactMessage)(before,id,target.id,controller.signal,this.historyDependencies(key,id,'analysis'));
       controller.signal.throwIfAborted();
       const state=this.store.read();
       if(this.closed||modelConfiguration(state,id,'analysis')!==configuration||insightsInputDigest(state,id,target.id)!==inputDigest||result.conversationId!==id||result.messageId!==target.id)throw Object.assign(new Error('这句话或分析配置已变化，旧结果未保存。'),{status:409});
@@ -125,9 +156,31 @@ export class ContactInsightService {
       this.store.update(s=>{const m=s.messages.find(m=>m.id===target.id&&m.conversationId===id);if(!m)throw missing();m.insights=saved;});
       this.record(id,'已保存交流分析','百分比是模型对语境的估计，原结果保存在本机。');
       return {insights:saved,cached:false};
-    }finally{unlink();if(this.active.get(key)?.controller===controller)this.active.delete(key);}
+    }finally{unlink();if(this.active.get(key)?.controller===controller){this.active.delete(key);this.progress.delete(key);}}
   }
   async compress(id:string,signal?:AbortSignal):Promise<{memory:ContactMemory;cached:boolean;remaining:number}>{
+    // Persist each successful batch. A cancelled/restarted request resumes from
+    // message hashes, and newly arriving messages cannot make this job endless.
+    if(this.closed)throw new Error('记忆服务已停止。');
+    assertFullHistoryReady(this.store.read(),id);
+    if(this.memoryRuns.has(id))throw Object.assign(new Error('此人的记忆正在整理，请等待结果。'),{status:409});
+    this.memoryRuns.add(id);
+    try{
+      const before=this.store.read();
+      const pending=before.messages.filter(m=>m.conversationId===id&&m.role!=='system');
+      let result=await this.compressBatch(id,signal);
+      while(result.remaining>0){
+        signal?.throwIfAborted();
+        const state=this.store.read(),memory=conversation(state,id).memory;
+        if(pending.every(m=>memory?.compressedMessageHashes?.[m.id]===messageEvidenceHash(m)))break;
+        const previous=memory?.sourceDigest;
+        result=await this.compressBatch(id,signal);
+        if(result.memory.sourceDigest===previous)throw new Error('历史记忆整理没有继续推进，已完成的分段已保存，请重试。');
+      }
+      return result;
+    }finally{this.memoryRuns.delete(id);}
+  }
+  private async compressBatch(id:string,signal?:AbortSignal):Promise<{memory:ContactMemory;cached:boolean;remaining:number}>{
     signal?.throwIfAborted();
     if(this.closed)throw new Error('记忆服务已停止。');
     const before=this.store.read(),c=conversation(before,id);
@@ -140,7 +193,7 @@ export class ContactInsightService {
     const controller=new AbortController(),inputDigest=memoryInputDigest(before,id),configuration=modelConfiguration(before,id,'memory'),unlink=linkAbort(controller,signal);
     this.active.set(key,{cid:id,kind:'memory',controller});
     try{
-      const result=await (this.options.compress??compressContactMemory)(before,id,controller.signal);
+      const result=await (this.options.compress??compressContactMemory)(before,id,controller.signal,this.historyDependencies(key,id,'memory'));
       controller.signal.throwIfAborted();
       const state=this.store.read();
       if(this.closed||modelConfiguration(state,id,'memory')!==configuration||memoryInputDigest(state,id)!==inputDigest)throw Object.assign(new Error('对话或记忆配置已变化，旧整理结果未保存。'),{status:409});
@@ -148,12 +201,13 @@ export class ContactInsightService {
       this.store.update(s=>{conversation(s,id).memory=result;});
       this.record(id,'对话记忆已保存在本机','新条目待你确认，后续草稿参考此人的资料和本地记忆。');
       return {memory:result,cached:false,remaining:memoryRemainingCount(this.store.read(),id)};
-    }finally{unlink();if(this.active.get(key)?.controller===controller)this.active.delete(key);}
+    }finally{unlink();if(this.active.get(key)?.controller===controller){this.active.delete(key);this.progress.delete(key);}}
   }
   async generateBasis(id:string,signal?:AbortSignal){
     signal?.throwIfAborted();
     if(this.closed)throw new Error('档案整理服务已停止。');
     const before=this.store.read(),c=conversation(before,id),inputDigest=basisInputDigest(before,id);
+    assertFullHistoryReady(before,id);
     if(c.basisGeneration?.sourceDigest===inputDigest)return {facts:c.basisFacts??[],cached:true};
     const manual=(c.basisFacts??[]).filter(f=>f.origin!=='model');
     if(manual.length>=100)throw new Error('基础资料已达到上限，请先整理已有内容。');
@@ -162,7 +216,7 @@ export class ContactInsightService {
     const controller=new AbortController(),configuration=modelConfiguration(before,id,'memory'),unlink=linkAbort(controller,signal);
     this.active.set(key,{cid:id,kind:'memory',controller});
     try{
-      const result=await (this.options.generateBasis??generateContactBasis)(before,id,controller.signal);
+      const result=await (this.options.generateBasis??generateContactBasis)(before,id,controller.signal,this.historyDependencies(key,id,'basis'));
       controller.signal.throwIfAborted();
       const now=this.store.read();
       if(this.closed||modelConfiguration(now,id,'memory')!==configuration||basisInputDigest(now,id)!==inputDigest||result.sourceDigest!==inputDigest)
@@ -176,7 +230,7 @@ export class ContactInsightService {
       });
       this.record(id,'模型已整理对方档案','基础资料已保存在本机，可逐条修改或补充；个人填写的信息已保留。');
       return {facts:conversation(this.store.read(),id).basisFacts??[],cached:false};
-    }finally{unlink();if(this.active.get(key)?.controller===controller)this.active.delete(key);}
+    }finally{unlink();if(this.active.get(key)?.controller===controller){this.active.delete(key);this.progress.delete(key);}}
   }
   private ensureMemory(s:AppState,id:string):ContactMemory{
     const c=conversation(s,id),at=new Date().toISOString();

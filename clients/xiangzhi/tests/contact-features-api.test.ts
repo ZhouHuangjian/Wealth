@@ -23,7 +23,7 @@ function memoryResult(state:AppState,cid:string):ContactMemory {
   const source=state.messages.filter(m=>m.conversationId===cid&&m.role!=='system').sort((a,b)=>a.sequence-b.sequence).at(-1)!;
   return {summary:'合成对话摘要',entries:[{id:`memory-${source.id}`,kind:'event',text:'对方发来一条合成消息',sourceMessageIds:[source.id],
     sourceMessageHashes:{[source.id]:messageEvidenceHash(source)},status:'pending',createdAt:new Date().toISOString()}],openTopics:['合成待确认事项'],
-    throughSequence:source.sequence,sourceDigest:memoryInputDigest(state,cid),provider:'compatible',modelName:'memory-default',updatedAt:new Date().toISOString()};
+    throughSequence:source.sequence,compressedMessageHashes:Object.fromEntries(state.messages.filter(m=>m.conversationId===cid&&m.role!=='system').map(m=>[m.id,messageEvidenceHash(m)])),sourceDigest:memoryInputDigest(state,cid),provider:'compatible',modelName:'memory-default',updatedAt:new Date().toISOString()};
 }
 function basisResult(state:AppState,cid:string):ContactBasisGeneration {
   const source=state.messages.filter(m=>m.conversationId===cid&&m.role==='peer').at(-1)!;
@@ -369,4 +369,19 @@ test('manual summary and open topics can be edited independently and persist aft
     const restored=reopened.store.read().conversations.find(c=>c.id===h.a)!.memory!;
     assert.equal(restored.summary,memory.summary);assert.deepEqual(restored.openTopics,['已修改的未完话题']);assert.equal(reopened.calls.memory,0);
   }finally{if(reopened)await reopened.close();if(!closed)await h.close();else rmSync(h.dir,{recursive:true,force:true});}
+});
+
+
+test('public state marks previous analysis stale without changing persisted results',async()=>{
+  const h=await harness();
+  try{
+    const mid=await h.add(h.a);
+    await h.request(`/conversations/${h.a}`,'PATCH',{processing:{intentEnabled:true}});
+    await h.request(`/conversations/${h.a}/analyze`,'POST',{messageId:mid});
+    assert.equal(h.publicState().messages.find(m=>m.id===mid)!.insights!.stale,false);
+    const saved=structuredClone(h.store.read().messages.find(m=>m.id===mid)!.insights);
+    h.store.update(s=>{s.messages.find(m=>m.id===mid)!.text+='原文发生变化';});
+    assert.equal(h.publicState().messages.find(m=>m.id===mid)!.insights!.stale,true);
+    assert.deepEqual(h.store.read().messages.find(m=>m.id===mid)!.insights,saved);
+  }finally{await h.close();}
 });

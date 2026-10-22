@@ -707,3 +707,34 @@ body:has(.chat-topbar) .theme-floating {
     padding: 18px 14px;
   }
 }
+
+.chat-remote-model-center {
+  border: 1px solid var(--theme-border);
+  border-radius: 16px;
+  padding: 20px;
+  margin: 16px 0;
+}
+.chat-remote-model-center > h3 {
+  margin-top: 0;
+}
+.chat-remote-operation-settings,
+.chat-remote-contact-models {
+  padding: 16px;
+  border: 1px solid var(--theme-border);
+  border-radius: 12px;
+  margin: 16px 0;
+}
+.chat-remote-operation-settings > summary,
+.chat-remote-contact-models > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.chat-remote-operation-settings[open] > summary,
+.chat-remote-contact-models[open] > summary {
+  margin-bottom: 16px;
+}
+@media (max-width: 600px) {
+  .chat-remote-model-center {
+    padding: 14px;
+  }
+}

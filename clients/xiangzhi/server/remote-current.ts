@@ -161,6 +161,23 @@ export function remoteCurrentConversation(state:AppState,cid:string,secrets:read
   fitViews([view],()=>bytes(view),forceMessageId);return view;
 }
 
+/** Archive transport retains the full text; pagination bounds each request, not the history. */
+export function remoteHistoryMessage(state:AppState,conversation:Conversation,message:Message,secrets:readonly string[]=[]){
+  const allSecrets=[...knownRemoteSecrets(state.settings),...secrets];
+  const result=currentMessage(state,conversation,message,allSecrets,'1970-01-01T00:00:00.000Z');
+  result.text=unicode(sanitizeRemoteText(message.text,allSecrets));delete result.truncated;
+  const observed=message.imageRecognition;
+  if(observed&&message.mediaStatus==='recognized'&&(message.kind==='image'||message.kind==='emoji'))result.mediaSummary=unicode(sanitizeRemoteText(`${message.kind==='emoji'?'表情解析':'图片解析'}：${observed.summary}${observed.visibleText?`\n可见文字：${observed.visibleText}`:''}`,allSecrets));
+  else if(message.kind==='voice'&&message.mediaStatus==='recognized'&&message.audioRecognition)result.mediaSummary=unicode(sanitizeRemoteText(`语音转写：${message.audioRecognition.text}`,allSecrets));
+  else {const emoji=messageEmojiRecognition(message);if(emoji)result.mediaSummary=unicode(sanitizeRemoteText(`表情解析：${emoji.tokens.map(token=>`${token.value} ${token.description}`).join('\n')}`,allSecrets));}
+  if(!result.analysis&&message.insights?.conversationId===conversation.id&&message.insights.messageId===message.id&&iso(message.insights.analyzedAt)){
+    const saved=message.insights;
+    return {...result,analysis:{intents:conversation.processing?.intentEnabled?saved.intents:[],affinity:conversation.processing?.affinityEnabled&&saved.affinity?{score:saved.affinity.score,confidence:saved.affinity.confidence}:null,
+      provider:saved.provider,modelName:safe(saved.modelName,200,allSecrets),analyzedAt:iso(saved.analyzedAt)!,stale:true}};
+  }
+  return result;
+}
+
 export function withRemoteCurrentView(baseSnapshotRecord:Record<string,unknown>,state:AppState,secrets:readonly string[]=[]):Record<string,unknown>{
   const syncedAt=new Date().toISOString(),allSecrets=[...knownRemoteSecrets(state.settings),...secrets];
   const configured=Array.isArray(baseSnapshotRecord.conversations)?baseSnapshotRecord.conversations as {id?:unknown}[]:[];

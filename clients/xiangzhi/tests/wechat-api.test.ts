@@ -100,12 +100,13 @@ test('WeChat reads only an exact bound contact and manual baseline never schedul
     await h.request('/api/settings', 'PATCH', {autoReplyEnabled: true});
     const result = await h.request(`/api/conversations/${selected.id}/wechat/poll`, 'POST', {});
     assert.equal(result.status, 200); assert.deepEqual(await result.json(), {added: 2, baseline: true});
-    assert.deepEqual(h.calls.query, [{contact: 'filehelper', order: 'desc', limit: 50, offset: 0}]);
+    assert.deepEqual(h.calls.query, [{contact: 'filehelper', order: 'desc', limit: 200, offset: 0}]);
     const state = h.store.read();
     assert.deepEqual(state.messages.map(message => message.sourceSequence), ['1', '2']);
     assert.ok(state.messages.every(message => message.conversationId === selected.id && message.source === 'wechat'));
     assert.equal(state.conversations.find(contact => contact.id === unrelated.id)!.wechat!.initialized, false);
     assert.equal(state.conversations.find(contact => contact.id === selected.id)!.wechat!.cursor, '2');
+    assert.equal(state.conversations.find(contact => contact.id === selected.id)!.wechat!.history!.status, 'complete');
     assert.equal(state.conversations.find(contact => contact.id === selected.id)!.wechat!.accountFingerprint, account);
     assert.deepEqual(state.jobs, []); assert.deepEqual(h.calls.generate, []); assert.equal(h.calls.send, 0);
     assert.equal((await h.request(`/api/conversations/${selected.id}/wechat/poll`, 'POST', {})).status, 200);

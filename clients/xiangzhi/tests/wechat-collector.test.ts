@@ -27,6 +27,12 @@ function record(sequence: string | number, overrides: Partial<WechatRecord> = {}
 function page(records: WechatRecord[], hasMore = false, accountFingerprint = account): WechatPage {
   return {records, hasMore, accountFingerprint};
 }
+function paged(rows:WechatRecord[],input:Input):WechatPage{
+  let selected=rows.filter(row=>input.after===undefined||BigInt(row.sortSeq)>BigInt(input.after))
+    .sort((a,b)=>BigInt(a.sortSeq)<BigInt(b.sortSeq)?-1:BigInt(a.sortSeq)>BigInt(b.sortSeq)?1:a.id.localeCompare(b.id));
+  if(input.order==='desc')selected=selected.reverse();const offset=input.offset??0;
+  return page(selected.slice(offset,offset+input.limit),offset+input.limit<selected.length);
+}
 function setup(t: TestContext, query: WechatQuery, binding: Partial<NonNullable<Conversation['wechat']>> = {},
   onMessages?: (cid: string, latest: string | null, live: boolean) => void) {
   const store = new Store(':memory:'); const events: Event[] = [], invalidations: string[] = [];
@@ -121,15 +127,17 @@ test('an account switch signals context invalidation before any foreign records 
   assert.deepEqual(invalidations, ['wechat-test']);
 });
 
-test('first poll reads the newest fifty as a non-live baseline without following older pages', async t => {
+test('first poll previews current messages and reads all 301 historical rows rather than stopping at a recent-message limit', async t => {
   const inputs: Input[] = [];
-  const rows = Array.from({length: 50}, (_, index) => record(100 + index));
-  const {store, collector, events} = setup(t, async input => {inputs.push(input); return page([...rows].reverse(), true);});
+  const rows = Array.from({length: 301}, (_, index) => record(100 + index));
+  const {store, collector, events} = setup(t, async input => {inputs.push(input); return paged(rows,input);});
   const result = await collector.poll('wechat-test');
-  assert.deepEqual(result, {added: 50, baseline: true});
-  assert.deepEqual(inputs[0], {contact: 'filehelper', order: 'desc', limit: 50, offset: 0});
+  assert.deepEqual(result, {added: 301, baseline: true});
+  assert.deepEqual(inputs[0], {contact: 'filehelper', order: 'desc', limit: 200, offset: 0});
+  assert.equal(inputs.filter(input=>input.order==='asc').length,2);
   const initial = store.read(); const binding = initial.conversations[0].wechat!;
-  assert.equal(binding.cursor, '149'); assert.equal(binding.accountFingerprint, account); assert.equal(binding.initialized, true);
+  assert.equal(binding.cursor, '400'); assert.equal(binding.accountFingerprint, account); assert.equal(binding.initialized, true);
+  assert.equal(binding.history!.status,'complete');assert.equal(binding.history!.scanned,301);assert.equal(binding.history!.added,301);
   assert.equal(binding.status, 'paused'); assert.equal(binding.lastCheckedAt, new Date(NOW).toISOString());
   assert.deepEqual(initial.messages.map(message => message.sourceSequence), rows.map(row => row.sortSeq));
   assert.equal(events.length, 1); assert.equal(events[0].live, false);
@@ -178,14 +186,14 @@ test('paginated catch-up preserves adjacent nineteen-digit identifiers and seque
   const {store, collector, events} = setup(t, async input => {
     inputs.push(input);
     if (first) {first = false; return page([rows[0]]);}
-    const offset = input.offset ?? 0;
-    return page(rows.slice(offset, offset + 200), offset + 200 < rows.length);
+    return paged(rows,input);
   });
   await collector.poll('wechat-test'); collector.setEnabled('wechat-test', true);
   const result = await collector.poll('wechat-test');
   assert.deepEqual(result, {added: 401, baseline: false});
-  assert.deepEqual(inputs.slice(1).map(input => input.offset), [0, 200, 400]);
-  assert.ok(inputs.slice(1).every(input => input.after === (base - 1n).toString() && input.order === 'asc' && input.limit === 200));
+  assert.deepEqual(inputs.slice(1).map(input => input.offset), [0, 1, 1]);
+  assert.deepEqual(inputs.slice(1).map(input => input.after), [(base-1n).toString(),(base+198n).toString(),(base+398n).toString()]);
+  assert.ok(inputs.slice(1).every(input => input.order === 'asc' && input.limit === 200));
   assert.equal(store.read().messages.length, 402); assert.equal(new Set(store.read().messages.map(message => message.externalId)).size, 402);
   assert.deepEqual(store.read().messages.map(message => message.sourceSequence), rows.map(row => row.sortSeq));
   assert.equal(store.read().conversations[0].wechat!.cursor, (base + 401n).toString());
@@ -195,7 +203,7 @@ test('paginated catch-up preserves adjacent nineteen-digit identifiers and seque
 test('last-fifty overlap recovers equal-boundary and recent delayed rows without moving the high cursor backwards', async t => {
   let rows = Array.from({length: 60}, (_, index) => record(100 + index));
   const inputs: Input[] = [];
-  const {store, collector, events} = setup(t, async input => {inputs.push(input); return page(rows);},
+  const {store, collector, events} = setup(t, async input => {inputs.push(input); return paged(rows,input);},
     {initialized: true, cursor: '99', accountFingerprint: account, enabled: true});
   await collector.poll('wechat-test');
   const originalLatest = store.read().messages.at(-1)!.id;
@@ -246,15 +254,16 @@ test('background polling rechecks later bindings after an earlier query awaits',
   }
 });
 
-test('query failure after a successful page rolls back the entire batch and backs off background retry', async t => {
+test('query failure preserves a committed preview and durable history checkpoint before backing off', async t => {
   let calls = 0;
   const {store, collector, events} = setup(t, async () => {
     if (++calls === 1) return page([record(101)], true);
     throw new Error('synthetic query failure');
   }, {enabled: true, initialized: true, cursor: '100', accountFingerprint: account});
   await assert.rejects(collector.poll('wechat-test'), /synthetic query failure/);
-  const state = store.read(); assert.equal(state.messages.length, 0); assert.equal(state.conversations[0].wechat!.cursor, '100');
-  assert.equal(state.conversations[0].wechat!.status, 'error'); assert.equal(events.length, 0);
+  const state = store.read(); assert.equal(state.messages.length, 1); assert.equal(state.conversations[0].wechat!.cursor, '101');
+  assert.equal(state.conversations[0].wechat!.history!.status,'error');assert.equal(state.conversations[0].wechat!.history!.cursor,'0');
+  assert.equal(state.conversations[0].wechat!.status, 'error'); assert.equal(events.length, 1);assert.equal(events[0].live,false);
   await collector.tick(); assert.equal(calls, 2, 'failed query is not immediately retried by background ticks');
 });
 
@@ -292,18 +301,25 @@ test('a provisional sequence ID upgrades to the stable server ID without a dupli
   assert.equal(store.read().conversations[0].wechat!.cursor, '101'); assert.equal(events.length, eventCount);
 });
 
-test('more than ten catch-up pages or an empty continuing page never commits partial records', async t => {
-  for (const mode of ['over-limit', 'empty-page'] as const) {
-    let calls = 0;
-    const {store, collector, events} = setup(t, async () => {
-      calls++;
-      return page(mode === 'empty-page' ? [] : [record(100 + calls)], true);
-    }, {enabled: true, initialized: true, cursor: '100', accountFingerprint: account});
-    await assert.rejects(collector.poll('wechat-test'), /分页异常/);
-    assert.equal(calls, mode === 'over-limit' ? 10 : 1);
-    assert.equal(store.read().messages.length, 0); assert.equal(store.read().conversations[0].wechat!.cursor, '100');
-    assert.equal(events.length, 0);
-  }
+test('more than ten historical pages complete across durable chunks without duplicates or paid-media eligibility',async t=>{
+  const rows=Array.from({length:2601},(_,index)=>record(index+1,index%50===0?{kind:'image',text:'[图片]',mediaStatus:'pending'}:{})),inputs:Input[]=[];
+  const {store,collector,events}=setup(t,async input=>{inputs.push(input);return paged(rows,input);},{enabled:true});
+  store.update(state=>state.conversations[0].processing={autoRecognizeImages:true,autoTranscribeVoice:true});
+  await collector.poll('wechat-test');assert.equal(store.read().conversations[0].wechat!.history!.status,'running');
+  assert.ok(store.read().messages.length>200&&store.read().messages.length<rows.length);
+  for(let round=0;round<10&&store.read().conversations[0].wechat!.history!.status!=='complete';round++)await collector.tick();
+  const state=store.read();assert.equal(state.conversations[0].wechat!.history!.status,'complete');assert.equal(state.messages.length,rows.length);
+  assert.equal(state.conversations[0].wechat!.history!.scanned,rows.length);assert.equal(state.conversations[0].wechat!.history!.added,rows.length);
+  assert.equal(new Set(state.messages.map(message=>message.externalId)).size,rows.length);assert.ok(inputs.filter(input=>input.order==='asc').length>10);
+  assert.ok(state.messages.every(message=>!message.autoMediaEligible));assert.ok(events.every(event=>!event.live));assert.deepEqual(state.jobs,[]);
+  rows.push(record(2602,{kind:'image',text:'[图片]',mediaStatus:'pending'}));await collector.poll('wechat-test');
+  assert.equal(events.at(-1)!.live,true);assert.equal(store.read().messages.at(-1)!.autoMediaEligible,true);
+});
+
+test('an empty continuing page is rejected without inventing a checkpoint or dropping old data',async t=>{
+  const {store,collector,events}=setup(t,async()=>page([],true),{enabled:true,initialized:true,cursor:'100',accountFingerprint:account});
+  await assert.rejects(collector.poll('wechat-test'),/分页异常/);assert.equal(store.read().messages.length,0);
+  assert.equal(store.read().conversations[0].wechat!.cursor,'100');assert.equal(store.read().conversations[0].wechat!.history!.cursor,'0');assert.equal(events.length,0);
 });
 
 test('account switches on any page disable collection and preserve the original account and cursor', async t => {
@@ -315,9 +331,10 @@ test('account switches on any page disable collection and preserve the original 
     }, {enabled: true, initialized: true, cursor: '100', accountFingerprint: account});
     await assert.rejects(collector.poll('wechat-test'), /账号已变化/);
     const state = store.read(); const binding = state.conversations[0].wechat!;
-    assert.equal(state.messages.length, 0); assert.equal(binding.cursor, '100'); assert.equal(binding.accountFingerprint, account);
+    assert.equal(state.messages.length,mismatchPage===1?0:1);assert.equal(binding.cursor,mismatchPage===1?'100':'101');assert.equal(binding.accountFingerprint,account);
+    assert.ok(state.messages.every(message=>message.externalId==='id-101'));assert.equal(binding.history!.status,'error');
     assert.equal(binding.enabled, false); assert.equal(binding.status, 'error'); assert.match(binding.detail, /账号已变化/);
-    assert.equal(events.length, 0); await collector.tick(); assert.equal(calls, mismatchPage);
+    assert.equal(events.length,mismatchPage===1?0:1);assert.ok(events.every(event=>!event.live));await collector.tick();assert.equal(calls,mismatchPage);
   }
 });
 
@@ -473,4 +490,156 @@ test('reopening the store pauses WeChat bindings while preserving account, curso
   assert.equal(binding.enabled, false); assert.equal(binding.status, 'paused');
   assert.equal(binding.initialized, true); assert.equal(binding.cursor, '9007199254740993001');
   assert.equal(binding.accountFingerprint, account); assert.equal(store.read().messages.length, 1);
+});
+
+test('an initialized legacy latest-fifty binding backfills everything without replacing saved IDs, review, caches or analysis',async t=>{
+  const rows=Array.from({length:1501},(_,index)=>record(index+1,index===1470?{kind:'image',text:'[图片]',mediaStatus:'pending'}:{}));
+  const {store,collector,events}=setup(t,async input=>paged(rows,input),{enabled:true,initialized:true,cursor:'1501',accountFingerprint:account});
+  store.update(state=>{
+    state.conversations[0].processing={autoRecognizeImages:true,autoTranscribeVoice:true};
+    state.messages=rows.slice(-50).map((row,index)=>({id:`preserved-${row.id}`,conversationId:'wechat-test',role:row.role,text:row.text,
+      source:'wechat',externalId:row.id,sequence:index+1,sourceSequence:row.sortSeq,sentAt:row.sentAt,aiAssisted:false,kind:row.kind,mediaStatus:row.mediaStatus}));
+    const media=state.messages.find(message=>message.kind==='image')!;
+    media.text='[图片识别] 用户已核对的合成内容';media.mediaStatus='reviewed';
+    media.imageAttachment={id:'saved-file',filename:'synthetic.png',mimeType:'image/png',source:'wechat'};
+    media.imageRecognition={summary:'已保存识别',visibleText:'合成文字',facts:[],provider:'qwen',modelName:'vision-fixture',recognizedAt:''};
+  });
+  saveSyntheticInsights(store,'wechat-test');
+  const originals=store.read().messages;
+  for(let round=0;round<5&&store.read().conversations[0].wechat?.history?.status!=='complete';round++)await collector.poll('wechat-test');
+  const state=store.read();assert.equal(state.messages.length,rows.length);assert.equal(state.conversations[0].wechat!.history!.status,'complete');
+  assert.equal(state.conversations[0].wechat!.history!.added,rows.length-50);assert.equal(state.conversations[0].wechat!.history!.scanned,rows.length);
+  for(const old of originals){const current=state.messages.find(message=>message.externalId===old.externalId)!;
+    assert.equal(current.id,old.id);assert.deepEqual(current.insights,old.insights);assert.equal(current.text,old.text);
+    assert.equal(current.mediaStatus,old.mediaStatus);assert.deepEqual(current.imageAttachment,old.imageAttachment);assert.deepEqual(current.imageRecognition,old.imageRecognition);
+  }
+  assert.ok(events.every(event=>!event.live));assert.ok(state.messages.every(message=>!message.autoMediaEligible));assert.deepEqual(state.jobs,[]);
+});
+
+test('a failed historical page resumes its saved tie offset after a real SQLite restart with no missing or duplicated equal-sequence rows',async t=>{
+  const directory=mkdtempSync(join(tmpdir(),'xiangzhi-history-resume-')),path=join(directory,'state.sqlite');
+  let store=new Store(path),collector:WechatCollector;const inputs:Input[]=[],events:boolean[]=[];
+  const rows=[record(1),...Array.from({length:1201},(_,index)=>record(100,{id:`tie-${String(index).padStart(5,'0')}`})),record(101)];
+  store.update(state=>state.conversations.push(conversation({enabled:true})));
+  let ascCalls=0,fail=true;
+  const query:WechatQuery=async input=>{inputs.push(input);if(input.order==='asc'&&++ascCalls===2&&fail)throw new Error('synthetic interrupted second page');return paged(rows,input);};
+  collector=new WechatCollector(store,{query,onMessages:(_cid,_id,live)=>events.push(live)});
+  t.after(()=>{collector.stop();store.close();rmSync(directory,{recursive:true,force:true});});
+  await assert.rejects(collector.poll('wechat-test'),/interrupted second page/);
+  const checkpoint=store.read().conversations[0].wechat!.history!;
+  assert.equal(checkpoint.status,'error');assert.equal(checkpoint.cursor,'99');assert.equal(checkpoint.offset,199);assert.equal(checkpoint.scanned,200);
+  const committed=new Map(store.read().messages.map(message=>[message.externalId,message.id]));
+  collector.stop();store.close();store=new Store(path);fail=false;inputs.length=0;
+  collector=new WechatCollector(store,{query,onMessages:(_cid,_id,live)=>events.push(live)});collector.setEnabled('wechat-test',true);
+  for(let round=0;round<5&&store.read().conversations[0].wechat!.history!.status!=='complete';round++)await collector.tick();
+  assert.equal(inputs.find(input=>input.order==='asc')!.offset,199);assert.equal(inputs.find(input=>input.order==='asc')!.after,'99');
+  const state=store.read();assert.equal(state.messages.length,rows.length);assert.equal(new Set(state.messages.map(message=>message.externalId)).size,rows.length);
+  assert.equal(state.conversations[0].wechat!.history!.scanned,rows.length);assert.equal(state.conversations[0].wechat!.history!.added,rows.length);
+  assert.equal(state.conversations[0].wechat!.history!.status,'complete');
+  for(const [externalId,id] of committed)assert.equal(state.messages.find(message=>message.externalId===externalId)!.id,id);
+  assert.deepEqual(new Set(state.messages.map(message=>message.externalId)),new Set(rows.map(row=>row.id)));assert.ok(events.every(live=>!live));
+});
+
+test('pausing after a committed historical page blocks a late result and resumes exactly from the checkpoint',async t=>{
+  const rows=Array.from({length:1201},(_,index)=>record(index+1)),gate=deferred<WechatPage>();let ascCalls=0;
+  const inputs:Input[]=[];let pausedInput:Input|undefined;
+  const {store,collector,events}=setup(t,async input=>{inputs.push(input);if(input.order==='asc'&&++ascCalls===2){pausedInput=input;return gate.promise;}return paged(rows,input);},{enabled:true});
+  const pending=collector.poll('wechat-test'),rejected=assert.rejects(pending,/暂停|停止|改变/);
+  while(!pausedInput)await Promise.resolve();
+  const prior=store.read();assert.equal(prior.conversations[0].wechat!.history!.scanned,200);
+  collector.setEnabled('wechat-test',false);gate.resolve(paged(rows,pausedInput));await rejected;
+  assert.deepEqual(store.read().messages,prior.messages);assert.equal(store.read().conversations[0].wechat!.history!.cursor,'199');
+  assert.equal(store.read().conversations[0].wechat!.history!.status,'pending');
+  inputs.length=0;collector.setEnabled('wechat-test',true);
+  for(let round=0;round<5&&store.read().conversations[0].wechat!.history!.status!=='complete';round++)await collector.tick();
+  assert.deepEqual(inputs.find(input=>input.order==='asc'),pausedInput);assert.equal(store.read().messages.length,rows.length);
+  assert.equal(store.read().conversations[0].wechat!.history!.scanned,rows.length);assert.ok(events.every(event=>!event.live));
+});
+
+test('latest messages appear before historical backfill finishes and a large later catch-up has no total page cap',async t=>{
+  const rows=Array.from({length:2401},(_,index)=>record(index+1)),inputs:Input[]=[];
+  const {store,collector,events}=setup(t,async input=>{inputs.push(input);return paged(rows,input);},{enabled:true});
+  await collector.poll('wechat-test');assert.equal(store.read().conversations[0].wechat!.history!.status,'running');
+  rows.push(record(2402,{text:'最新合成来信'}));await collector.poll('wechat-test');
+  assert.equal(store.read().messages.at(-1)!.text,'最新合成来信');assert.equal(store.read().conversations[0].wechat!.history!.status,'running');
+  assert.ok(events.every(event=>!event.live));
+  for(let round=0;round<5&&store.read().conversations[0].wechat!.history!.status!=='complete';round++)await collector.tick();
+  const historyCount=store.read().conversations[0].wechat!.history!.scanned;
+  rows.push(...Array.from({length:2501},(_,index)=>record(2403+index)));
+  await collector.poll('wechat-test');assert.ok(store.read().conversations[0].wechat!.history!.tail);
+  for(let round=0;round<10&&store.read().conversations[0].wechat!.history!.tail;round++)await collector.tick();
+  const state=store.read();assert.equal(state.messages.length,rows.length);assert.equal(new Set(state.messages.map(message=>message.externalId)).size,rows.length);
+  assert.equal(state.conversations[0].wechat!.history!.tail,undefined);assert.equal(state.conversations[0].wechat!.history!.scanned,historyCount);
+  assert.equal(state.messages.at(-1)!.externalId,rows.at(-1)!.id);assert.ok(events.every(event=>!event.live));assert.deepEqual(state.jobs,[]);
+});
+
+test('a foreign account on a later historical page cannot advance or contaminate the committed account checkpoint',async t=>{
+  const rows=Array.from({length:1001},(_,index)=>record(index+1));let ascCalls=0;
+  const {store,collector}=setup(t,async input=>{
+    const result=paged(rows,input);if(input.order==='asc'&&++ascCalls===2)return {...result,accountFingerprint:'foreign-account'};return result;
+  },{enabled:true});
+  await assert.rejects(collector.poll('wechat-test'),/账号已变化/);
+  const state=store.read(),history=state.conversations[0].wechat!.history!;
+  assert.equal(state.conversations[0].wechat!.enabled,false);assert.equal(state.conversations[0].wechat!.accountFingerprint,account);
+  assert.equal(history.status,'error');assert.equal(history.cursor,'199');assert.equal(history.offset,1);assert.equal(history.scanned,200);
+  assert.equal(state.messages.length,400);assert.ok(!state.messages.some(message=>message.externalId==='id-201'));
+  await collector.tick();assert.equal(ascCalls,2);
+});
+
+test('background history timers continue durable chunks and pause without polling the contact',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','setInterval']});
+  const rows=Array.from({length:1201},(_,index)=>record(index+1));let calls=0;
+  const {store,collector}=setup(t,async input=>{calls++;return paged(rows,input);},{enabled:true});
+  collector.start();t.mock.timers.tick(1000);await collector.tick();
+  assert.equal(store.read().conversations[0].wechat!.history!.scanned,600);const firstCount=calls;
+  collector.setEnabled('wechat-test',false);t.mock.timers.tick(1000);await collector.tick();assert.equal(calls,firstCount);
+  collector.setEnabled('wechat-test',true);t.mock.timers.tick(1000);await collector.tick();
+  assert.equal(store.read().conversations[0].wechat!.history!.scanned,1200);
+  t.mock.timers.tick(1000);await collector.tick();
+  assert.equal(store.read().conversations[0].wechat!.history!.status,'complete');assert.equal(store.read().messages.length,rows.length);
+});
+
+test('one manual history read finishes a paused contact across ticks and then stops monitoring future messages',async t=>{
+  const rows=Array.from({length:1501},(_,i)=>record(i+1));let calls=0;
+  const {store,collector,events}=setup(t,async input=>{calls++;return paged(rows,input);});
+  await collector.readHistory('wechat-test');
+  assert.equal(store.read().conversations[0].wechat!.enabled,false);
+  assert.equal(store.read().conversations[0].wechat!.history!.status,'running');
+  assert.equal(store.read().conversations[0].wechat!.history!.scanned,600);
+  for(let i=0;i<4&&store.read().conversations[0].wechat!.history!.status!=='complete';i++)await collector.tick();
+  assert.equal(store.read().messages.length,1501);assert.equal(store.read().conversations[0].wechat!.history!.status,'complete');
+  assert.equal(store.read().conversations[0].wechat!.enabled,false);
+  assert.ok(events.every(event=>!event.live));assert.deepEqual(store.read().jobs,[]);
+  const completedCalls=calls;rows.push(record(1502));await collector.tick();
+  assert.equal(calls,completedCalls);assert.equal(store.read().messages.length,1501);
+});
+
+test('manual history rescan finds newly downloaded older records while preserving stable IDs and parsed media',async t=>{
+  const rows=Array.from({length:251},(_,i)=>record(i+100,i===100?{kind:'image',text:'[图片]',mediaStatus:'pending'}:{}));
+  const {store,collector,events}=setup(t,async input=>paged(rows,input));
+  await collector.readHistory('wechat-test');
+  assert.equal(store.read().conversations[0].wechat!.history!.status,'complete');
+  const originals=new Map(store.read().messages.map(m=>[m.externalId,m.id]));
+  store.update(s=>{const media=s.messages.find(m=>m.kind==='image')!;media.mediaStatus='recognized';
+    media.imageRecognition={summary:'已保存的合成识别结果',visibleText:'',facts:[],provider:'codex',modelName:'test-model',recognizedAt:'2026-10-22T00:00:00Z'};});
+  const parsed=store.read().messages.find(m=>m.kind==='image')!.imageRecognition;
+  rows.unshift(...Array.from({length:99},(_,i)=>record(i+1)));
+  await collector.readHistory('wechat-test',undefined,true);
+  for(let i=0;i<3&&store.read().conversations[0].wechat!.history!.status!=='complete';i++)await collector.tick();
+  const final=store.read();assert.equal(final.messages.length,350);assert.equal(new Set(final.messages.map(m=>m.externalId)).size,350);
+  assert.equal(final.conversations[0].wechat!.history!.status,'complete');assert.equal(final.conversations[0].wechat!.enabled,false);
+  for(const [externalId,id]of originals)assert.equal(final.messages.find(m=>m.externalId===externalId)!.id,id);
+  assert.deepEqual(final.messages.find(m=>m.kind==='image')!.imageRecognition,parsed);assert.ok(events.every(event=>!event.live));
+});
+
+test('cancelling an active manual historical read drops a late page and does not restart the one-shot job',async t=>{
+  const rows=Array.from({length:1501},(_,i)=>record(i+1)),gate=deferred<WechatPage>();let calls=0,asc=0,waiting:Input|undefined;
+  const {store,collector,events}=setup(t,async input=>{calls++;if(input.order==='asc'&&++asc===2){waiting=input;return gate.promise;}return paged(rows,input);});
+  const pending=collector.readHistory('wechat-test'),rejection=assert.rejects(pending,/暂停|停止/);
+  while(!waiting)await Promise.resolve();
+  const committed=store.read();assert.equal(committed.conversations[0].wechat!.history!.scanned,200);
+  collector.cancel('wechat-test');gate.resolve(paged(rows,waiting));await rejection;
+  assert.deepEqual(store.read().messages,committed.messages);assert.equal(store.read().conversations[0].wechat!.history!.scanned,200);
+  const stoppedCalls=calls;await collector.tick();assert.equal(calls,stoppedCalls);
+  assert.ok(events.every(event=>!event.live));assert.equal(store.read().conversations[0].wechat!.enabled,false);
 });

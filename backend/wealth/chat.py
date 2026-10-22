@@ -184,6 +184,10 @@ def dispatch_chat(request, path, body):
         return {"enabled": enabled(user), "is_admin": is_platform_admin(user)}
     require_enabled(user)
     parts = path.split("/")
+    if len(parts) == 4 and parts[:2] == ["chat", "devices"] and parts[3] == "history":
+        from .chat_history import read_history
+
+        return read_history(request, parts[2])
     if (
         len(parts) == 4
         and parts[:2] == ["chat", "devices"]

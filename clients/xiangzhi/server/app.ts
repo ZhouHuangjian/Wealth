@@ -1,3 +1,4 @@
+import {HistorySync} from './history-sync.js';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -34,7 +35,7 @@ import { contactAutoMediaEnabled, contactUsesDemo, effectiveContactSettings } fr
 import { replyModelsSchema } from './contact-processing-schema.js';
 import { ContactInsightService, validateContactFeatures } from './contact-insight-service.js';
 import {generateContactBasis} from './contact-basis.js';
-import { analyzeContactMessage } from './contact-insights.js';
+import { analyzeContactMessage,insightsInputDigest } from './contact-insights.js';
 import { compressContactMemory } from './contact-memory.js';
 import { findImageRecognition, imageRecognitionIdentity, imageSha256, saveImageRecognition } from './image-recognition-cache.js';
 
@@ -145,7 +146,7 @@ export function createApplication(options: {
     activeSends.set(conversation.id,key);
     try {return await rawSend(conversation,text,key,signal);} finally {activeSends.delete(conversation.id);}
   };
-  const generateModel = options.generate ?? ((state,cid,intent,signal)=>generateDrafts(state,cid,intent,signal,{onModelFailure:failure=>{
+  const generateModel = options.generate ?? ((state,cid,intent,signal)=>generateDrafts(state,cid,intent,signal,{historyCache:{get:(namespace,key)=>store.cacheGet(namespace,key),set:(namespace,key,value)=>store.cacheSet(namespace,key,value)},onModelFailure:failure=>{
     store.update(s=>addActivity(s,'warning','部分模型未生成回复',`模型 ${failure.modelName||failure.provider} 未完成，其余候选仍可比较。`,cid));
   }}));
   const generate:typeof generateDrafts = (state,cid,intent,signal) => generateModel({...state,settings:effectiveContactSettings(state.settings,state.conversations.find(c=>c.id===cid))},cid,intent,signal);
@@ -155,6 +156,7 @@ export function createApplication(options: {
   } });
   const session = randomBytes(32).toString('hex');
   let insights:ContactInsightService;
+  let historySync:HistorySync;
   const manualSending = new Set<string>();
   const suggestionRequests = new Map<string,string>();
   const uploads = new Map<string,{controller: AbortController; promise: Promise<{ok:true;id:string;duplicate:boolean}>}>();
@@ -263,10 +265,16 @@ export function createApplication(options: {
     const publicAudio=audio?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(audio):undefined;
     const publicAnalysis=analysis?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(analysis):undefined;
     const publicMemory=memory?(({apiKey:key,...rest})=>({...rest,hasApiKey:!!key}))(memory):undefined;
-    return { ...state, messages:messages.map(({imageRecognitionHistory:_history,...message})=>message), settings:{...settings,hasApiKey:!!apiKey,...(publicVision?{vision:publicVision}:{}),...(publicAudio?{audio:publicAudio}:{}),...(publicAnalysis?{analysis:publicAnalysis}:{}),...(publicMemory?{memory:publicMemory}:{})}, knowledge:KNOWLEDGE,
+    return { ...state, messages:messages.map(({imageRecognitionHistory:_history,...message})=>{
+      if(!message.insights)return message;
+      let stale=true;try{const h=s.conversations.find(c=>c.id===message.conversationId)?.wechat?.history;
+        stale=!!h&&(h.status!=='complete'||!!h.tail)||message.insights.inputDigest!==insightsInputDigest(s,message.conversationId,message.id);
+      }catch{/* Incomplete/disabled context keeps its old result visibly pending. */}
+      return {...message,insights:{...message.insights,stale}};
+    }), settings:{...settings,hasApiKey:!!apiKey,...(publicVision?{vision:publicVision}:{}),...(publicAudio?{audio:publicAudio}:{}),...(publicAnalysis?{analysis:publicAnalysis}:{}),...(publicMemory?{memory:publicMemory}:{})}, knowledge:KNOWLEDGE,
       runtime: { channel:isBridgeReceiveConfigured(config)?'webhook':'simulator',bridgeConfigured:isBridgeConfigured(config),bridgeReceiveConfigured:isBridgeReceiveConfigured(config),bridgeSendConfigured:isBridgeConfigured(config),learnedProfileError,
         codexAvailable:codexStatus.available,codexVersion:codexStatus.version,codexStatus:codexStatus.message,
-        draftSyncConfigured:isDraftSyncConfigured(syncConnection.config()),draftInboxConfigured:isDraftInboxConfigured(syncConnection.config()),draftSyncConnection:syncConnection.status(),remoteManagement:remote.status(),
+        draftSyncConfigured:isDraftSyncConfigured(syncConnection.config()),draftInboxConfigured:isDraftInboxConfigured(syncConnection.config()),draftSyncConnection:syncConnection.status(),remoteManagement:remote.status(),historySync:historySync?.status(),contactAnalysis:insights.status(),
         wechatAvailable:wechatInspection().available,wechatStatus:wechatInspection().message,
         autoRunning:settings.autoReplyEnabled,modelLabel:settings.provider==='demo'?'本机规则演示':settings.provider==='codex'?`Codex · ${settings.modelName||'默认模型'}`:settings.modelName||'尚未设置模型' } };
   };
@@ -294,7 +302,7 @@ export function createApplication(options: {
   };
   const changeSyncConnection = (change: () => void) => {
     // Persist before changing runtime state. An I/O or validation failure preserves the active binding.
-    change(); syncRevision++; remote.invalidate();
+    change(); syncRevision++; historySync?.invalidate();remote.invalidate();
     checkSequence++; activeConnectionCheck?.abort(); activeConnectionCheck = null;
     for (const upload of uploads.values()) upload.controller.abort();
     uploads.clear();
@@ -333,7 +341,7 @@ export function createApplication(options: {
     const now=new Date().toISOString();
     const conversation:Conversation={id:randomUUID(),name:body.name,externalId:body.externalId,channel:'wechat',avatar:body.name.slice(0,1),
       color:'#e7eddf',note:'',autoReplyEnabled:false,createdAt:now,updatedAt:now,
-      wechat:{enabled:false,initialized:false,cursor:null,accountFingerprint:null,lastCheckedAt:null,status:'paused',detail:'已绑定，尚未读取。首次只载入最近 50 条上下文。'}};
+      wechat:{enabled:false,initialized:false,cursor:null,accountFingerprint:null,lastCheckedAt:null,status:'paused',detail:'已绑定，尚未读取。将分批读取并保存完整历史，之后持续补充新消息。'}};
     store.update(s=>{s.conversations.push(conversation);addActivity(s,'info','微信会话已绑定','采集与自动草稿均未开启。',conversation.id);});
     return conversation;
   };
@@ -352,7 +360,11 @@ export function createApplication(options: {
   });
   app.post('/api/conversations/:id/wechat/poll',async(req,res)=>{
     if(!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
-    res.json(await collector.poll(param(req)));
+    res.json(await collector.readHistory(param(req)));
+  });
+  app.post('/api/conversations/:id/wechat/history/reload',async(req,res)=>{
+    if(!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');
+    res.json(await collector.readHistory(param(req),undefined,true));
   });
   app.post('/api/messages/:id/review-media',(req,res)=>{
     const {summary}=z.object({summary:z.string().trim().max(2000).default('')}).strict().parse(req.body??{});
@@ -556,7 +568,7 @@ export function createApplication(options: {
     });
     if(patch.analysis)insights.invalidateCached();
     mediaAutomation.invalidate();
-    if(patch.remoteManagementEnabled!==undefined && old.remoteManagementEnabled!==patch.remoteManagementEnabled)remote.invalidate(!patch.remoteManagementEnabled);
+    if(patch.remoteManagementEnabled!==undefined && old.remoteManagementEnabled!==patch.remoteManagementEnabled){historySync?.invalidate();remote.invalidate(!patch.remoteManagementEnabled);}
   };
   app.patch('/api/settings',(req,res)=>{patchSettings(req.body);res.json(publicState());});
   app.post('/api/auto/pause', (_req,res)=>{ engine.pause(); res.json(publicState()); });
@@ -631,7 +643,7 @@ export function createApplication(options: {
     const attachments=store.read().messages.filter(m=>m.conversationId===cid).flatMap(m=>[m.imageAttachment,m.audioAttachment]);
     for(const message of store.read().messages.filter(m=>m.conversationId===cid))cancelMedia(message.id);
     store.update(s=>{s.sendAttempts=(s.sendAttempts??[]).filter(a=>a.conversationId!==cid);});
-    deleteConversation(store,cid);for(const attachment of attachments)mediaFiles.delete(attachment);res.json({ok:true});
+    deleteConversation(store,cid);store.cacheDelete(`history:${cid}`);store.cacheDelete(`basis:${cid}`);for(const attachment of attachments)mediaFiles.delete(attachment);res.json({ok:true});
   });
 
   app.post('/api/conversations/:id/messages', (req,res)=>{
@@ -756,7 +768,7 @@ export function createApplication(options: {
     if(preview.needsSelfId) throw new Error('请先选择哪一位是你。');
     engine.pause();const result=commitImport(store,body);store.update(s=>{s.drafts=[];});res.json(result);
   });
-  app.post('/api/demo', (_req,res)=>{const attachments=store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]);cancelMedia();insights.changed();seedDemo(store);for(const attachment of attachments)mediaFiles.delete(attachment);res.json(publicState());});
+  app.post('/api/demo', (_req,res)=>{for(const c of store.read().conversations){collector.cancel(c.id);store.cacheDelete(`history:${c.id}`);store.cacheDelete(`basis:${c.id}`);}const attachments=store.read().messages.flatMap(m=>[m.imageAttachment,m.audioAttachment]);cancelMedia();insights.changed();seedDemo(store);for(const attachment of attachments)mediaFiles.delete(attachment);res.json(publicState());});
   app.post('/api/bridge/incoming', (req,res)=>{
     if(!isBridgeReceiveConfigured(config)||!secureEqual(req.headers.authorization??'',`Bearer ${config.inboundToken}`)) return res.status(401).json({error:'消息桥接未配置或凭据无效。'});
     const body=z.object({eventId:id,conversationId:id,text,direction:z.enum(['incoming','outgoing']).default('incoming'),timestamp:z.string().datetime({offset:true}).optional(),idempotencyKey:id.optional()}).parse(req.body);
@@ -808,13 +820,13 @@ export function createApplication(options: {
       if(command.type in remoteCurrentCommandSchemas){
         const {id:cid,messageId,expectedMessageRevision,intent}=parseRemoteCurrentPayload(command.type,command.payload);
         const before=store.read(),target=conversationOf(before,cid);
-        if(target.channel!=='wechat'||!before.conversations.filter(c=>c.channel==='wechat').slice(0,8).some(c=>c.id===cid))throw new Error('远程管理只支持已接入的微信会话。');
+        if(target.channel!=='wechat'||!before.conversations.filter(c=>c.channel==='wechat').some(c=>c.id===cid))throw new Error('远程管理只支持已接入的微信会话。');
         const message=messageId?before.messages.find(m=>m.id===messageId&&m.conversationId===cid):undefined;
         if(messageId&&(!message||message.role==='system'))throw new Error('找不到此会话中的这条消息。');
         if(message&&remoteMessageRevision(message)!==expectedMessageRevision)throw Object.assign(new Error('这条消息已变化，请刷新后重试。'),{status:409});
         if(command.type==='conversation.refresh'){
           if(!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');
-          await collector.poll(cid,signal);
+          await collector.readHistory(cid,signal);
         }else if(command.type==='conversation.message.analyze')await insights.analyze(cid,messageId,signal);
         else if(command.type==='conversation.message.recognize'){
           if(!message||!['image','emoji','voice'].includes(message.kind??''))throw new Error('此消息没有需要模型识别的图片、表情或语音。');
@@ -831,5 +843,6 @@ export function createApplication(options: {
         wechatAvailable:()=>wechatInspection().available,secrets:()=>[syncConnection.config().token??'']});
     },
   });
-  return {app,store,engine,collector,remote,mediaAutomation,insights,publicState,close:()=>{insights.stop();mediaAutomation.stop();cancelMedia();remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
+  historySync=new HistorySync(store,{config:()=>syncConnection.config(),enabled:()=>store.read().settings.remoteManagementEnabled===true,fetch:options.remoteFetch});
+  return {app,store,engine,collector,remote,historySync,mediaAutomation,insights,publicState,close:()=>{historySync.stop();insights.stop();mediaAutomation.stop();cancelMedia();remote.stop();closed=true;syncRevision++;checkSequence++;activeConnectionCheck?.abort();for(const upload of uploads.values()) upload.controller.abort();collector.stop();engine.stop();store.close();}};
 }

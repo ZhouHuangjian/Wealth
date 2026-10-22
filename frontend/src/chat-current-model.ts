@@ -29,6 +29,7 @@ export type RemoteCurrentMessage = {
     provider: string;
     modelName: string;
     analyzedAt: string;
+    stale?: boolean;
   };
   truncated?: boolean;
 };

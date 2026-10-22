@@ -9,6 +9,7 @@ import type { AudioRecognition, AudioSettings, ContactBasisFact, ContactInsights
 import { api } from './api';
 import { effectiveContactSettings } from '../shared/contact-processing';
 import { InsightModelFields } from './insight-model-fields';
+import { ContactAnalysisProgress, HistoryReadProgress, ModelCenterOverview, modelAssignmentLabel, modelAssignments, type ModelTask } from './model-center';
 import { ModelCatalogProvider, ProviderModelPicker } from './model-picker';
 import { CODEX_AUDIO_HELP, modelNameForProviderChange, type ModelProvider } from '../shared/model-catalog';
 
@@ -286,7 +287,7 @@ function AppContent() {
                 <div className="avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</div><div className="chat-person"><h2>{conversation.name}<ContactAffinity conversation={conversation} messages={messages} /></h2><span>{isDemo ? '本机演练 · 不会发送到微信' : isWechat ? '微信仅读取 · 回复需复制到微信发送' : canSend ? '已连接消息通道 · 发送后会实际送出' : '消息桥仅接收 · 回复需复制到微信发送'}</span></div>
                 <button className="icon-button" onClick={() => setShowDetails(true)} aria-label="对话详情"><MoreHorizontal size={21} /></button>
               </div>
-              <ConversationProcessing key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onRead={() => readWechatOnce(conversation)} onOpenContext={() => setShowContactContext(true)} />
+              <ConversationProcessing key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onRead={() => readWechatOnce(conversation)} onOpenContext={() => setShowContactContext(true)} onOpenModelCenter={() => setPage('settings')} />
               <div className="messages" ref={messageList} onScroll={event => {
                 const list = event.currentTarget;
                 messageListNearBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 96;
@@ -373,10 +374,11 @@ function ContactAffinity({ conversation, messages }: { conversation: Conversatio
   if (score === undefined || score === null) return null;
   return <span className="contact-affinity-badge" aria-label={`${conversation.name}的好感度估计 ${score}%`} title="根据互动估计"><HeartHandshake size={10} /><span>{score}%</span></span>;
 }
-function NumericInsights({ insights, conversation }: { insights: ContactInsights; conversation: Conversation }) {
+export function NumericInsights({ insights, conversation }: { insights: ContactInsights; conversation: Conversation }) {
   if (!conversation.processing?.intentEnabled || !insights.intents.length) return null;
   const intents = insights.intents.slice().sort((a, b) => b.percentage - a.percentage);
   return <div className="numeric-insights" aria-label="这条消息的意图分析">
+    {insights.stale && <p className="insight-stale-note" role="status"><strong>已保存的旧分析 · 待更新</strong><span>聊天历史或分析配置已变化。更新分析后，可纳入完整历史和当前配置；下方保留原结果供参考。</span></p>}
     {conversation.processing?.intentEnabled && intents.length > 0 && <><span className="intent-percentages"><span>可能的意图（模型估计）</span><span className="intent-label-chips">{intents.map((item, index) => <span key={`${item.label}-${index}`}>{item.label} <strong>{item.percentage}%</strong></span>)}</span></span><details className="intent-weight-help"><summary><CircleHelp size={11} />比例说明</summary><p>这些比例是模型对不同理解分配的相对权重。比例越高，表示模型越倾向这种理解；各项合计 100%，不表示真实概率或情绪强度。</p>{intents.some(item => item.label === '其他') && <p>其他：未归入现有分类的可能含义。</p>}</details></>}
   </div>;
 }
@@ -426,13 +428,13 @@ function ContactInsightModel({ conversation, state, busy, run, kind }: { convers
   const dirty = (custom ? JSON.stringify(choice) : 'inherit') !== signature;
   const name = kind === 'analysis' ? '分析' : '记忆';
   const key = `contact-${kind}-model-${conversation.id}`;
-  return <details className="processing-models insight-contact-model"><summary><Sparkles size={12} /><strong>{name}模型</strong><span>{saved ? saved.modelName || 'Codex 默认模型' : `使用默认 · ${insightModelLabel(config)}`}</span><ChevronDown size={12} /></summary>
+  return <section className="processing-models insight-contact-model"><div className="model-task-heading"><Sparkles size={12} /><strong>{name}模型</strong><span>{saved ? saved.modelName || 'Codex 默认模型' : `使用默认 · ${insightModelLabel(config)}`}</span><ChevronDown size={12} /></div>
     <form onSubmit={event => { event.preventDefault(); void run(key, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { [field]: custom ? choice : null } }), `${conversation.name}的${name}模型已保存`); }}>
       <label className="field-label">{conversation.name}的{name}模型<select disabled={!!busy} value={custom ? 'custom' : 'inherit'} onChange={event => { const next = event.target.value === 'custom'; if (next && !saved && !custom) setChoice(defaultChoice()); setCustom(next); }}><option value="inherit">使用设置中的默认{name}模型</option><option value="custom">为此人单独选择型号</option></select></label>
       {custom && <div className="form-grid"><label className="field-label">服务<select disabled={!!busy} value={choice.provider === 'codex' ? 'codex' : choice.modelPreset === 'qwen' ? 'qwen' : 'compatible'} onChange={event => { const provider = event.target.value as ModelProvider, previousProvider = choice.provider === 'codex' ? 'codex' : choice.modelPreset === 'qwen' ? 'qwen' : 'compatible'; remembered.current[previousProvider] = choice.modelName; setChoice(previous => ({ ...previous, provider: provider === 'codex' ? 'codex' : 'compatible', modelPreset: provider === 'qwen' ? 'qwen' : 'custom', modelName: modelNameForProviderChange(previousProvider,provider,choice.modelName,kind,remembered.current) })); }}><option value="qwen">阿里千问</option><option value="compatible">兼容 API</option><option value="codex">Codex</option></select></label><ProviderModelPicker provider={choice.provider === 'codex' ? 'codex' : choice.modelPreset === 'qwen' ? 'qwen' : 'compatible'} role={kind} label={`${name}模型名称`} value={choice.modelName} disabled={!!busy} onChange={modelName => setChoice(previous => ({ ...previous, modelName }))} /></div>}
       <div className="processing-model-save"><small>{name}服务地址、密钥使用设置中的独立配置。</small><Button type="submit" kind="secondary" disabled={!!busy || !dirty}>{busy === key ? <LoaderCircle size={12} className="spin" /> : <Check size={12} />}保存此人{name}模型</Button></div>
     </form>
-  </details>;
+  </section>;
 }
 
 function ContactInsightControls({ conversation, state, busy, run }: { conversation: Conversation; state: PublicState; busy: string; run: Run }) {
@@ -444,11 +446,11 @@ function ContactInsightControls({ conversation, state, busy, run }: { conversati
     <section className="contact-processing-group"><h3><Sparkles size={13} />意图与好感度</h3>
     <div className="processing-controls"><div><span>意图分析<small>在这条消息下展示名称与百分比</small></span><Toggle small checked={!!processing.intentEnabled} disabled={!!busy || (!analysisReady && !processing.intentEnabled)} label={`${conversation.name}的意图分析`} onChange={() => toggle('intentEnabled')} /></div><div><span>好感度估计<small>基于当前互动，可单独关闭</small></span><Toggle small checked={!!processing.affinityEnabled} disabled={!!busy || (!analysisReady && !processing.affinityEnabled)} label={`${conversation.name}的好感度估计`} onChange={() => toggle('affinityEnabled')} /></div></div>
     {(processing.intentEnabled || processing.affinityEnabled) && <label className="checkbox-label processing-checkbox"><input type="checkbox" disabled={!!busy} checked={!!processing.autoAnalyzeMessages} onChange={() => toggle('autoAnalyzeMessages')} /><span><strong>新来信自动分析</strong><small>只处理此人新收到的文字，历史消息可点击分析。</small></span></label>}
-    {!analysisReady && <p className="processing-model-hint">先在设置中配置独立的分析模型。</p>}
-    <ContactInsightModel conversation={conversation} state={state} busy={busy} run={run} kind="analysis" /></section>
+    {!analysisReady && <p className="processing-model-hint">先在“模型设置”中查看分析分工，或前往模型中心配置服务。</p>}
+    </section>
     <section className="contact-processing-group"><h3><BookOpen size={13} />档案与记忆</h3><div className="processing-controls"><div><span>使用对话记忆<small>已确认的关键记忆用于后续草稿</small></span><Toggle small checked={!!processing.memoryEnabled} disabled={!!busy} label={`${conversation.name}的对话记忆`} onChange={() => toggle('memoryEnabled')} /></div></div>
     {processing.memoryEnabled && <label className="checkbox-label processing-checkbox"><input type="checkbox" disabled={!!busy || (!memoryReady && !processing.autoCompressMemory)} checked={!!processing.autoCompressMemory} onChange={() => toggle('autoCompressMemory')} /><span><strong>新来信自动整理记忆</strong><small>{memoryReady ? '累计 20 条未整理消息后压缩，线索待你确认。' : '先在设置中配置记忆模型。'}</small></span></label>}
-    <ContactInsightModel conversation={conversation} state={state} busy={busy} run={run} kind="memory" /></section>
+    </section>
   </div>;
 }
 
@@ -490,7 +492,7 @@ function ContactContextDialog({ conversation, state, busy, run, onClose }: { con
     <div className="contact-context-tabs"><button type="button" className={tab === 'basis' ? 'active' : ''} onClick={() => setTab('basis')}><UserRound size={14} />基础库 <span>{facts.length}</span></button><button type="button" className={tab === 'memory' ? 'active' : ''} onClick={() => setTab('memory')}><BookOpen size={14} />对话记忆 <span>{memory?.entries.filter(entry => entry.status !== 'rejected').length || 0}</span></button></div>
     {tab === 'basis' ? <>
       <div className="contact-memory-toolbar basis-generate-toolbar"><div><h3>从对话整理基础库</h3><p>使用此人的记忆模型，整理已聊到的状况、爱好与计划。</p></div><Button kind="secondary" disabled={!!busy || !memoryReady} onClick={() => void run(`basis-generate-${conversation.id}`, () => api<{facts: ContactBasisFact[]; cached: boolean}>(`/conversations/${conversation.id}/basis/generate`, 'POST', {}), result => result.cached ? '已使用本地生成结果，未调用模型' : result.facts.length ? `已整理 ${result.facts.length} 条基础信息，可逐条修改` : '暂未发现可以整理的明确基础信息')}>{busy === `basis-generate-${conversation.id}` ? <LoaderCircle size={13} className="spin" /> : <Sparkles size={13} />}{busy === `basis-generate-${conversation.id}` ? '正在整理…' : '生成基础库'}</Button></div>
-      {!memoryReady && <p className="processing-model-hint">先在设置中配置记忆模型，也可在此人的信息处理中单独选择型号。</p>}
+      {!memoryReady && <p className="processing-model-hint">先在模型中心配置记忆服务，也可在此人的“模型设置”中选择型号。</p>}
       {conversation.basisGeneration && <p className="basis-generation-status">上次生成：{conversation.basisGeneration.modelName || 'Codex 默认模型'} · {dateLabel(conversation.basisGeneration.generatedAt)} {timeLabel(conversation.basisGeneration.generatedAt)}</p>}
       <form className="contact-fact-editor" onSubmit={event => { event.preventDefault(); void run(`basis-save-${conversation.id}`, async () => { const result = await api(`/conversations/${conversation.id}/basis${editingId ? `/${editingId}` : ''}`, editingId ? 'PATCH' : 'POST', { category, content: content.trim(), sourceNote: sourceNote.trim() }); resetFact(); return result; }, '基础信息已保存在本机'); }}>
         <div className="form-grid"><label className="field-label">信息类型<select disabled={!!busy} value={category} onChange={event => setCategory(event.target.value as ContactBasisFact['category'])}>{Object.entries(contactBasisLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="field-label">来源备注（可选）<input maxLength={500} disabled={!!busy} value={sourceNote} onChange={event => setSourceNote(event.target.value)} placeholder="例如：本人告诉我的，10 月更新" /></label></div>
@@ -710,19 +712,42 @@ function ConversationReplyModels({ conversation, state, busy, run }: {
       setChoices(state.settings.replyModels?.length ? state.settings.replyModels : [{ id: crypto.randomUUID(), provider: state.settings.provider, modelPreset: state.settings.modelPreset, modelName: state.settings.modelName, label: '' }]);
     }
   };
-  return <details className="processing-models"><summary><Sparkles size={12} /><strong>回复模型</strong><span>{savedMode === 'inherit' ? '使用默认' : savedMode === 'single' ? '主要模型' : `${activeChoices.length} 个模型`} · {activeSummary}</span><ChevronDown size={12} /></summary>
+  return <section className="processing-models"><div className="model-task-heading"><Sparkles size={12} /><strong>回复模型</strong><span>{savedMode === 'inherit' ? '使用默认' : savedMode === 'single' ? '主要模型' : `${activeChoices.length} 个模型`} · {activeSummary}</span><ChevronDown size={12} /></div>
     <form onSubmit={event => { event.preventDefault(); void run(saveKey, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { replyModels: mode === 'inherit' ? null : mode === 'single' ? [] : choices } }), `${conversation.name}的回复模型已保存`); }}>
       <label className="field-label">为 {conversation.name} 选择回复方式<select disabled={!!busy} value={mode} onChange={event => chooseMode(event.target.value as ModelMode)}><option value="inherit">使用设置中的默认比较模型</option><option value="single">仅使用设置中的主要回复模型</option><option value="custom">为此人单独选择模型</option></select></label>
       {mode === 'custom' ? <ReplyModelsEditor title="此人使用的回复模型" choices={choices} onChange={setChoices} disabled={!!busy} /> : <p className="processing-model-hint">{mode === 'inherit' ? '默认模型调整后，此对话会跟随更新。' : `只由 ${describeChoice(state.settings)} 提供候选回复。`}</p>}
       <div className="processing-model-save"><small>{dirty ? '模型修改尚未保存。' : '仅改变当前联系人的模型；地址和密钥共用设置中的配置。'}</small><Button type="submit" kind="secondary" disabled={!!busy || !dirty || (mode === 'custom' && !choices.length)}>{busy === saveKey ? <LoaderCircle size={12} className="spin" /> : <Check size={12} />}保存此人模型</Button></div>
     </form>
-  </details>;
+  </section>;
 }
 
-function ConversationProcessing({ conversation, state, busy, run, onRead, onOpenContext }: {
-  conversation: Conversation; state: PublicState; busy: string; run: Run; onRead: () => void; onOpenContext: () => void;
+export function ContactModelCenter({ conversation, state, busy, run, onClose, onOpenGlobal }: {
+  conversation: Conversation; state: PublicState; busy: string; run: Run; onClose: () => void; onOpenGlobal: () => void;
+}) {
+  const [task, setTask] = useState<ModelTask>('reply');
+  return <Modal title={`${conversation.name} · 模型设置`} description="在一处查看此人使用的全部模型。回复、分析和记忆可跟随默认，也可单独指定。" onClose={onClose} wide>
+    <div className="contact-model-center">
+      <div className="model-assignment-grid">{modelAssignments(state.settings, conversation).map(item => <button type="button" key={item.id} className={`model-assignment ${task === item.id ? 'selected' : ''}`} aria-pressed={task === item.id} aria-controls={`contact-model-${item.id}`} onClick={() => setTask(item.id)}>
+        <span className="model-assignment-title"><item.icon size={15} /><strong>{item.title}</strong><ChevronRight size={13} /></span><span className="model-assignment-value">{item.label}</span><small>{item.custom ? '此人单独设置' : '跟随全局默认'}</small>
+      </button>)}</div>
+      <div hidden={task !== 'reply'} id="contact-model-reply"><ConversationReplyModels conversation={conversation} state={state} busy={busy} run={run} /></div>
+      <div hidden={task !== 'analysis'} id="contact-model-analysis"><ContactInsightModel conversation={conversation} state={state} busy={busy} run={run} kind="analysis" /></div>
+      <div hidden={task !== 'memory'} id="contact-model-memory"><ContactInsightModel conversation={conversation} state={state} busy={busy} run={run} kind="memory" /></div>
+      {(['vision', 'audio'] as const).map(kind => <section hidden={task !== kind} id={`contact-model-${kind}`} key={kind} className="contact-shared-model">
+        <h3>{kind === 'vision' ? '图片与表情包识别' : '语音转写'}</h3><p>{modelAssignmentLabel(state.settings[kind])}</p>
+        <small>使用模型中心的全局默认。是否自动处理仍由 {conversation.name} 的个人开关决定，可在“信息处理”中调整。</small>
+        {kind === 'audio' && <p className="model-capability-note">{CODEX_AUDIO_HELP}</p>}
+      </section>)}
+      <div className="contact-model-center-footer"><small>服务地址、密钥及默认型号在模型中心统一管理。</small><Button kind="secondary" disabled={!!busy} onClick={onOpenGlobal}>打开全局模型中心<ArrowRight size={13} /></Button></div>
+    </div>
+  </Modal>;
+}
+
+function ConversationProcessing({ conversation, state, busy, run, onRead, onOpenContext, onOpenModelCenter }: {
+  conversation: Conversation; state: PublicState; busy: string; run: Run; onRead: () => void; onOpenContext: () => void; onOpenModelCenter: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [showModels, setShowModels] = useState(false);
   const isWechat = conversation.channel === 'wechat';
   const autoMode = state.settings.autoReplyMode ?? 'draft';
   const autoLabel = isWechat || autoMode === 'draft' ? '自动草稿' : '自动发送';
@@ -739,17 +764,19 @@ function ConversationProcessing({ conversation, state, busy, run, onRead, onOpen
   const imageReady = !!state.settings.vision && state.settings.vision.provider !== 'disabled' && state.settings.vision.allowRemoteModel;
   const voiceReady = !!state.settings.audio && state.settings.audio.provider !== 'disabled' && state.settings.audio.allowRemoteModel;
   return <section className={`conversation-processing ${expanded ? 'expanded' : ''}`} aria-label={`${conversation.name}的信息处理`}>
-    <div className="processing-summary"><button className="processing-expand" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><Settings2 size={13} />信息处理<ChevronDown size={12} /></button><span className="processing-overview">{isWechat && `${readStatus} · `}{autoLabel}{autoStatus}{autoImage && ' · 自动识图'}{autoVoice && ' · 语音转写'}</span>{isWechat && <Button kind="ghost" disabled={!!busy || !state.runtime.wechatAvailable || reading} onClick={onRead}>{reading ? <LoaderCircle size={12} className="spin" /> : <ArrowDownToLine size={12} />}读取一次</Button>}</div>
+    <div className="processing-summary"><button className="processing-expand" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><Settings2 size={13} />信息处理<ChevronDown size={12} /></button><span className="processing-overview">{isWechat && `${readStatus} · `}{autoLabel}{autoStatus}{autoImage && ' · 自动识图'}{autoVoice && ' · 语音转写'}</span><Button kind="ghost" onClick={() => setShowModels(true)}><Sparkles size={12} />模型设置</Button>{isWechat && <Button kind="ghost" disabled={!!busy || !state.runtime.wechatAvailable || reading} onClick={onRead}>{reading ? <LoaderCircle size={12} className="spin" /> : <ArrowDownToLine size={12} />}读取历史</Button>}</div>
+    <ContactAnalysisProgress progress={(state.runtime.contactAnalysis || []).filter(item => item.conversationId === conversation.id)} />
     {!expanded && (readError || processingError) && <p className="processing-error" role="status">{readError ? `读取：${readError}` : `最近处理：${processingError}`}</p>}
     {expanded && <div className="processing-body processing-grouped-body">
-      {isWechat && <section className="contact-processing-group"><h3><MessageCircle size={13} />消息读取</h3><div className="processing-controls"><div><span>持续读取<small>每 15 秒检查此人的新消息</small></span><Toggle small checked={!!conversation.wechat?.enabled} disabled={!!busy || (!state.runtime.wechatAvailable && !conversation.wechat?.enabled)} label={`读取${conversation.name}的微信消息`} onChange={() => void run(`wechat-toggle-${conversation.id}`, () => api(`/conversations/${conversation.id}/wechat`, 'PATCH', { enabled: !conversation.wechat?.enabled }), `${conversation.name}：${conversation.wechat?.enabled ? '持续读取已暂停' : '持续读取已开启'}`)} /></div></div></section>}
+      {isWechat && <section className="contact-processing-group"><h3><MessageCircle size={13} />消息读取</h3><HistoryReadProgress conversation={conversation} messageCount={state.messages.filter(message => message.conversationId === conversation.id && message.role !== 'system').length} /><div className="history-rescan-action"><Button kind="ghost" disabled={!!busy || !state.runtime.wechatAvailable || reading} onClick={() => void run(`wechat-rescan-${conversation.id}`, () => api(`/conversations/${conversation.id}/wechat/history/reload`, 'POST', {}), '已开始重新扫描历史，已有记录会自动去重')}><ArrowDownToLine size={12} />重新扫描历史</Button><small>在微信中补下载了更早的聊天后使用，已有解析和记录会保留。</small></div><div className="processing-controls"><div><span>持续读取<small>每 15 秒检查此人的新消息</small></span><Toggle small checked={!!conversation.wechat?.enabled} disabled={!!busy || (!state.runtime.wechatAvailable && !conversation.wechat?.enabled)} label={`读取${conversation.name}的微信消息`} onChange={() => void run(`wechat-toggle-${conversation.id}`, () => api(`/conversations/${conversation.id}/wechat`, 'PATCH', { enabled: !conversation.wechat?.enabled }), `${conversation.name}：${conversation.wechat?.enabled ? '持续读取已暂停' : '持续读取已开启'}`)} /></div></div></section>}
       {isWechat && <section className="contact-processing-group"><h3><ImageIcon size={13} />图片、表情与语音</h3><div className="processing-controls processing-media-controls"><div><span>自动图片与表情解析<small>{imageReady ? '自动读取并识别此人的新图片、表情包' : '先在设置配置图片识别模型'}</small></span><Toggle small checked={autoImage} disabled={!!busy || (!imageReady && !autoImage)} label={`自动识别${conversation.name}的微信图片和表情包`} onChange={() => void run(`contact-image-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { autoRecognizeImages: !autoImage } }), `${conversation.name}：自动识图已${autoImage ? '关闭' : '开启'}`)} /></div><div><span>自动转写语音<small>{voiceReady ? '自动读取并转写此人的新语音' : '先在设置配置语音转写模型'}</small></span><Toggle small checked={autoVoice} disabled={!!busy || (!voiceReady && !autoVoice)} label={`自动转写${conversation.name}的微信语音`} onChange={() => void run(`contact-voice-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { autoTranscribeVoice: !autoVoice } }), `${conversation.name}：语音转写已${autoVoice ? '关闭' : '开启'}`)} /></div></div><p className="processing-media-hint">仅作用于 {conversation.name} 的新来信，历史内容仍可手动识别。</p></section>}
-      <section className="contact-processing-group"><h3><Sparkles size={13} />回复草稿</h3><div className="processing-controls"><div><span>{autoLabel}<small>{autoStatus}</small></span><Toggle small checked={conversation.autoReplyEnabled} disabled={!!busy || (isWechat && autoMode === 'send' && !conversation.autoReplyEnabled)} label={`${conversation.name}的${autoLabel}`} onChange={() => void run(`contact-toggle-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { autoReplyEnabled: !conversation.autoReplyEnabled }))} /></div></div><ConversationReplyModels conversation={conversation} state={state} busy={busy} run={run} /></section>
+      <section className="contact-processing-group"><h3><Sparkles size={13} />回复草稿</h3><div className="processing-controls"><div><span>{autoLabel}<small>{autoStatus}</small></span><Toggle small checked={conversation.autoReplyEnabled} disabled={!!busy || (isWechat && autoMode === 'send' && !conversation.autoReplyEnabled)} label={`${conversation.name}的${autoLabel}`} onChange={() => void run(`contact-toggle-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { autoReplyEnabled: !conversation.autoReplyEnabled }))} /></div></div></section>
       <ContactInsightControls conversation={conversation} state={state} busy={busy} run={run} />
       <div className="processing-context-link"><Button kind="secondary" onClick={onOpenContext}><UserRound size={12} />对方档案与记忆</Button><small>{conversation.basisFacts?.length || 0} 条基础信息 · {conversation.memory?.entries.filter(entry => entry.status === 'approved').length || 0} 条已确认记忆</small></div>
-      {isWechat && <div className={`processing-read-status ${readError ? 'error' : ''}`} role="status"><p>{!state.runtime.wechatAvailable ? state.runtime.wechatStatus : conversation.wechat?.detail || '尚未读取。点击“读取一次”载入上下文，或开启持续读取。'}</p><small>{conversation.wechat?.lastCheckedAt ? `上次检查 ${dateLabel(conversation.wechat.lastCheckedAt)} ${checkedTimeLabel(conversation.wechat.lastCheckedAt)}` : '尚未检查消息'}</small></div>}
+      {isWechat && <div className={`processing-read-status ${readError ? 'error' : ''}`} role="status"><p>{!state.runtime.wechatAvailable ? state.runtime.wechatStatus : conversation.wechat?.detail || '尚未读取。点击“读取历史”补齐完整记录，或开启持续读取跟进新消息。'}</p><small>{conversation.wechat?.lastCheckedAt ? `上次检查 ${dateLabel(conversation.wechat.lastCheckedAt)} ${checkedTimeLabel(conversation.wechat.lastCheckedAt)}` : '尚未检查消息'}</small></div>}
       {lastJob ? <div className={`processing-result ${processingError ? 'error' : ''}`}><span>最近处理 · {jobLabels[lastJob.status]}<time>{timeLabel(lastJob.finishedAt || lastJob.createdAt)}</time></span>{lastJob.detail && <p>{lastJob.detail}</p>}</div> : <p className="processing-no-result">还没有自动处理记录。{conversation.autoReplyEnabled && !state.settings.autoReplyEnabled ? '开启顶部全局开关后，才会处理新的来信。' : '已有消息只作上下文，开启后处理新来信。'}</p>}
     </div>}
+    {showModels && <ContactModelCenter conversation={conversation} state={state} busy={busy} run={run} onClose={() => setShowModels(false)} onOpenGlobal={() => { setShowModels(false); onOpenModelCenter(); }} />}
   </section>;
 }
 
@@ -911,7 +938,7 @@ function AddConversationDialog({ state, notify, onClose, onAdded }: {
   </Modal>;
 }
 
-function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }: { state: PublicState; notify: (message: string, error?: boolean) => void; refresh: () => Promise<void>; busy: string; run: Run; onOpenConversation: (id: string) => void }) {
+export function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }: { state: PublicState; notify: (message: string, error?: boolean) => void; refresh: () => Promise<void>; busy: string; run: Run; onOpenConversation: (id: string) => void }) {
   const [form, setForm] = useState<Settings & { hasApiKey: boolean; vision: VisionSettings & {hasApiKey?: boolean}; audio: AudioSettings & {hasApiKey?: boolean}; analysis: ContactModelSettings & {hasApiKey?: boolean}; memory: ContactModelSettings & {hasApiKey?: boolean} }>(() => ({
     ...state.settings, autoReplyMode: state.settings.autoReplyMode ?? 'draft', apiKey: '',
     vision: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.vision, apiKey: '' },
@@ -920,7 +947,8 @@ function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }:
     memory: { provider: 'disabled', modelUrl: '', modelName: 'qwen3.8-flash', useReplyApiKey: true, allowRemoteModel: false, ...state.settings.memory, apiKey: '' },
   }));
   const [saving, setSaving] = useState('');
-  const [settingsGroup, setSettingsGroup] = useState<'reply' | 'media' | 'insights' | 'device'>('reply');
+  const [settingsGroup, setSettingsGroup] = useState<'models' | 'automation' | 'insights' | 'device'>('models');
+  const [modelTask, setModelTask] = useState<ModelTask>('reply');
   const [connectionPackage, setConnectionPackage] = useState('');
   const [connectionError, setConnectionError] = useState('');
   const connection = state.runtime.draftSyncConnection;
@@ -964,7 +992,7 @@ function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }:
   };
   async function save(test = false): Promise<boolean> {
     if (test && form.provider === 'codex' && !form.allowRemoteModel) {
-      notify('测试 Codex 前，请先允许向模型服务发送必要的对话片段', true);
+      notify('测试 Codex 前，请先允许模型参考完整会话与习惯档案', true);
       return false;
     }
     setSaving(test ? 'test' : 'save'); setTestResult(null);
@@ -1044,19 +1072,22 @@ function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }:
   }
   return <><div className="section-heading"><div className="eyebrow">MAKE IT YOURS</div><h1>按照你的节奏工作。</h1><p>选择模型、控制回复节奏，明确每一次数据的去向。</p></div>
     <div className="settings-group-tabs" aria-label="设置分类">{([
-      { id: 'reply', title: '回复与节奏', detail: '主要模型 · 多模型草稿', icon: Sparkles },
-      { id: 'media', title: '图片与语音', detail: '媒体识别 · 上传测试', icon: ImageIcon },
-      { id: 'insights', title: '分析与记忆', detail: '独立模型 · 分析详情', icon: BookOpen },
+      { id: 'models', title: '模型中心', detail: '回复 · 识图 · 语音 · 分析 · 记忆', icon: Sparkles },
+      { id: 'automation', title: '自动处理', detail: '草稿模式 · 等待与发送节奏', icon: Clock3 },
+      { id: 'insights', title: '分析记录', detail: '消息意图 · 档案与记忆', icon: BookOpen },
       { id: 'device', title: '设备与同步', detail: 'Wealth 连接 · 消息通道', icon: Cloud },
     ] as const).map(group => <button type="button" key={group.id} className={settingsGroup === group.id ? 'active' : ''} aria-pressed={settingsGroup === group.id} onClick={() => setSettingsGroup(group.id)}><group.icon size={18} /><span><strong>{group.title}</strong><small>{group.detail}</small></span></button>)}</div>
     <form className="settings-layout" onInvalid={event => {
       const group = (event.target as HTMLElement).closest<HTMLElement>('[data-settings-group]')?.dataset.settingsGroup;
-      if (group === 'reply' || group === 'media' || group === 'insights' || group === 'device') setSettingsGroup(group);
+      if (group === 'models' || group === 'automation' || group === 'insights' || group === 'device') setSettingsGroup(group);
+      const task = (event.target as HTMLElement).closest<HTMLElement>('[data-model-task]')?.dataset.modelTask;
+      if (task === 'reply' || task === 'vision' || task === 'audio' || task === 'analysis' || task === 'memory') setModelTask(task);
       let details = (event.target as HTMLElement).closest('details');
       while (details) { details.open = true; details = details.parentElement?.closest('details') ?? null; }
     }} onSubmit={event => { event.preventDefault(); void save(); }}>
 
-      <section hidden={settingsGroup !== 'reply'} data-settings-group="reply" className="settings-card"><div className="settings-section-title"><span><Sparkles size={19} /></span><div><h2>默认回复模型</h2><p>先体验演练，也可以连接你自己的模型。</p></div></div>
+      <div hidden={settingsGroup !== 'models'}><ModelCenterOverview settings={form} selected={modelTask} onSelect={setModelTask} disabled={!!saving} /></div>
+      <section hidden={settingsGroup !== 'models' || modelTask !== 'reply'} data-settings-group="models" data-model-task="reply" id="model-editor-reply" className="settings-card"><div className="settings-section-title"><span><Sparkles size={19} /></span><div><h2>默认回复模型</h2><p>设置主要回复模型，或在下方添加多个模型比较。</p></div></div>
         <div className="provider-options model-provider-options">{([{ id: 'demo', title: '本地规则演示', detail: '无需配置 · 不调用 AI' }, { id: 'codex', title: 'Codex', detail: '由服务端 Codex CLI 生成' }, { id: 'qwen', title: '阿里千问', detail: '选择具体千问模型' }, { id: 'ollama', title: 'Ollama', detail: '连接本机模型服务' }, { id: 'compatible', title: '兼容 API', detail: '连接其他兼容模型服务' }] as const).map(provider => {
           const selected = (form.provider === 'compatible' && form.modelPreset === 'qwen' ? 'qwen' : form.provider) === provider.id;
           return <label className={`provider-option ${selected ? 'selected' : ''}`} key={provider.id}><input type="radio" name="provider" checked={selected} onChange={() => selectProvider(provider.id === 'qwen' ? 'compatible' : provider.id, provider.id === 'qwen' ? 'qwen' : 'custom')} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{selected && <Check size={15} />}</label>;
@@ -1065,29 +1096,29 @@ function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }:
           {form.provider === 'codex' ? <>
             <div className="codex-status" role="status"><span className={`status-dot ${state.runtime.codexAvailable ? '' : 'unavailable'}`} /><div><strong>{state.runtime.codexAvailable ? '已检测到 Codex CLI' : 'Codex CLI 暂不可用'}{state.runtime.codexVersion && <small>{state.runtime.codexVersion}</small>}</strong><p>{state.runtime.codexStatus}</p><p>此检测不联网，不代表已登录或模型可调用。</p></div><Button kind="secondary" disabled={!!saving} onClick={() => void checkCodex()}>{saving === 'check' ? <LoaderCircle size={13} className="spin" /> : <Search size={13} />}重新检测</Button></div>
             <ProviderModelPicker provider="codex" role="reply" label="Codex 回复模型" value={form.modelName} onChange={value => change('modelName', value)} disabled={!!saving} />
-            <div className="info-box codex-context-note"><CircleHelp size={17} /><span>按 Mac 生成、腾讯云存放草稿的方式使用：在 Mac 上选择 Codex，并加载习惯档案和当前会话上下文。它不会自动继承我们在 Codex 中的聊天；腾讯云仅接收和展示已生成的草稿。</span></div>
+            <div className="info-box codex-context-note"><CircleHelp size={17} /><span>按 Mac 生成、腾讯云存放草稿的方式使用：在 Mac 上选择 Codex，并加载习惯档案和当前会话上下文。它不会自动继承我们在 Codex 中的聊天。完整历史、解析和草稿会按设备同步设置上传至腾讯云供你查看。</span></div>
           </> : <><ProviderModelPicker provider={form.provider === 'compatible' && form.modelPreset === 'qwen' ? 'qwen' : form.provider} role="reply" label="回复模型名称" value={form.modelName} onChange={value => change('modelName', value)} disabled={!!saving} />
           <details className="model-connection-details" open={!form.modelUrl}><summary><Settings2 size={14} />服务连接与凭据<span>{form.modelUrl ? '已配置服务' : '待配置'}</span><ChevronDown size={14} /></summary><label className="field-label">模型服务地址<input type="url" required placeholder={form.provider === 'ollama' ? 'http://127.0.0.1:11434' : form.modelPreset === 'qwen' ? 'https://你的业务空间域名/compatible-mode/v1' : 'https://your-model-service/v1'} value={form.modelUrl} onChange={event => change('modelUrl', event.target.value)} />{form.modelPreset === 'qwen' && <small>填写百炼业务空间的完整 Base URL，包含 /compatible-mode/v1。</small>}</label>
           {form.provider === 'compatible' && <label className="field-label">API 密钥 <span className="field-hint">{state.settings.hasApiKey ? '已保存密钥；留空保留现有密钥' : '仅保存在本机，不会回显'}</span><input type="password" autoComplete="off" value={form.apiKey} onChange={event => change('apiKey', event.target.value)} placeholder={state.settings.hasApiKey ? '•••••••• 已配置' : '输入 API 密钥'} /></label>}</details></>}
           {form.modelPreset === 'qwen' && <label className="checkbox-label"><input type="checkbox" checked={!!form.modelThinkingEnabled} onChange={event => change('modelThinkingEnabled', event.target.checked)} /><span><strong>回复启用思考模式</strong><small>默认关闭以缩短测试等待；开启后可能增加耗时和 tokens，需模型支持。</small></span></label>}
-          <label className="checkbox-label"><input type="checkbox" checked={form.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许向模型服务发送必要的对话片段</strong><small>{form.provider === 'codex' ? 'Codex CLI 虽在本机运行，仍会调用远端模型。开启后，生成所需的对话、习惯档案和反馈会交给模型服务。' : '使用非本机服务时需要开启；提供商会收到生成回复所需的内容与档案。'}</small></span></label></>}
+          <label className="checkbox-label"><input type="checkbox" checked={form.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许模型参考完整会话与习惯档案</strong><small>{form.provider === 'codex' ? 'Codex CLI 虽在本机运行，仍会调用远端模型。开启后，生成所需的对话、习惯档案和反馈会交给模型服务。' : '使用非本机服务时需要开启；提供商会收到生成回复所需的内容与档案。'}</small></span></label></>}
         <details className="model-connection-details comparison-model-details"><summary><Sparkles size={14} />比较多个回复模型<span>{form.replyModels?.length ? `${form.replyModels.length} 个模型` : '使用主要模型'}</span><ChevronDown size={14} /></summary><ReplyModelsEditor choices={form.replyModels || []} onChange={choices => setForm(previous => ({ ...previous, replyModels: choices, ...(choices.length > 1 ? { autoReplyMode: 'draft' } : {}) }))} disabled={!!saving} /></details>
         {form.provider !== 'compatible' && form.replyModels?.some(choice => choice.provider === 'compatible') && <div className="multi-model-api"><h3>比较模型共用的 API 配置</h3><label className="field-label">兼容 API 服务地址<input type="url" required value={form.modelUrl} onChange={event => change('modelUrl', event.target.value)} placeholder="https://你的业务空间域名/compatible-mode/v1" /></label><label className="field-label">API 密钥<span className="field-hint">{state.settings.hasApiKey ? '已保存；留空保留现有密钥' : '仅保存在本机，不会回显'}</span><input type="password" autoComplete="off" value={form.apiKey} onChange={event => change('apiKey', event.target.value)} placeholder={state.settings.hasApiKey ? '•••••••• 已配置' : '输入 API 密钥'} /></label></div>}
-        {form.provider === 'demo' && !!form.replyModels?.length && <label className="checkbox-label"><input type="checkbox" checked={form.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许向比较模型发送必要的对话片段</strong><small>所选模型会参考当前对话、习惯档案及校准反馈。</small></span></label>}
-        {!!form.replyModels?.length && <p className="multi-model-note">这份列表作为默认配置。每个人可在对话的“信息处理”中单独选择模型，多个模型比较时由你选择候选后发送。</p>}
+        {form.provider === 'demo' && !!form.replyModels?.length && <label className="checkbox-label"><input type="checkbox" checked={form.allowRemoteModel} onChange={event => change('allowRemoteModel', event.target.checked)} /><span><strong>允许比较模型参考完整会话与习惯档案</strong><small>所选模型会参考当前对话、习惯档案及校准反馈。</small></span></label>}
+        {!!form.replyModels?.length && <p className="multi-model-note">这份列表作为默认配置。每个人可在对话的“模型设置”中单独选择模型，多个模型比较时由你选择候选后发送。</p>}
         <div className="test-model"><Button kind="secondary" onClick={() => void save(true)} disabled={!!saving || (form.provider === 'codex' && (!form.allowRemoteModel || !state.runtime.codexAvailable))}>{saving === 'test' ? <LoaderCircle size={14} className="spin" /> : <Zap size={14} />}{form.provider === 'codex' ? '保存并测试默认模型' : '保存并测试默认连接'}</Button>{testResult && <span className={testResult.ok ? 'success-text' : 'error-text'} role="status">{testResult.message}</span>}</div>
         {form.provider === 'codex' && <p className="model-test-hint">{!form.allowRemoteModel ? '先勾选上方授权，再测试生成。' : '测试会发起一次真实模型调用，可能消耗额度。'}仅保存设置不会调用模型。</p>}
       </section>
-      <details hidden={settingsGroup !== 'reply'} data-settings-group="reply" className="settings-card settings-advanced"><summary><FileText size={16} />回复处理方式<span>{form.autoReplyMode === 'draft' ? '草稿模式' : '自动发送模式'}</span><ChevronDown size={14} /></summary><div className="settings-section-title"><span><FileText size={19} /></span><div><h2>收到消息后怎样处理</h2><p>全局开关和联系人开关都开启后，才会处理新的来信。</p></div></div><div className="provider-options reply-mode-options">{([{ id: 'draft', title: '自动生成草稿', detail: '生成后等待你修改、复制或手动发送' }, { id: 'send', title: '自动发送回复', detail: '生成后直接通过当前对话通道发送' }] as const).map(mode => <label className={`provider-option ${form.autoReplyMode === mode.id ? 'selected' : ''}`} key={mode.id}><input type="radio" name="autoReplyMode" checked={form.autoReplyMode === mode.id} disabled={mode.id === 'send' && (form.replyModels?.length || 0) > 1} onChange={() => change('autoReplyMode', mode.id)} /><span><strong>{mode.title}{mode.id === 'draft' && ' · 推荐'}</strong><small>{mode.detail}</small></span>{form.autoReplyMode === mode.id && <Check size={15} />}</label>)}</div><div className="info-box"><ShieldCheck size={17} /><span>{form.autoReplyMode === 'draft' ? '草稿模式不会自动发送消息。采用建议后，可以仅保存反馈，或由你决定是否发送。' : '自动发送会实际送出回复；本机演练对话只写入本机。'}切换模式并保存后，全局开关会暂停，需要你重新开启。</span></div></details>
-      <section hidden={settingsGroup !== 'insights'} data-settings-group="insights" className="settings-card insight-settings-card"><div className="settings-section-title"><span><Sparkles size={19} /></span><div><h2>意图与好感度分析模型</h2><p>独立选择模型，按联系人分别开启；不会改变回复模型。</p></div></div>
+      <details hidden={settingsGroup !== 'automation'} data-settings-group="automation" className="settings-card settings-advanced"><summary><FileText size={16} />回复处理方式<span>{form.autoReplyMode === 'draft' ? '草稿模式' : '自动发送模式'}</span><ChevronDown size={14} /></summary><div className="settings-section-title"><span><FileText size={19} /></span><div><h2>收到消息后怎样处理</h2><p>全局开关和联系人开关都开启后，才会处理新的来信。</p></div></div><div className="provider-options reply-mode-options">{([{ id: 'draft', title: '自动生成草稿', detail: '生成后等待你修改、复制或手动发送' }, { id: 'send', title: '自动发送回复', detail: '生成后直接通过当前对话通道发送' }] as const).map(mode => <label className={`provider-option ${form.autoReplyMode === mode.id ? 'selected' : ''}`} key={mode.id}><input type="radio" name="autoReplyMode" checked={form.autoReplyMode === mode.id} disabled={mode.id === 'send' && (form.replyModels?.length || 0) > 1} onChange={() => change('autoReplyMode', mode.id)} /><span><strong>{mode.title}{mode.id === 'draft' && ' · 推荐'}</strong><small>{mode.detail}</small></span>{form.autoReplyMode === mode.id && <Check size={15} />}</label>)}</div><div className="info-box"><ShieldCheck size={17} /><span>{form.autoReplyMode === 'draft' ? '草稿模式不会自动发送消息。采用建议后，可以仅保存反馈，或由你决定是否发送。' : '自动发送会实际送出回复；本机演练对话只写入本机。'}切换模式并保存后，全局开关会暂停，需要你重新开启。</span></div></details>
+      <section hidden={settingsGroup !== 'models' || modelTask !== 'analysis'} data-settings-group="models" data-model-task="analysis" id="model-editor-analysis" className="settings-card insight-settings-card"><div className="settings-section-title"><span><Sparkles size={19} /></span><div><h2>意图与好感度分析模型</h2><p>为消息意图与好感度分配模型，功能开关按联系人设置。</p></div></div>
         <InsightModelFields kind="analysis" model={form.analysis} onChange={analysis => setForm(previous => ({ ...previous, analysis }))} disabled={!!saving} canReuseReplyKey={['compatible', 'ollama'].includes(form.provider)} hasApiKey={!!state.settings.analysis?.hasApiKey} />
         <p className="insight-explanation">意图百分比是模型分配给不同理解的相对权重，各项合计 100%。比例越高，模型越倾向这种理解；它不表示真实概率或情绪强度。个人对话在对应消息下显示意图名称与百分比，依据可在下方查看。</p>
       </section>
-      <section hidden={settingsGroup !== 'insights'} data-settings-group="insights" className="settings-card insight-settings-card"><div className="settings-section-title"><span><BookOpen size={19} /></span><div><h2>对话记忆模型</h2><p>压缩关键对话、事件与未完话题，长期保存在本机。</p></div></div>
+      <section hidden={settingsGroup !== 'models' || modelTask !== 'memory'} data-settings-group="models" data-model-task="memory" id="model-editor-memory" className="settings-card insight-settings-card"><div className="settings-section-title"><span><BookOpen size={19} /></span><div><h2>对话记忆模型</h2><p>整理完整聊天中的关键事件、基础信息与未完话题，长期保存在本机。</p></div></div>
         <InsightModelFields kind="memory" model={form.memory} onChange={memory => setForm(previous => ({ ...previous, memory }))} disabled={!!saving} canReuseReplyKey={['compatible', 'ollama'].includes(form.provider)} hasApiKey={!!state.settings.memory?.hasApiKey} />
         <p className="insight-explanation">为联系人开启记忆后，已确认的线索可作为后续回复背景。手动基础库不需要调用模型。</p>
       </section>
-      <section hidden={settingsGroup !== 'media'} data-settings-group="media" className="settings-card image-settings-card"><div className="settings-section-title"><span><ImageIcon size={19} /></span><div><h2>图片与表情包识别模型</h2><p>与回复模型分别选择。微信内置表情和文字表情由本机直接解析；表情包使用此识图模型。</p></div></div>
+      <section hidden={settingsGroup !== 'models' || modelTask !== 'vision'} data-settings-group="models" data-model-task="vision" id="model-editor-vision" className="settings-card image-settings-card"><div className="settings-section-title"><span><ImageIcon size={19} /></span><div><h2>图片与表情包识别模型</h2><p>与回复模型分别选择。微信内置表情和文字表情由本机直接解析；表情包使用此识图模型。</p></div></div>
         <p className="media-contact-note"><Users size={14} />自动识图按联系人设置：打开该人的对话 → 信息处理，仅为需要的人开启。</p>
         <div className="provider-options vision-provider-options">{([{ id: 'disabled', title: '暂不识别', detail: '保留图片供你查看' }, { id: 'qwen', title: '阿里千问', detail: '选择支持图片的千问模型' }, { id: 'codex', title: 'Codex', detail: '通过本机 Codex 识图' }, { id: 'compatible', title: '兼容 API', detail: '连接其他视觉模型' }] as const).map(provider => <label className={`provider-option ${form.vision.provider === provider.id ? 'selected' : ''}`} key={provider.id}><input type="radio" name="vision-provider" checked={form.vision.provider === provider.id} onChange={() => selectVisionProvider(provider.id)} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{form.vision.provider === provider.id && <Check size={15} />}</label>)}</div>
         {form.vision.provider !== 'disabled' && <>{form.vision.provider === 'codex' ? <ProviderModelPicker provider="codex" role="vision" label="Codex 图片识别模型" value={form.vision.modelName} onChange={value => changeVision('modelName', value)} disabled={!!saving} /> : <>
@@ -1099,7 +1130,7 @@ function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }:
         <label className="checkbox-label"><input type="checkbox" checked={form.vision.allowRemoteModel} onChange={event => changeVision('allowRemoteModel', event.target.checked)} /><span><strong>允许向识别服务发送图片</strong><small>识别时会将所选图片发送给上述模型服务。</small></span></label></>}
         <div className="image-test-panel"><h3>上传图片测试</h3><p>先选一张图片，再点击识别。此测试不加入聊天上下文。</p><ImageFilePicker image={testImage} onChange={image => { setTestImage(image); setImageResult(null); setImageError(''); }} disabled={!!saving} /><Button kind="secondary" disabled={!!saving || !testImage || form.vision.provider === 'disabled' || !form.vision.allowRemoteModel} onClick={() => void recognizeTestImage()}>{saving === 'image-test' ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}{saving === 'image-test' ? '正在获取识别结果…' : imageResult ? '查看/更新测试识别结果' : '保存并识别这张图片'}</Button><small className="model-test-hint">同一图片、模型和识别配置会复用本机结果，不重复消耗识图额度；首次识别会调用模型。选择文件和保存设置不会调用模型。</small>{imageError && <p className="inline-error" role="alert">{imageError}</p>}{imageResult && <><p className="image-test-cache-status" role="status">{imageResult.cached ? '已使用本地识别结果，未调用模型。' : '识别结果已保存在本机，可再次使用。'}</p><RecognitionResult recognition={imageResult} saved /></>}</div>
       </section>
-      <section hidden={settingsGroup !== 'media'} data-settings-group="media" className="settings-card audio-settings-card"><div className="settings-section-title"><span><Mic size={19} /></span><div><h2>语音转写模型</h2><p>将语音转成文字，再作为生成回复草稿的参考。</p></div></div>
+      <section hidden={settingsGroup !== 'models' || modelTask !== 'audio'} data-settings-group="models" data-model-task="audio" id="model-editor-audio" className="settings-card audio-settings-card"><div className="settings-section-title"><span><Mic size={19} /></span><div><h2>语音转写模型</h2><p>将语音转成文字，再作为生成回复草稿的参考。</p></div></div>
         <p className="media-contact-note"><Users size={14} />自动语音转写按联系人设置：打开该人的对话 → 信息处理，可与识图分别开关。</p>
         <div className="provider-options audio-provider-options">{([{ id: 'disabled', title: '暂不转写', detail: '保留语音供你查看' }, { id: 'qwen', title: '阿里千问', detail: '使用支持音频的千问模型' }, { id: 'compatible', title: '兼容 API', detail: '连接其他音频模型' }] as const).map(provider => <label className={`provider-option ${form.audio.provider === provider.id ? 'selected' : ''}`} key={provider.id}><input type="radio" name="audio-provider" checked={form.audio.provider === provider.id} onChange={() => selectAudioProvider(provider.id)} /><span><strong>{provider.title}</strong><small>{provider.detail}</small></span>{form.audio.provider === provider.id && <Check size={15} />}</label>)}</div>
         <div className="model-capability-note"><Mic size={15} /><span>{CODEX_AUDIO_HELP}</span></div>
@@ -1116,19 +1147,20 @@ function SettingsPage({ state, notify, refresh, busy, run, onOpenConversation }:
         {connection?.verification && <div className={`sync-verification ${connection.verification.status}`} role="status"><strong>{connection.verification.status === 'verified' ? '服务器连接验证成功' : connection.verification.status === 'checking' ? '正在向服务器验证设备…' : connection.verification.status === 'failed' ? '配置已保存 · 服务器验证失败' : connection.configured && !connection.verification.supported ? '此地址不支持设备验证' : '服务器连接尚未验证'}</strong>{connection.verification.device && <p>设备：{connection.verification.device.name}</p>}{connection.verification.checkedAt && <small>最近验证：{dateLabel(connection.verification.checkedAt)} {checkedTimeLabel(connection.verification.checkedAt)}</small>}{connection.verification.error && <p>{connection.verification.error}</p>}{connection.configured && !connection.verification.supported && <p>仅 Wealth 草稿接收地址支持设备验证。当前通用地址请通过手动同步草稿确认。</p>}</div>}
         {connectionError && <p className="inline-error" role="alert">{connectionError}</p>}
         <p className="sync-connection-note">保存 Wealth 配置后会自动验证一次，只核对设备凭据，不上传聊天或草稿。保存、清除或恢复连接均暂停自动同步；启动工作台不会自动验证。</p>
-        <label className="checkbox-label"><input type="checkbox" checked={form.remoteManagementEnabled !== false} disabled={!!saving} onChange={event => change('remoteManagementEnabled', event.target.checked)} /><span><strong>允许网页远程管理</strong><small>保存后生效。绑定后向 Wealth 同步最多 8 位已添加微信联系人的设置、各自最近 30 条消息片段、解析结果、意图分析、回复草稿及档案记忆摘要。网页可查看近况和调整设置；Mac 运行时才能更新或处理操作，离线时可查看上次同步内容。</small></span></label>
+        <label className="checkbox-label"><input type="checkbox" checked={form.remoteManagementEnabled !== false} disabled={!!saving} onChange={event => change('remoteManagementEnabled', event.target.checked)} /><span><strong>允许网页远程管理</strong><small>保存后生效。绑定后向 Wealth 同步已添加微信联系人的完整已读取消息、解析结果、意图分析、回复草稿及档案记忆。历史分批上传并存档，网页可逐页查看和调整设置；Mac 运行时才能补齐历史或处理操作，离线时可查看上次同步内容。</small></span></label>
+        <p className="history-sync-status" role="status">{state.runtime.historySync?.detail}{state.runtime.historySync?.syncedAt && ` 上次存档：${dateLabel(state.runtime.historySync.syncedAt)} ${checkedTimeLabel(state.runtime.historySync.syncedAt)}`}</p>
         <p role="status">{state.runtime.remoteManagement?.detail}{state.runtime.remoteManagement?.lastConnectedAt && ` 最近连接：${timeLabel(state.runtime.remoteManagement.lastConnectedAt)}`}</p>
         <label className="checkbox-label"><input type="checkbox" checked={!!form.syncDraftsEnabled} disabled={!!saving || (!state.runtime.draftSyncConfigured && !form.syncDraftsEnabled)} onChange={event => change('syncDraftsEnabled', event.target.checked)} /><span><strong>生成后同步草稿至服务器</strong><small>勾选后点击“保存设置”，只同步此后生成的候选回复、联系人显示名与档案版本。旧草稿可在对话中手动同步。</small></span></label>
-        <div className="info-box"><ShieldCheck size={17} /><span>完整聊天历史、原始图片和语音、习惯档案及密钥保留在 Mac。关闭并同步后，远程近况会隐藏。网页操作不会发送微信消息。{state.runtime.draftInboxConfigured && ' 此工作空间也已配置草稿接收，可从“云端草稿箱”查看收到的回复。'}</span></div>
+        <div className="info-box"><ShieldCheck size={17} /><span>完整聊天文本与已解析内容会同步至 Wealth；原始图片、语音文件和模型密钥保留在 Mac。关闭并同步后，远程内容会隐藏。网页操作不会发送微信消息。{state.runtime.draftInboxConfigured && ' 此工作空间也已配置草稿接收，可从“云端草稿箱”查看收到的回复。'}</span></div>
       </section>
-      <section hidden={settingsGroup !== 'reply'} data-settings-group="reply" className="settings-card"><div className="settings-section-title"><span><Clock3 size={19} /></span><div><h2>自动处理节奏</h2><p>草稿只需短暂等待，合并连续来信；冷却、每日上限和安静时段仅用于自动发送。</p></div></div>
+      <section hidden={settingsGroup !== 'automation'} data-settings-group="automation" className="settings-card"><div className="settings-section-title"><span><Clock3 size={19} /></span><div><h2>自动处理节奏</h2><p>草稿只需短暂等待，合并连续来信；冷却、每日上限和安静时段仅用于自动发送。</p></div></div>
         <label className="field-label reply-delay-field">合并消息等待<input type="number" min={1} max={300} required value={form.replyDelaySeconds} onChange={event => change('replyDelaySeconds', Number(event.target.value))} /><small>秒 · 等对方连续说完，再生成回复</small></label>
         <details className="send-only-settings model-connection-details"><summary><Clock3 size={14} />自动发送专用设置<span>{form.autoReplyMode === 'draft' ? '草稿模式无需使用' : '冷却与安静时段'}</span><ChevronDown size={14} /></summary><div className="send-only-heading"><h3>自动发送专用设置</h3><span>{form.autoReplyMode === 'draft' ? '当前草稿模式不使用以下限制' : '仅影响自动发送'}</span></div><div className="form-grid"><label className="field-label">发送冷却<input type="number" min={0} max={3600} required value={form.cooldownSeconds} onChange={event => change('cooldownSeconds', Number(event.target.value))} /><small>秒 · 两次自动发送之间的间隔</small></label><label className="field-label">每位联系人每日发送上限<input type="number" min={1} max={200} required value={form.dailyLimit} onChange={event => change('dailyLimit', Number(event.target.value))} /><small>次 / 人 · 不限制草稿数量</small></label></div>
           <div className="setting-toggle-row"><div><strong>自动发送安静时段</strong><p>在这个时间段内暂停自动发送，草稿仍可生成。</p></div><Toggle checked={form.quietHoursEnabled} onChange={() => change('quietHoursEnabled', !form.quietHoursEnabled)} label="开启自动发送安静时段" /></div>{form.quietHoursEnabled && <div className="quiet-time"><label className="field-label">开始时间<input type="time" required value={form.quietStart} onChange={event => change('quietStart', event.target.value)} /></label><span>至</span><label className="field-label">结束时间<input type="time" required value={form.quietEnd} onChange={event => change('quietEnd', event.target.value)} /></label><small>北京时间 · Asia/Shanghai</small></div>}
         </details>
       </section>
       <section hidden={settingsGroup !== 'device'} data-settings-group="device" className="settings-card channel-setting"><div className="settings-section-title"><span><ShieldCheck size={19} /></span><div><h2>消息通道</h2><p>{state.runtime.bridgeSendConfigured ? '外部发送通道已配置；手动发送或自动发送模式会通过该通道送出回复。' : state.runtime.bridgeReceiveConfigured ? '当前仅接收外部来信。可生成草稿和保存反馈，回复需复制到微信手动发送。' : state.conversations.some(item => item.channel === 'wechat') ? '微信会话仅读取消息，读取与自动草稿在各自对话内控制。回复需复制到微信手动发送。' : '当前使用本机演练。接入外部消息桥需要在服务端配置。'}</p></div></div><span className="runtime-badge"><span className="status-dot" />{state.runtime.bridgeSendConfigured ? '消息桥 · 可发送' : state.runtime.bridgeReceiveConfigured ? '消息桥 · 仅接收' : state.conversations.some(item => item.channel === 'wechat') ? '微信 · 仅读取' : '不会发送到微信'}</span></section>
-      <div className="settings-save"><span>保存全部分类中的修改 · 设置保存在本机</span><Button type="submit" disabled={!!saving}>{saving === 'save' ? <LoaderCircle size={15} className="spin" /> : <Check size={15} />}保存设置</Button></div>
+      <div className="settings-save"><span>保存模型与其他设置中的全部修改 · 保存在本机</span><Button type="submit" disabled={!!saving}>{saving === 'save' ? <LoaderCircle size={15} className="spin" /> : <Check size={15} />}保存设置</Button></div>
     </form>
     <div hidden={settingsGroup !== 'insights'}><InsightSettingsDetails state={state} busy={saving || busy} run={run} onOpenConversation={onOpenConversation} /></div>
   </>;

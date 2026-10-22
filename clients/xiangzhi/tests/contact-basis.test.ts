@@ -74,11 +74,30 @@ test('recognized voice can provide opponent evidence and digest changes with tra
   const next=basisInputDigest(app,'A');app.settings.memory!.modelName='different';assert.notEqual(basisInputDigest(app,'A'),next);
 });
 
-test('large histories are bounded and the chosen basis window keeps the newest statements',async()=>{
+test('large basis histories cover every statement in bounded batches rather than dropping the oldest window',async()=>{
   const app=state();app.messages=Array.from({length:300},(_,index)=>message(`a-${index}`,'A',index+1,'很长的发言'.repeat(1000)));
-  await generateContactBasis(app,'A',undefined,{fetch:async(_url,init)=>{
+  const readIds=new Set<string>(),evidenceIds=new Set<string>();let finalCalls=0,summaryCalls=0;
+  const result=await generateContactBasis(app,'A',undefined,{fetch:async(_url,init)=>{
     const body=JSON.parse(String(init!.body)),context=JSON.parse(body.messages[1].content);
-    assert.ok(Buffer.byteLength(JSON.stringify(body.messages))<128_000);assert.ok(context.messages.length<200);
-    assert.equal(context.messages.at(-1).id,'a-299');return response({facts:[]});
+    assert.ok(Buffer.byteLength(JSON.stringify(body.messages))<128_000);
+    if(context.level!==undefined){summaryCalls++;for(const item of context.messages??[])readIds.add(item.id);return response({summary:'完整读取本批合成资料'});}
+    finalCalls++;for(const id of context.allowedSourceMessageIds)evidenceIds.add(id);for(const item of context.messages)readIds.add(item.id);
+    assert.equal(context.fullHistory.coveredMessages,context.allowedSourceMessageIds.length);
+    return response({facts:[{category:'fact',content:`对方在${context.allowedSourceMessageIds[0]}有合成发言。`,sourceMessageIds:[context.allowedSourceMessageIds[0]]}]});
   }});
+  assert.ok(summaryCalls>1);assert.ok(finalCalls>1);assert.equal(result.sourceMessageCount,300);assert.equal(result.facts.length,finalCalls);
+  const expected=new Set(app.messages.map(item=>item.id));assert.deepEqual(readIds,expected);assert.deepEqual(evidenceIds,expected);
+});
+
+test('basis extraction reuses completed batch results and rereads source changes beyond a displayed text prefix',async()=>{
+  const app=state();app.messages=Array.from({length:260},(_,index)=>message(`a-${index}`,'A',index+1,`合成发言 ${index} ${'长'.repeat(1600)}`));
+  const saved=new Map<string,unknown>();let calls=0;
+  const dependencies={historyCache:{get:(ns:string,key:string)=>saved.get(`${ns}:${key}`),set:(ns:string,key:string,value:unknown)=>{saved.set(`${ns}:${key}`,value);}},fetch:async(_url:unknown,init?:RequestInit)=>{
+    calls++;const context=JSON.parse(JSON.parse(String(init!.body)).messages[1].content);
+    return response(context.level!==undefined?{summary:'完整合成分段摘要'}:{facts:[]});
+  }};
+  await generateContactBasis(app,'A',undefined,dependencies);const afterFirst=calls;assert.ok(afterFirst>2);
+  await generateContactBasis(app,'A',undefined,dependencies);assert.equal(calls,afterFirst);
+  const before=basisInputDigest(app,'A');app.messages[0].text+='尾部真实源修正';assert.notEqual(basisInputDigest(app,'A'),before);
+  await generateContactBasis(app,'A',undefined,dependencies);assert.ok(calls>afterFirst);
 });

@@ -168,11 +168,42 @@ test('inline emoji and recognized custom stickers provide bounded expressions, w
   assert.deepEqual(unknown.intents,[{label:'其他',percentage:100}]);
 });
 
-test('long utterance analysis bounds the most recent preceding context', async () => {
+test('long utterance analysis reads every preceding long utterance while bounding each request and excluding later messages', async () => {
   const state = insightState(); state.messages = Array.from({length: 30}, (_, index) => message(`a${index + 1}`, 'A', index + 1, '很长的合成发言'.repeat(1000)));
+  state.messages.push(message('later','A',31,'FUTURE-SENTENCE-MUST-NOT-APPEAR'));
+  const readIds=new Set<string>();let finalCalls=0,summaryCalls=0;
   await analyzeContactMessage(state, 'A', 'a30', undefined, {fetch: async (_url, init) => {
     const body = JSON.parse(String(init!.body)); const context = JSON.parse(body.messages[1].content);
+    assert.ok(Buffer.byteLength(JSON.stringify(body.messages)) < 128_000);assert.doesNotMatch(String(init!.body),/FUTURE-SENTENCE/);
+    if(context.level!==undefined){summaryCalls++;for(const item of context.messages??[])readIds.add(item.id);return response({summary:'已读取本段全部发言'});}
+    finalCalls++;
     assert.equal(context.priorMessages.at(-1).id, 'a29'); assert.ok(context.priorMessages.length < 19);
-    assert.ok(Buffer.byteLength(JSON.stringify(body.messages)) < 128_000); return response();
+    assert.equal(context.fullHistory.mode,'hierarchical');assert.equal(context.fullHistory.coveredMessages,30);return response();
   }});
+  assert.ok(summaryCalls>1);assert.equal(finalCalls,1);assert.deepEqual(readIds,new Set(Array.from({length:30},(_,index)=>`a${index+1}`)));
+});
+
+test('analysis input revision includes the oldest message and long-message tails outside the recent preview',()=>{
+  const state=insightState();state.messages=Array.from({length:40},(_,index)=>message(`a${index+1}`,'A',index+1,`原发言 ${index+1} ${'字'.repeat(2000)}`));
+  const first=insightsInputDigest(state,'A','a40');state.messages[0].text+='尾部修正';assert.notEqual(insightsInputDigest(state,'A','a40'),first);
+  const second=insightsInputDigest(state,'A','a40');state.messages.push(message('future','A',41,'后来的发言'));assert.equal(insightsInputDigest(state,'A','a40'),second);
+  state.messages[0].kind='voice';state.messages[0].mediaStatus='recognized';state.messages[0].audioRecognition={text:'很早语音已补充的完整转写',provider:'qwen',modelName:'voice',recognizedAt:''};
+  assert.notEqual(insightsInputDigest(state,'A','a40'),second);
+});
+
+test('complete history plus a full reviewed memory and manual basis still fits each analysis request',async()=>{
+  const state=insightState();state.conversations[0].processing!.memoryEnabled=true;
+  state.messages=Array.from({length:40},(_,index)=>message(`00000000-0000-4000-8000-${String(index+1).padStart(12,'0')}`,'A',index+1,'合成发言'.repeat(500)));
+  const sourceIds=state.messages.slice(0,12).map(row=>row.id),hashes=Object.fromEntries(state.messages.map(row=>[row.id,messageEvidenceHash(row)]));
+  state.conversations[0].memory={summary:'记'.repeat(1200),openTopics:Array.from({length:8},()=> '题'.repeat(200)),throughSequence:39,
+    sourceDigest:'synthetic',provider:'qwen',modelName:'memory',updatedAt:'',compressedMessageHashes:Object.fromEntries(state.messages.slice(0,39).map(row=>[row.id,messageEvidenceHash(row)])),
+    entries:Array.from({length:24},(_,index)=>({id:`entry-${index}`,kind:'event',text:`${index} ${'忆'.repeat(300)}`,sourceMessageIds:sourceIds,sourceMessageHashes:hashes,status:'approved',createdAt:''}))};
+  state.conversations[0].basisFacts=Array.from({length:12},(_,index)=>({id:`basis-${index}`,category:'fact',content:'资'.repeat(300),sourceNote:'源'.repeat(160),createdAt:'',updatedAt:''}));
+  let finalCalls=0;
+  await analyzeContactMessage(state,'A',state.messages.at(-1)!.id,undefined,{fetch:async(_url,init)=>{
+    const body=JSON.parse(String(init!.body)),context=JSON.parse(body.messages[1].content);assert.ok(Buffer.byteLength(JSON.stringify(body.messages))<=128_000);
+    if(context.level!==undefined)return response({summary:'有来源的合成摘要'});
+    finalCalls++;assert.equal(context.fullHistory.coveredMessages,40);return response();
+  }});
+  assert.equal(finalCalls,1);
 });
