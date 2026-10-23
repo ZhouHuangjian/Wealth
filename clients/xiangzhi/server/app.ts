@@ -360,7 +360,10 @@ export function createApplication(options: {
   });
   app.post('/api/conversations/:id/wechat/poll',async(req,res)=>{
     if(!wechatInspection().available) throw new Error('本机微信读取工具尚未配置。');
-    res.json(await collector.readHistory(param(req)));
+    const cid=param(req),result=await collector.readHistory(cid),state=store.read();
+    const history=state.conversations.find(c=>c.id===cid)?.wechat?.history;
+    res.json({...result,historyComplete:history?.status==='complete'&&!history.tail,
+      savedMessages:state.messages.filter(m=>m.conversationId===cid).length});
   });
   app.post('/api/conversations/:id/wechat/history/reload',async(req,res)=>{
     if(!wechatInspection().available)throw new Error('本机微信读取工具尚未配置。');

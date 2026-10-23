@@ -528,6 +528,8 @@ test('a failed historical page resumes its saved tie offset after a real SQLite 
   await assert.rejects(collector.poll('wechat-test'),/interrupted second page/);
   const checkpoint=store.read().conversations[0].wechat!.history!;
   assert.equal(checkpoint.status,'error');assert.equal(checkpoint.cursor,'99');assert.equal(checkpoint.offset,199);assert.equal(checkpoint.scanned,200);
+  assert.match(store.read().conversations[0].wechat!.detail,/已保存 \d+ 条消息.*续读未完成/);
+  assert.match(checkpoint.detail,/已扫描 200 条历史/);
   const committed=new Map(store.read().messages.map(message=>[message.externalId,message.id]));
   collector.stop();store.close();store=new Store(path);fail=false;inputs.length=0;
   collector=new WechatCollector(store,{query,onMessages:(_cid,_id,live)=>events.push(live)});collector.setEnabled('wechat-test',true);
@@ -538,6 +540,16 @@ test('a failed historical page resumes its saved tie offset after a real SQLite 
   assert.equal(state.conversations[0].wechat!.history!.status,'complete');
   for(const [externalId,id] of committed)assert.equal(state.messages.find(message=>message.externalId===externalId)!.id,id);
   assert.deepEqual(new Set(state.messages.map(message=>message.externalId)),new Set(rows.map(row=>row.id)));assert.ok(events.every(live=>!live));
+});
+
+test('a failed incremental check keeps completed history complete and describes only the failed check',async t=>{
+  let fail=false;
+  const {store,collector}=setup(t,async()=>{if(fail)throw new Error('synthetic incremental failure');return page([record(1),record(2)]);});
+  await collector.poll('wechat-test');const saved=store.read().messages;fail=true;
+  await assert.rejects(collector.poll('wechat-test'),/incremental failure/);
+  const state=store.read();assert.deepEqual(state.messages,saved);
+  assert.equal(state.conversations[0].wechat!.history!.status,'complete');
+  assert.match(state.conversations[0].wechat!.detail,/已完整保存 2 条历史.*新增消息检查未成功/);
 });
 
 test('pausing after a committed historical page blocks a late result and resumes exactly from the checkpoint',async t=>{

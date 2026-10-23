@@ -224,8 +224,12 @@ export class WechatCollector{
         if(current.wechat.detail.startsWith('微信账号已变化'))invalidated=true;
         else if(!signal.aborted&&!this.closed){this.catchup.add(cid);const failures=(this.backoff.get(cid)?.failures??0)+1;
           this.backoff.set(cid,{failures,next:this.now()+Math.min(60000,this.intervalMs*2**Math.min(failures,4))});
-          this.store.update(state=>{const w=binding(state,cid).wechat!;w.status='error';w.detail='读取未完成，已保存的历史和断点均已保留；后台将退避重试。';
-            if(w.history?.status!=='complete'){w.history!.status='error';w.history!.detail='本批读取未完成，恢复后从已保存断点继续。';}});
+          this.store.update(state=>{const w=binding(state,cid).wechat!;w.status='error';
+            const saved=state.messages.filter(m=>m.conversationId===cid).length;
+            w.detail=w.history?.status==='complete'&&!w.history.tail
+              ?`已完整保存 ${saved} 条历史；本次新增消息检查未成功，稍后重试。`
+              :`已保存 ${saved} 条消息；本次续读未完成，断点已保留，后台将退避重试。`;
+            if(w.history?.status!=='complete'){w.history!.status='error';w.history!.detail=`已扫描 ${w.history!.scanned} 条历史，恢复后从已保存断点继续。`;}});
         }
         if(invalidated)this.options.onContextInvalidated?.(cid);
         if(changed)this.options.onMessages?.(cid,this.store.read().messages.filter(m=>m.conversationId===cid).at(-1)?.id??null,false);

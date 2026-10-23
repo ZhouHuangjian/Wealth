@@ -86,6 +86,25 @@ test('WeChat binding requires authentication, remains off, rejects duplicates/in
   } finally {await h.close();}
 });
 
+test('manual API distinguishes a saved batch from completed history and preserves the continuation checkpoint',async()=>{
+  const rows=Array.from({length:1001},(_,index)=>row(index+1));
+  const h=await harness({queryWechat:async input=>{
+    const selected=rows.filter(r=>input.after===undefined||BigInt(r.sortSeq)>BigInt(input.after));
+    if(input.order==='desc')selected.reverse();const offset=input.offset??0;
+    return {records:selected.slice(offset,offset+input.limit),hasMore:offset+input.limit<selected.length,accountFingerprint:account};
+  }});
+  try{
+    const c=await h.bind();
+    const first=await(await h.request(`/api/conversations/${c.id}/wechat/poll`,'POST',{})).json();
+    assert.equal(first.historyComplete,false);assert.equal(first.savedMessages,800);
+    const checkpoint=h.store.read().conversations[0].wechat!.history!;
+    assert.equal(checkpoint.status,'running');assert.equal(checkpoint.scanned,600);
+    const second=await(await h.request(`/api/conversations/${c.id}/wechat/poll`,'POST',{})).json();
+    assert.equal(second.historyComplete,true);assert.equal(second.savedMessages,1001);
+    assert.deepEqual(h.calls.generate,[]);assert.equal(h.calls.send,0);
+  }finally{await h.close();}
+});
+
 test('WeChat reads only an exact bound contact and manual baseline never schedules a reply', async () => {
   const h = await harness({queryWechat: async input => {
     assert.equal(input.contact, 'filehelper'); return page([row(2), row(1)]);
@@ -99,7 +118,7 @@ test('WeChat reads only an exact bound contact and manual baseline never schedul
     await h.request(`/api/conversations/${selected.id}`, 'PATCH', {autoReplyEnabled: true});
     await h.request('/api/settings', 'PATCH', {autoReplyEnabled: true});
     const result = await h.request(`/api/conversations/${selected.id}/wechat/poll`, 'POST', {});
-    assert.equal(result.status, 200); assert.deepEqual(await result.json(), {added: 2, baseline: true});
+    assert.equal(result.status, 200); assert.deepEqual(await result.json(), {added: 2, baseline: true, historyComplete:true, savedMessages:2});
     assert.deepEqual(h.calls.query, [{contact: 'filehelper', order: 'desc', limit: 200, offset: 0}]);
     const state = h.store.read();
     assert.deepEqual(state.messages.map(message => message.sourceSequence), ['1', '2']);

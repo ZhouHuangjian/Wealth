@@ -228,9 +228,9 @@ function AppContent() {
   const syncDrafts = () => void run('sync-drafts', () => api(`/conversations/${selectedId}/sync-drafts`, 'POST'), '草稿已同步至服务器，没有发送微信消息');
   const pause = () => void run('pause', () => api('/auto/pause', 'POST'), '已暂停全部自动回复，微信读取由各会话的读取开关控制');
   const readWechatOnce = (target: Conversation) => void run(`wechat-poll-${target.id}`, async () => {
-    try { return await api(`/conversations/${target.id}/wechat/poll`, 'POST'); }
+    try { return await api<{historyComplete:boolean;savedMessages:number}>(`/conversations/${target.id}/wechat/poll`, 'POST'); }
     catch (error) { throw new Error(`${target.name}：${error instanceof Error ? error.message : '读取未完成'}`); }
-  }, `${target.name}：本次读取已完成`);
+  }, result => `${target.name}：已保存 ${result.savedMessages} 条消息，${result.historyComplete ? '本机可用历史已完整读取' : '正在继续补齐全部历史'}`);
 
   if (!state) return <div className="startup"><div className="brand-symbol"><Leaf size={27} /></div><h1>相知</h1>
     {loadError ? <><p className="error-text">{loadError}</p><Button onClick={() => void refresh()}>重新连接</Button></>
