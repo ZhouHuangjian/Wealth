@@ -22,7 +22,7 @@ function state(status?:History['status']):AppState{
 function response(request:RequestInit){
   const body=JSON.parse(String(request.body)),system=body.messages[0].content as string;
   const content=body.model==='reply-fixture'?{replies:Array.from({length:3},()=>({text:'合成回复',label:'自然',reason:'依据合成上下文'}))}
-    :body.model==='analysis-fixture'?{intents:[{label:'询问',percentage:100}],affinity:null,uncertainty:'合成测试'}
+    :body.model==='analysis-fixture'?{emotions:[],replyReview:null,intents:[{label:'询问',percentage:100}],affinity:null,uncertainty:'合成测试'}
       :system.includes('基础资料整理助手')?{facts:[]}:{summary:'合成记忆',entries:[],openTopics:[]};
   return Response.json({choices:[{message:{content:JSON.stringify(content)}}]});
 }

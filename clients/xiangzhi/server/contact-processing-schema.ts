@@ -14,7 +14,7 @@ export const contactProcessingPatchSchema = z.object({
   replyModels: replyModelsSchema.nullable().optional(),
   autoRecognizeImages: z.boolean().optional(),
   autoTranscribeVoice: z.boolean().optional(),
-  intentEnabled:z.boolean().optional(),affinityEnabled:z.boolean().optional(),memoryEnabled:z.boolean().optional(),
+  intentEnabled:z.boolean().optional(),emotionEnabled:z.boolean().optional(),replyReviewEnabled:z.boolean().optional(),affinityEnabled:z.boolean().optional(),memoryEnabled:z.boolean().optional(),
   autoAnalyzeMessages:z.boolean().optional(),autoCompressMemory:z.boolean().optional(),
   analysisModel:contactModelChoiceSchema.nullable().optional(),memoryModel:contactModelChoiceSchema.nullable().optional(),
 }).strict();

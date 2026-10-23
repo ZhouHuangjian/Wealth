@@ -1,3 +1,4 @@
+import RemoteAnalysisDetails from "./RemoteAnalysisDetails";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -32,7 +33,6 @@ import {
 import type { RemoteCommand, RemoteStatus } from "../chat-remote-model";
 import {
   currentDraftsAreStale,
-  currentIntentLabels,
   currentKindLabels,
   reconcileCurrentStatus,
 } from "../chat-current-model";
@@ -490,13 +490,27 @@ export default function RemoteConversationDashboard({
                     {person.processing?.affinityEnabled &&
                       person.affinity !== null &&
                       person.affinity !== undefined && (
-                        <span
-                          className="chat-current-affinity"
-                          title="根据互动估计"
-                        >
-                          <Heart size={13} />
-                          {person.affinity}%
-                        </span>
+                        <details className="chat-affinity-details">
+                          <summary
+                            className="chat-current-affinity"
+                            title="查看互动分项"
+                          >
+                            <Heart size={13} />
+                            {person.affinity}%
+                          </summary>
+                          <div className="chat-affinity-popover">
+                            <RemoteAnalysisDetails
+                              analysis={
+                                current?.messages
+                                  .slice()
+                                  .reverse()
+                                  .find((m) => m.analysis?.affinity)?.analysis
+                              }
+                              processing={{ affinityEnabled: true }}
+                              messages={current?.messages}
+                            />
+                          </div>
+                        </details>
                       )}
                   </h2>
                   <p>
@@ -666,50 +680,37 @@ export default function RemoteConversationDashboard({
                             </section>
                           )}
                         </div>
-                        {person.processing?.intentEnabled &&
-                          !!item.analysis?.intents.length && (
-                            <div
-                              className="chat-current-analysis"
-                              aria-label="这条消息的意图分析"
+                        <RemoteAnalysisDetails
+                          analysis={item.analysis}
+                          processing={person.processing}
+                          messages={current?.messages}
+                        />
+                        {item.role === "self" &&
+                          person.processing?.replyReviewEnabled &&
+                          supported("conversation.message.analyze") && (
+                            <Button
+                              size="small"
+                              disabled={
+                                operationDisabled ||
+                                !!pending(
+                                  "conversation.message.analyze",
+                                  item.id,
+                                )
+                              }
+                              onClick={() =>
+                                actions("conversation.message.analyze", item.id)
+                              }
                             >
-                              <Sparkles size={13} />
-                              <span>可能的意图（模型估计）</span>
-                              {item.analysis?.stale && (
-                                <Tag color="orange">
-                                  历史或模型有变化，待更新
-                                </Tag>
-                              )}
-                              <div className="chat-current-intents">
-                                {currentIntentLabels(item).map(
-                                  (intent, index) => (
-                                    <Tag key={`${intent.label}-${index}`}>
-                                      {intent.label}{" "}
-                                      <strong>{intent.percentage}%</strong>
-                                    </Tag>
-                                  ),
-                                )}
-                              </div>
-                              <details className="chat-current-intent-help">
-                                <summary>比例说明</summary>
-                                <p>
-                                  这些比例是模型对不同理解分配的相对权重。比例越高，表示模型越倾向这种理解；各项合计
-                                  100%，不表示真实概率或情绪强度。
-                                </p>
-                                {item.analysis.intents.some(
-                                  (intent) => intent.label === "其他",
-                                ) && <p>其他：未归入现有分类的可能含义。</p>}
-                              </details>
-                              <small>
-                                {item.analysis.modelName ||
-                                  item.analysis.provider}{" "}
-                                · {time(item.analysis.analyzedAt)}
-                              </small>
-                            </div>
+                              {item.analysis?.replyReview
+                                ? "更新回复复盘"
+                                : "复盘这条回复"}
+                            </Button>
                           )}
                         {item.role === "peer" && (
                           <Space className="chat-current-message-actions" wrap>
                             {supported("conversation.message.analyze") &&
-                              (person.processing?.intentEnabled ||
+                              (person.processing?.emotionEnabled ||
+                                person.processing?.intentEnabled ||
                                 person.processing?.affinityEnabled) && (
                                 <Button
                                   size="small"

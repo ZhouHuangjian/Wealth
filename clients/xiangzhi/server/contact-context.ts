@@ -63,7 +63,7 @@ export function contactBasisContext(conversation: Conversation, state?: AppState
 export function validMemoryEntries(state: AppState, conversation: Conversation, throughSequence: number): ContactMemoryEntry[] {
   const allowed = new Map(scopedMessages(state, conversation.id).filter(message => message.sequence <= throughSequence).map(message => [message.id, message]));
   return recentContextPriority((conversation.memory?.entries ?? []).filter(entry => entry.status !== 'rejected'
-    && (entry.origin === 'manual' || entry.sourceMessageIds.length > 0 && entry.sourceMessageIds.every(id => {
+    && (entry.origin === 'manual' || entry.sourceMessageIds.length > 0 && [...entry.sourceMessageIds,...(entry.event?.resolvedByMessageIds??[])].every(id => {
       const message = allowed.get(id);
       return message && entry.sourceMessageHashes?.[id] === messageEvidenceHash(message);
     }))), 'model');
@@ -99,7 +99,7 @@ export function memoryContext(state: AppState, conversation: Conversation, throu
     summarySource: manualSummary ? '用户补充回顾，作为沟通背景，不是已发生事实的认证' : '模型未确认回顾',
     entries: entries.slice(-24).map(entry => ({kind: entry.kind, text: safeContextText(entry.text, 300),
       sourceMessageIds: entry.origin === 'manual' ? [] : entry.sourceMessageIds.slice(0, 12), confirmedByUser: entry.status === 'approved',
-      origin: entry.origin === 'manual' ? 'manual' : 'model', source: entry.origin === 'manual' ? '用户补充，仅作当前联系人背景' : '模型整理的会话记忆'})),
+      ...(entry.event?{event:entry.event}:{}),origin: entry.origin === 'manual' ? 'manual' : 'model', source: entry.origin === 'manual' ? '用户补充，仅作当前联系人背景' : '模型整理的会话记忆'})),
     openTopics: manualTopics || validSummary ? memory.openTopics.slice(0, 8).map(value => safeContextText(value, 200)) : [],
     openTopicsSource: manualTopics ? '用户补充的未完话题' : '模型未确认的未完话题',
     throughSequence: memory.throughSequence, uncertain: true};

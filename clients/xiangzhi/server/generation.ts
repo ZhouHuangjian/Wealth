@@ -1,3 +1,4 @@
+import {eventEvidenceContext} from './event-context.js';
 import { randomUUID } from 'node:crypto';
 import {assertFullHistoryReady,fullHistoryContext,HISTORY_SUMMARY_SCHEMA,type HistoryDependencies} from './full-history-context.js';
 import type { AppState, Draft, Message, Provider, Settings } from '../shared/types.js';
@@ -222,6 +223,7 @@ async function generateDraftsSingle(state: AppState, conversationId: string, int
     fullHistory:history,
     intent: redact(intent.slice(0, 1000)), approvedSelfClaims: claims.map(claim => ({...claim, statement: redact(claim.statement)})),
     confirmedContactFacts: contactContext.confirmedContactFacts.map(fact => ({...fact, content: redact(fact.content), sourceNote: redact(fact.sourceNote)})),
+    eventEvidence:eventEvidenceContext(state,state.conversations.find(c=>c.id===conversationId)!).map(event=>({...event,originals:event.originals.map(m=>({...m,text:redact(m.text)}))})),
     unconfirmedContactFacts: contactContext.unconfirmedContactFacts.map(fact => ({...fact, content: redact(fact.content), sourceNote: redact(fact.sourceNote)})),
     reviewedConversationMemory: contactContext.reviewedConversationMemory ? {
       confirmedEntries: contactContext.reviewedConversationMemory.confirmedEntries.map(entry => ({...entry, text: redact(entry.text)})),

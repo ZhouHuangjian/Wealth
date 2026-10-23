@@ -114,7 +114,7 @@ export async function contactModelCompletion(settings: Settings, config: Contact
     let response: Response;
     try {
       response = await (dependencies.fetch ?? fetch)(endpoint, {method: 'POST', headers, redirect: 'error', signal: combined,
-        body: JSON.stringify({model: config.modelName.trim(), messages:requestMessages, stream: false, temperature: 0.1, max_tokens: 3000,
+        body: JSON.stringify({model: config.modelName.trim(), messages:requestMessages, stream: false, temperature: 0.1, max_tokens: feature==='记忆压缩'?6000:3000,
           ...(qwen ? {enable_thinking: config.thinkingEnabled ?? false} : {})})});
     } catch { throw abortError() ?? new Error(`无法连接${feature}模型，请检查地址、网络和认证。`); }
     if (!response.ok) {

@@ -53,8 +53,8 @@ test('only current, scoped saved analysis is projected and self expressions rema
   const revision=remoteMessageRevision(target);target.insights!.affinity!.score=90;assert.equal(remoteMessageRevision(target),revision);
   target.text+='发生变化';assert.equal(remoteCurrentConversation(state,cid).messages[0].analysis,undefined);assert.notEqual(remoteMessageRevision(target),revision);
   saveAnalysis(state,target);target.insights!.conversationId=randomUUID();assert.equal(remoteCurrentConversation(state,cid).messages[0].analysis,undefined);
-  target.role='self';saveAnalysis(state,target);assert.equal(remoteCurrentConversation(state,cid).messages[0].analysis?.intents.length,2);
-  state.conversations[0].processing!.intentEnabled=false;state.conversations[0].processing!.affinityEnabled=false;
+  target.role='self';state.conversations[0].processing!.replyReviewEnabled=true;saveAnalysis(state,target);assert.equal(remoteCurrentConversation(state,cid).messages[0].analysis?.intents.length,2);
+  state.conversations[0].processing!.intentEnabled=false;state.conversations[0].processing!.affinityEnabled=false;state.conversations[0].processing!.replyReviewEnabled=false;
   assert.equal(remoteCurrentConversation(state,cid).messages[0].analysis,undefined);
 });
 

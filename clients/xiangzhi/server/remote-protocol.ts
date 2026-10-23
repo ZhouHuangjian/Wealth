@@ -1,3 +1,4 @@
+import {eventSchema} from './event-schema.js';
 /** Versioned, explicit projections for the Wealth remote control surface. */
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
@@ -55,7 +56,7 @@ export const patchCommandSchema=remoteConversationPatchSchema.extend({id:z.uuid(
 const profileId=z.object({id:z.uuid()}).strict();
 const profileMutation=profileId.extend({expectedRevision:remoteRevisionSchema}).strict();
 const basisShape={category:z.enum(['current_status','interest','preference','fact','boundary','plan']),content:text(1000,true),sourceNote:text(500)};
-const entryShape={kind:z.enum(['fact','event','preference','openTopic']),text:text(600,true)};
+const entryShape={event:eventSchema.nullable().optional(),kind:z.enum(['fact','event','preference','openTopic']),text:text(600,true)};
 const hasChanges=(keys:readonly string[])=>(value:Record<string,unknown>)=>keys.some(key=>key in value);
 export const remoteProfileCommandSchemas={
   'conversation.profile.get':profileId,
@@ -66,10 +67,10 @@ export const remoteProfileCommandSchemas={
   'conversation.basis.delete':profileMutation.extend({factId:z.uuid()}).strict(),
   'conversation.memory.patch':profileMutation.extend({summary:text(1600).optional(),openTopics:z.array(text(200,true)).max(10).optional()}).strict().refine(hasChanges(['summary','openTopics'])),
   'conversation.memory.entry.add':profileMutation.extend(entryShape).strict(),
-  'conversation.memory.entry.patch':profileMutation.extend({entryId:z.uuid(),kind:entryShape.kind.optional(),text:entryShape.text.optional(),status:z.enum(['pending','approved','rejected']).optional()}).strict().refine(hasChanges(['kind','text','status'])),
+  'conversation.memory.entry.patch':profileMutation.extend({entryId:z.uuid(),event:entryShape.event,kind:entryShape.kind.optional(),text:entryShape.text.optional(),status:z.enum(['pending','approved','rejected']).optional()}).strict().refine(hasChanges(['kind','text','status','event'])),
   'conversation.memory.entry.delete':profileMutation.extend({entryId:z.uuid()}).strict(),
 };
-export type RemoteProfilePayload={id:string;expectedRevision?:string;factId?:string;entryId?:string;category?:ContactBasisFact['category'];content?:string;sourceNote?:string;kind?:ContactMemoryEntry['kind'];text?:string;status?:ContactMemoryEntry['status'];summary?:string;openTopics?:string[]};
+export type RemoteProfilePayload={id:string;expectedRevision?:string;factId?:string;entryId?:string;category?:ContactBasisFact['category'];content?:string;sourceNote?:string;event?:ContactMemoryEntry['event']|null;kind?:ContactMemoryEntry['kind'];text?:string;status?:ContactMemoryEntry['status'];summary?:string;openTopics?:string[]};
 export function parseRemoteProfilePayload(kind:RemoteCommandType,payload:unknown):RemoteProfilePayload {
   const schema=remoteProfileCommandSchemas[kind as keyof typeof remoteProfileCommandSchemas];
   if(!schema)throw new Error('不支持此远程操作。');
@@ -123,14 +124,14 @@ export function remoteConversationV2(c:Conversation,messages:readonly Message[]=
     .sort((a,b)=>b.sequence-a.sequence)[0]?.insights:undefined;
   return {...remoteConversation(c),name:sanitizeRemoteText(c.name,secrets),note:sanitizeRemoteText(c.note,secrets),revision:remoteConversationRevision(c),
     processing:{replyModels:p.replyModels===undefined?null:p.replyModels.map(value=>projectChoice(value,secrets)),autoRecognizeImages:!!p.autoRecognizeImages,autoTranscribeVoice:!!p.autoTranscribeVoice,
-      intentEnabled:!!p.intentEnabled,affinityEnabled:!!p.affinityEnabled,memoryEnabled:!!p.memoryEnabled,autoAnalyzeMessages:!!p.autoAnalyzeMessages,autoCompressMemory:!!p.autoCompressMemory,
+      intentEnabled:!!p.intentEnabled,emotionEnabled:!!p.emotionEnabled,replyReviewEnabled:!!p.replyReviewEnabled,affinityEnabled:!!p.affinityEnabled,memoryEnabled:!!p.memoryEnabled,autoAnalyzeMessages:!!p.autoAnalyzeMessages,autoCompressMemory:!!p.autoCompressMemory,
       analysisModel:p.analysisModel?projectChoice(p.analysisModel,secrets):null,memoryModel:p.memoryModel?projectChoice(p.memoryModel,secrets):null},
     affinity:latest?.affinity?.score??null,affinityUpdatedAt:latest?.analyzedAt??null,basisCount:c.basisFacts?.length??0,memoryCount:c.memory?.entries.filter(e=>e.status!=='rejected').length??0};
 }
 export function remoteProfile(c:Conversation,secrets:readonly string[]=[]){
   const memory=c.memory;
   const profile={id:c.id,revision:remoteProfileRevision(c),basisFacts:(c.basisFacts??[]).map(f=>({id:f.id,category:f.category,content:sanitizeRemoteText(f.content,secrets),sourceNote:sanitizeRemoteText(f.sourceNote,secrets),origin:f.origin??'manual',createdAt:f.createdAt,updatedAt:f.updatedAt})),
-    memory:memory?{summary:sanitizeRemoteText(memory.summary,secrets),openTopics:memory.openTopics.map(value=>sanitizeRemoteText(value,secrets)),entries:memory.entries.filter(e=>e.status!=='rejected').map(e=>({id:e.id,kind:e.kind,text:sanitizeRemoteText(e.text,secrets),status:e.status,origin:e.origin??'model',createdAt:e.createdAt,...(e.updatedAt?{updatedAt:e.updatedAt}:{})})),
+    memory:memory?{summary:sanitizeRemoteText(memory.summary,secrets),openTopics:memory.openTopics.map(value=>sanitizeRemoteText(value,secrets)),entries:memory.entries.filter(e=>e.status!=='rejected').map(e=>({id:e.id,kind:e.kind,text:sanitizeRemoteText(e.text,secrets),status:e.status,origin:e.origin??'model',createdAt:e.createdAt,...(e.updatedAt?{updatedAt:e.updatedAt}:{}),...(e.event?{event:e.event}:{})})),
       provider:memory.provider,modelName:sanitizeRemoteText(memory.modelName,secrets),updatedAt:memory.updatedAt,...(memory.summaryOrigin?{summaryOrigin:memory.summaryOrigin}:{}),...(memory.openTopicsOrigin?{openTopicsOrigin:memory.openTopicsOrigin}:{})}:null};
   if(profile.basisFacts.length>100||(profile.memory?.entries.length??0)>132||Buffer.byteLength(JSON.stringify(profile))>MAX_REMOTE_PROFILE_BYTES)throw new Error('此人的档案与记忆过大，请先在 Mac 整理后再远程读取。');
   return profile;

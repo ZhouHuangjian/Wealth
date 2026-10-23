@@ -50,6 +50,8 @@ PROCESSING_FIELDS = {
     "autoRecognizeImages",
     "autoTranscribeVoice",
     "intentEnabled",
+    "emotionEnabled",
+    "replyReviewEnabled",
     "affinityEnabled",
     "memoryEnabled",
     "autoAnalyzeMessages",
@@ -90,7 +92,56 @@ CURRENT_COMMAND_TYPES = {
     "conversation.drafts.generate",
 }
 ALL_COMMAND_TYPES = COMMAND_TYPES | V2_COMMAND_TYPES | CURRENT_COMMAND_TYPES
-INTENT_LABELS = {"关心", "质问", "询问", "分享", "邀请", "玩笑", "表达不满", "其他"}
+INTENT_LABELS = {
+    "关心",
+    "质问",
+    "询问",
+    "分享",
+    "邀请",
+    "玩笑",
+    "表达不满",
+    "其他",
+    "回答问题",
+    "确认理解",
+    "解释说明",
+    "表达认同",
+    "倾诉烦恼",
+    "寻求安慰",
+    "请求帮助",
+    "提供建议",
+    "感谢",
+    "道歉",
+    "表达边界",
+    "结束聊天",
+    "难以判断",
+}
+EMOTION_LABELS = {
+    "开心",
+    "疑惑",
+    "生气",
+    "难过",
+    "害羞",
+    "关切",
+    "调侃",
+    "平静",
+    "不耐烦",
+    "惊讶",
+    "失落",
+    "难以判断",
+}
+EVENT_KINDS = {
+    "invitation",
+    "confirmation",
+    "cancellation",
+    "care",
+    "preference",
+    "disclosure",
+    "boundary",
+    "correction",
+    "commitment",
+    "question",
+    "other",
+}
 MESSAGE_KINDS = {
     "text",
     "image",
@@ -174,7 +225,7 @@ def safe_text(value, maximum, *, blank=True):
     if re.search(
         r"(?:\bsk-[A-Za-z0-9._-]{10,}|\bBearer\s+\S+|data:(?:image|audio)/)",
         value,
-        re.I,
+        re.IGNORECASE,
     ):
         invalid()
     return value
@@ -198,12 +249,11 @@ def choice(body, *, contact=False):
     if not isinstance(body["provider"], str) or body["provider"] not in providers:
         invalid()
     safe_text(body["modelName"], 200)
-    if "modelPreset" in body:
-        if not isinstance(body["modelPreset"], str) or body["modelPreset"] not in {
-            "custom",
-            "qwen",
-        }:
-            invalid()
+    if "modelPreset" in body and (
+        not isinstance(body["modelPreset"], str)
+        or body["modelPreset"] not in {"custom", "qwen"}
+    ):
+        invalid()
     if "label" in body:
         safe_text(body["label"], 80)
 
@@ -510,7 +560,7 @@ def memory_values(body):
 def memory_entry_values(body, *, patch=False):
     fields(
         body,
-        {"kind", "text"} | ({"status"} if patch else set()),
+        {"kind", "text", "event"} | ({"status"} if patch else set()),
         () if patch else {"kind", "text"},
     )
     if not body:
@@ -525,6 +575,28 @@ def memory_entry_values(body, *, patch=False):
         not isinstance(body["status"], str)
         or body["status"] not in {"pending", "approved", "rejected"}
     ):
+        invalid()
+
+    if "event" in body and body["event"] is not None:
+        validate_memory_event(body["event"])
+        if "kind" in body and body["kind"] != "event":
+            invalid()
+
+
+def validate_memory_event(body):
+    exact_fields(body, {"kind", "state", "resolvedByMessageIds"})
+    if (
+        not isinstance(body["kind"], str)
+        or body["kind"] not in EVENT_KINDS
+        or body["state"] not in ("active", "resolved", "uncertain")
+    ):
+        invalid()
+    ids = body["resolvedByMessageIds"]
+    if not isinstance(ids, list) or len(ids) > 6:
+        invalid()
+    for message_id in ids:
+        safe_text(message_id, 256, blank=False)
+    if len(set(ids)) != len(ids):
         invalid()
 
 
@@ -622,7 +694,7 @@ def validate_profile(body):
             },
         )
         identifier(fact["id"])
-        basis_values({key: fact[key] for key in {"category", "content", "sourceNote"}})
+        basis_values({key: fact[key] for key in ("category", "content", "sourceNote")})
         if fact["origin"] not in ("manual", "model"):
             invalid()
         timestamp(fact["createdAt"])
@@ -665,12 +737,26 @@ def validate_profile(body):
     for entry in entries:
         fields(
             entry,
-            {"id", "kind", "text", "status", "origin", "createdAt", "updatedAt"},
+            {
+                "id",
+                "kind",
+                "text",
+                "status",
+                "origin",
+                "createdAt",
+                "updatedAt",
+                "event",
+            },
             {"id", "kind", "text", "status", "origin", "createdAt"},
         )
         identifier(entry["id"])
         memory_entry_values(
-            {key: entry[key] for key in {"kind", "text", "status"}}, patch=True
+            {
+                key: entry[key]
+                for key in ("kind", "text", "status", "event")
+                if key in entry
+            },
+            patch=True,
         )
         if entry["status"] == "rejected":
             invalid()
@@ -701,8 +787,62 @@ def validate_current_payload(kind, body):
         safe_text(body["intent"], 300)
 
 
+def validate_distribution(items, labels):
+    if not isinstance(items, list) or len(items) > 6:
+        invalid()
+    for item in items:
+        exact_fields(item, {"label", "percentage"})
+        if not isinstance(item["label"], str) or item["label"] not in labels:
+            invalid()
+        integer(item["percentage"], 1, 100)
+    if (
+        len({item["label"] for item in items}) != len(items)
+        or items
+        and sum(item["percentage"] for item in items) != 100
+    ):
+        invalid()
+
+
+def validate_dimensions(items, keys):
+    if not isinstance(items, list) or len(items) != len(keys):
+        invalid()
+    for item in items:
+        exact_fields(item, {"key", "score", "evidenceMessageIds"})
+        if not isinstance(item["key"], str) or item["key"] not in keys:
+            invalid()
+        if item["score"] is not None:
+            integer(item["score"], 0, 100)
+        ids = item["evidenceMessageIds"]
+        if (
+            not isinstance(ids, list)
+            or len(ids) > 6
+            or item["score"] is not None
+            and not ids
+        ):
+            invalid()
+        for message_id in ids:
+            safe_text(message_id, 300, blank=False)
+        if len(set(ids)) != len(ids):
+            invalid()
+    if {item["key"] for item in items} != keys:
+        invalid()
+
+
 def validate_current_analysis(body):
-    exact_fields(body, {"intents", "affinity", "provider", "modelName", "analyzedAt"})
+    fields(
+        body,
+        {
+            "intents",
+            "affinity",
+            "provider",
+            "modelName",
+            "analyzedAt",
+            "emotions",
+            "replyReview",
+            "rubricVersion",
+        },
+        {"intents", "affinity", "provider", "modelName", "analyzedAt"},
+    )
     intents = body["intents"]
     if not isinstance(intents, list) or len(intents) > 6:
         invalid()
@@ -716,7 +856,11 @@ def validate_current_analysis(body):
     ):
         invalid()
     if body["affinity"] is not None:
-        exact_fields(body["affinity"], {"score", "confidence"})
+        fields(
+            body["affinity"],
+            {"score", "confidence", "dimensions", "coverage"},
+            {"score", "confidence"},
+        )
         if body["affinity"]["score"] is not None:
             integer(body["affinity"]["score"], 0, 100)
         integer(body["affinity"]["confidence"], 0, 100)
@@ -728,6 +872,28 @@ def validate_current_analysis(body):
         invalid()
     safe_text(body["modelName"], 200)
     timestamp(body["analyzedAt"])
+    if "emotions" in body:
+        validate_distribution(body["emotions"], EMOTION_LABELS)
+    affinity = body["affinity"]
+    if affinity is not None:
+        if "dimensions" in affinity:
+            validate_dimensions(
+                affinity["dimensions"],
+                {"initiative", "engagement", "care", "openness", "closeness", "action"},
+            )
+        if "coverage" in affinity:
+            integer(affinity["coverage"], 0, 100)
+    if body.get("replyReview") is not None:
+        review = body["replyReview"]
+        exact_fields(review, {"score", "summary", "criteria"})
+        if review["score"] is not None:
+            integer(review["score"], 0, 100)
+        safe_text(review["summary"], 600, blank=False)
+        validate_dimensions(
+            review["criteria"], {"style", "relevance", "clarity", "factuality"}
+        )
+    if "rubricVersion" in body:
+        safe_text(body["rubricVersion"], 80, blank=False)
 
 
 def validate_current_message(body):

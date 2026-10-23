@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   changedRemoteSettings,
+  changedRemoteConversation,
   commandPending,
   remoteConnectionState,
   remoteResponseMatches,
@@ -262,4 +263,39 @@ test("model candidates follow both provider and supported input instead of mixin
     true,
   );
   assert.deepEqual(remoteModelOptions("compatible", "analysis", models), []);
+});
+
+test("emotion and self-review switches produce a scoped patch without changing other contact options", () => {
+  const original = {
+    id: "contact",
+    name: "合成联系人",
+    revision: "a".repeat(64),
+    processing: {
+      intentEnabled: true,
+      affinityEnabled: true,
+      emotionEnabled: false,
+      replyReviewEnabled: false,
+      memoryEnabled: true,
+    },
+  };
+  const patch = changedRemoteConversation(original, {
+    ...original,
+    processing: {
+      ...original.processing,
+      emotionEnabled: true,
+      replyReviewEnabled: true,
+    },
+  });
+  assert.deepEqual(patch.processing, {
+    emotionEnabled: true,
+    replyReviewEnabled: true,
+  });
+  assert.equal(patch.id, original.id);
+  assert.deepEqual(
+    changedRemoteConversation(original, {
+      ...original,
+      processing: { ...original.processing },
+    }),
+    { id: original.id },
+  );
 });

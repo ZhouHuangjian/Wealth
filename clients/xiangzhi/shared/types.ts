@@ -57,6 +57,7 @@ export interface ContactMemoryEntry {
   sourceMessageHashes?: Record<string,string>;
   /** Manual notes need no message provenance; model notes do. */
   origin?: 'manual' | 'model'; updatedAt?: string;
+  event?: {kind: string; state: 'active' | 'resolved' | 'uncertain'; resolvedByMessageIds: string[]};
 }
 export interface ContactMemory {
   summary: string; entries: ContactMemoryEntry[]; openTopics: string[];
@@ -70,7 +71,11 @@ export interface ContactMemory {
 export interface ContactInsights {
   conversationId: string; messageId: string;
   intents: {label: string; percentage: number}[];
-  affinity: {score: number | null; confidence: number; evidence: string[]} | null;
+  emotions?: {label: string; percentage: number}[];
+  affinity: {score: number | null; confidence: number; evidence: string[]; coverage?: number;
+    dimensions?: {key: string; score: number | null; evidenceMessageIds: string[]}[]} | null;
+  replyReview?: {score: number | null; summary: string; criteria: {key: string; score: number | null; evidenceMessageIds: string[]}[]} | null;
+  rubricVersion?: string;
   uncertainty: string; provider: 'qwen' | 'compatible' | 'codex'; modelName: string; analyzedAt: string;
   inputDigest?: string;
   /** Derived UI flag; saved evidence is retained when context has changed. */
@@ -82,7 +87,7 @@ export interface ContactProcessing {
   replyModels?: ReplyModelChoice[];
   autoRecognizeImages?: boolean;
   autoTranscribeVoice?: boolean;
-  intentEnabled?: boolean; affinityEnabled?: boolean; memoryEnabled?: boolean;
+  intentEnabled?: boolean; emotionEnabled?: boolean; affinityEnabled?: boolean; replyReviewEnabled?: boolean; memoryEnabled?: boolean;
   autoAnalyzeMessages?: boolean; autoCompressMemory?: boolean;
   analysisModel?: ReplyModelChoice; memoryModel?: ReplyModelChoice;
 }

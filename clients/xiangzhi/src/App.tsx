@@ -1,3 +1,6 @@
+import {InsightBreakdown} from './InsightBreakdown';
+import {analysisEnabled,EVENT_KINDS,EVENT_STATES} from '../shared/analysis-rubric';
+import {VirtualMessageList} from './VirtualMessageList';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity as ActivityIcon, ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check,
@@ -103,9 +106,6 @@ function AppContent() {
   const sendRequests = useRef(new Map<string, string>());
   const feedbackRequests = useRef(new Map<string, string>());
   const [now, setNow] = useState(Date.now());
-  const messageList = useRef<HTMLDivElement>(null);
-  const messageListNearBottom = useRef(true);
-  const scrolledConversation = useRef<string | null>(null);
   const mounted = useRef(true);
   const refresh = useCallback(async () => {
     try {
@@ -143,17 +143,6 @@ function AppContent() {
   const conversation = state?.conversations.find(c => c.id === selectedId);
   const messages = state?.messages.filter(m => m.conversationId === selectedId).sort((a, b) => a.sequence - b.sequence) || [];
   const lastMessageId = messages.at(-1)?.id;
-  useEffect(() => {
-    if (page !== 'conversations') { scrolledConversation.current = null; return; }
-    const list = messageList.current;
-    if (!list || !list.clientHeight) return;
-    const changedConversation = scrolledConversation.current !== selectedId;
-    if (changedConversation || messageListNearBottom.current) {
-      list.scrollTo({ top: list.scrollHeight, behavior: changedConversation ? 'instant' : 'smooth' });
-      if (changedConversation) messageListNearBottom.current = true;
-    }
-    scrolledConversation.current = selectedId;
-  }, [lastMessageId, selectedId, page, mobileConversation, adoptedDrafts[selectedId], role]);
   const drafts = state?.drafts.filter(d => d.conversationId === selectedId && d.basedOnMessageId === lastMessageId) ?? [];
   const currentJob = state?.jobs.filter(j => j.conversationId === selectedId && ['queued', 'generating'].includes(j.status)).at(-1);
   const uploadsForConversation = state?.draftUploads?.filter(upload => upload.conversationId === selectedId && upload.destinationId === state.runtime.draftSyncConnection?.bindingId) ?? [];
@@ -274,7 +263,7 @@ function AppContent() {
             <div className="contact-list">{state.conversations.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => {
               const last = state.messages.filter(m => m.conversationId === c.id).at(-1);
               return <button key={c.id} className={`contact ${selectedId === c.id ? 'selected' : ''}`} onClick={() => { setSelectedId(c.id); setMobileConversation(true); setRole('self'); setIntent(''); }}>
-                <span className="avatar" style={{ background: c.color || '#e9e6dc' }}>{c.avatar || c.name.slice(0, 1)}</span><span className="contact-copy"><span className="contact-title"><span className="contact-name-with-affinity"><strong>{c.name}</strong><ContactAffinity conversation={c} messages={state.messages} /></span><small>{timeLabel(last?.sentAt || c.updatedAt)}</small></span>
+                <span className="avatar" style={{ background: c.color || '#e9e6dc' }}>{c.avatar || c.name.slice(0, 1)}</span><span className="contact-copy"><span className="contact-title"><span className="contact-name-with-affinity"><strong>{c.name}</strong><ContactAffinity conversation={c} messages={state.messages} interactive={false} /></span><small>{timeLabel(last?.sentAt || c.updatedAt)}</small></span>
                   <span className="contact-preview">{last?.text || (c.channel === 'wechat' ? '等待读取微信消息' : '从一句问候开始')}</span><span className="contact-meta"><span className={`tiny-dot ${c.autoReplyEnabled && globalOn ? 'on' : ''}`} />{c.channel === 'wechat' ? `微信 · ${c.wechat?.enabled ? '读取已开启' : '读取已暂停'}` : c.autoReplyEnabled && globalOn ? `${autoLabel}中` : c.channel === 'simulator' ? '本机演练' : '手动回复'}</span></span>
               </button>;
             })}{state.conversations.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).length === 0 && <div className="empty-conversation-list"><Empty title={search ? '没有匹配的对话' : '还没有对话'}>{search ? '换个关键词，或添加新的联系人。' : '添加微信联系人，也可以先创建本机演练。'}</Empty><Button kind="secondary" onClick={() => setShowNew(true)}><Plus size={14} />添加联系人</Button></div>}</div>
@@ -288,18 +277,10 @@ function AppContent() {
                 <button className="icon-button" onClick={() => setShowDetails(true)} aria-label="对话详情"><MoreHorizontal size={21} /></button>
               </div>
               <ConversationProcessing key={conversation.id} conversation={conversation} state={state} busy={busy} run={run} onRead={() => readWechatOnce(conversation)} onOpenContext={() => setShowContactContext(true)} onOpenModelCenter={() => setPage('settings')} />
-              <div className="messages" ref={messageList} onScroll={event => {
-                const list = event.currentTarget;
-                messageListNearBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 96;
-              }} aria-live="polite" aria-relevant="additions text">
-                <div className="conversation-start"><span />{messages.length ? dateLabel(messages[0].sentAt) : '从这里开始'}<span /></div>
-                {messages.map((message, index) => <div key={message.id} className={`message-row ${message.role}`}>
+              <VirtualMessageList key={conversation.id} items={messages} header={<div className="conversation-start"><span />{messages.length ? dateLabel(messages[0].sentAt) : '从这里开始'}<span /></div>} renderItem={(message,index) => <div key={message.id} className={`message-row ${message.role}`}>
                   {message.role === 'peer' && <span className="avatar message-avatar" style={{ background: conversation.color || '#e8ecdf' }}>{conversation.avatar || conversation.name.slice(0, 1)}</span>}
                   <div className="message-content"><div className={`bubble ${message.mediaStatus === 'pending' ? 'media-pending' : ''}`}>{message.mediaStatus && <span className={`media-label ${message.mediaStatus}`}><FileText size={12} />{messageKindLabels[message.kind ?? 'unknown']} · {message.mediaStatus === 'pending' ? '未解析' : message.mediaStatus === 'recognized' ? '模型已识别' : '已人工查看'}</span>}{messageDisplayText(message)}<EmojiInterpretation message={message} />{(message.kind === 'image' || message.kind === 'emoji') && <ImageMessage vision={state.settings.vision} message={message} busy={busy} run={run} visionEnabled={!!state.settings.vision && state.settings.vision.provider !== 'disabled'} />}{message.kind === 'voice' && <VoiceMessage message={message} busy={busy} run={run} audioEnabled={!!state.settings.audio && state.settings.audio.provider !== 'disabled'} />}</div>{message.mediaStatus === 'pending' && <MediaReview message={message} busy={busy} run={run} />}<div className="message-meta">{timeLabel(message.sentAt)}{message.source === 'wechat' && <span>微信读取</span>}{message.source === 'auto' && <span><Sparkles size={10} />自动回复</span>}{message.aiAssisted && message.source !== 'auto' && <span>辅助表达</span>}{message.role === 'self' && index === messages.length - 1 && <CheckCheck size={12} />}</div><MessageInsights message={message} conversation={conversation} state={state} busy={busy} run={run} /></div>
-                </div>)}
-                {!messages.length && <div className="empty-chat-start"><Empty title={isWechat ? '等待读取微信消息' : '给这段对话一个开始'}>{isWechat ? '点击下方读取上下文，或在上方“信息处理”开启持续读取。' : isDemo ? '可以发送一句话，或用下方「模拟来信」体验自动回复。' : '消息通道收到来信后，会显示在这里。'}</Empty>{isWechat && <Button kind="secondary" disabled={!!busy || !state.runtime.wechatAvailable || conversation.wechat?.status === 'reading'} onClick={() => readWechatOnce(conversation)}>{busy === `wechat-poll-${conversation.id}` || conversation.wechat?.status === 'reading' ? <LoaderCircle size={14} className="spin" /> : <ArrowDownToLine size={14} />}读取微信上下文</Button>}</div>}
-                {currentJob && <div className="job-indicator"><LoaderCircle size={14} className="spin" /><span>{currentJob.status === 'generating' ? '正在组织回复…' : `${Math.max(0, Math.ceil((new Date(currentJob.dueAt).getTime() - now) / 1000))} 秒后${(currentJob.mode ?? autoMode) === 'draft' ? '生成草稿' : '自动发送'}`}</span><button onClick={pause}>暂停</button></div>}
-              </div>
+                </div>} empty={<div className="empty-chat-start"><Empty title={isWechat ? '等待读取微信消息' : '给这段对话一个开始'}>{isWechat ? '点击下方读取上下文，或在上方“信息处理”开启持续读取。' : isDemo ? '可以发送一句话，或用下方「模拟来信」体验自动回复。' : '消息通道收到来信后，会显示在这里。'}</Empty>{isWechat && <Button kind="secondary" disabled={!!busy || !state.runtime.wechatAvailable || conversation.wechat?.status === 'reading'} onClick={() => readWechatOnce(conversation)}>{busy === `wechat-poll-${conversation.id}` || conversation.wechat?.status === 'reading' ? <LoaderCircle size={14} className="spin" /> : <ArrowDownToLine size={14} />}读取微信上下文</Button>}</div>} footer={currentJob && <div className="job-indicator"><LoaderCircle size={14} className="spin" /><span>{currentJob.status === 'generating' ? '正在组织回复…' : `${Math.max(0, Math.ceil((new Date(currentJob.dueAt).getTime() - now) / 1000))} 秒后${(currentJob.mode ?? autoMode) === 'draft' ? '生成草稿' : '自动发送'}`}</span><button onClick={pause}>暂停</button></div>} />
               <div className="composer"><div className="composer-toolbar"><div className="segmented"><button className={role === 'self' ? 'active' : ''} onClick={() => setRole('self')}>我的回复</button>{isDemo && <button className={role === 'peer' ? 'active' : ''} onClick={() => setRole('peer')}>模拟来信</button>}</div><Button kind="ghost" disabled={!!busy} onClick={() => setShowImageUpload(true)}><ImageIcon size={13} />补充图片</Button></div>
                 <textarea value={text} placeholder={role === 'peer' ? '输入一条对方的消息，体验自动草稿或回复…' : '写下你的回复，或先看看右侧的表达建议…'} aria-label={role === 'peer' ? '模拟对方消息' : '回复内容'} onChange={event => setText(event.target.value)} onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void sendText(text); } }} />
                 {role === 'self' && staleDraft && <div className="stale-draft" role="status">对话或档案已变化，请重新生成建议后再保存反馈或发送。<button onClick={() => setText('')}>清空并重新编辑</button></div>}
@@ -365,40 +346,36 @@ function contactInsightReady(state: PublicState, conversation: Conversation | un
       : config.allowRemoteModel && url.protocol === 'https:';
   } catch { return false; }
 }
-function ContactAffinity({ conversation, messages }: { conversation: Conversation; messages: Message[] }) {
+function ContactAffinity({ conversation, messages, interactive=true }: { conversation: Conversation; messages: Message[];interactive?:boolean }) {
   if (!conversation.processing?.affinityEnabled) return null;
   const latest = messages.filter(message => message.conversationId === conversation.id && message.role === 'peer'
     && message.insights?.conversationId === conversation.id && message.insights.messageId === message.id
     && message.insights.affinity).sort((a, b) => a.sequence - b.sequence).at(-1)?.insights;
   const score = latest?.affinity?.score;
   if (score === undefined || score === null) return null;
-  return <span className="contact-affinity-badge" aria-label={`${conversation.name}的好感度估计 ${score}%`} title="根据互动估计"><HeartHandshake size={10} /><span>{score}%</span></span>;
+  if(!interactive)return <span className="contact-affinity-badge" aria-label={`${conversation.name}的好感度估计 ${score}%`}><HeartHandshake size={10}/><span>{score}%</span></span>;
+  return <details className="contact-affinity-details"><summary className="contact-affinity-badge" aria-label={`${conversation.name}的好感度估计 ${score}%`} title="点击查看互动分项与原话"><HeartHandshake size={10} /><span>{score}%</span></summary><div className="contact-affinity-popover"><InsightBreakdown insights={latest!} processing={{affinityEnabled:true}} messages={messages} /></div></details>;
 }
-export function NumericInsights({ insights, conversation }: { insights: ContactInsights; conversation: Conversation }) {
-  if (!conversation.processing?.intentEnabled || !insights.intents.length) return null;
-  const intents = insights.intents.slice().sort((a, b) => b.percentage - a.percentage);
-  return <div className="numeric-insights" aria-label="这条消息的意图分析">
-    {insights.stale && <p className="insight-stale-note" role="status"><strong>已保存的旧分析 · 待更新</strong><span>聊天历史或分析配置已变化。更新分析后，可纳入完整历史和当前配置；下方保留原结果供参考。</span></p>}
-    {conversation.processing?.intentEnabled && intents.length > 0 && <><span className="intent-percentages"><span>可能的意图（模型估计）</span><span className="intent-label-chips">{intents.map((item, index) => <span key={`${item.label}-${index}`}>{item.label} <strong>{item.percentage}%</strong></span>)}</span></span><details className="intent-weight-help"><summary><CircleHelp size={11} />比例说明</summary><p>这些比例是模型对不同理解分配的相对权重。比例越高，表示模型越倾向这种理解；各项合计 100%，不表示真实概率或情绪强度。</p>{intents.some(item => item.label === '其他') && <p>其他：未归入现有分类的可能含义。</p>}</details></>}
-  </div>;
+export function NumericInsights({insights,conversation}:{insights:ContactInsights;conversation:Conversation}) {
+  return <InsightBreakdown insights={insights} processing={conversation.processing} />;
 }
 
 function MessageInsights({ message, conversation, state, busy, run }: { message: Message; conversation: Conversation; state: PublicState; busy: string; run: Run }) {
-  const enabled = conversation.processing?.intentEnabled || conversation.processing?.affinityEnabled;
-  const analyzable = message.role === 'peer' && ((!message.kind || message.kind === 'text') || (message.kind === 'voice' && !!message.audioRecognition) || (['image', 'emoji'].includes(message.kind ?? '') && !!message.imageRecognition));
+  const enabled = analysisEnabled(conversation.processing);
+  const analyzable = (message.role === 'peer' && !!(conversation.processing?.intentEnabled||conversation.processing?.emotionEnabled||conversation.processing?.affinityEnabled) || message.role==='self'&&conversation.processing?.replyReviewEnabled) && ((!message.kind || message.kind === 'text') || (message.kind === 'voice' && !!message.audioRecognition) || (['image', 'emoji'].includes(message.kind ?? '') && !!message.imageRecognition));
   if (!enabled || !analyzable) return null;
   const ready = contactInsightReady(state, conversation, 'analysis');
   const key = `analyze-${message.id}`;
   return <div className="message-insights">
-    {message.insights && <NumericInsights insights={message.insights} conversation={conversation} />}
+    {message.insights && <InsightBreakdown insights={message.insights} processing={conversation.processing} messages={state.messages} />}
     <button type="button" disabled={!!busy || !ready} onClick={() => void run(key, () => api<{insights: ContactInsights; cached: boolean}>(`/conversations/${conversation.id}/analyze`, 'POST', { messageId: message.id }), result => result.cached ? '已使用本地分析结果，未调用模型' : '分析结果已保存在本机')}>
-      {busy === key ? <LoaderCircle size={11} className="spin" /> : <Sparkles size={11} />}{busy === key ? '正在分析…' : message.insights ? '查看/更新分析' : '分析这句话'}
+      {busy === key ? <LoaderCircle size={11} className="spin" /> : <Sparkles size={11} />}{busy === key ? '正在分析…' : message.insights ? '查看/更新分析' : message.role==='self'?'复盘这条回复':'分析这句话'}
     </button>
   </div>;
 }
 
 function ContactContextCard({ conversation, messages, state, busy, run, onOpen }: { conversation: Conversation; messages: Message[]; state: PublicState; busy: string; run: Run; onOpen: () => void }) {
-  const enabled = conversation.processing?.intentEnabled || conversation.processing?.affinityEnabled;
+  const enabled = analysisEnabled(conversation.processing);
   const latest = messages.filter(message => message.role === 'peer' && ((!message.kind || message.kind === 'text') || !!message.audioRecognition || !!message.imageRecognition)).at(-1);
   const latestInsights = messages.filter(message => !!message.insights).at(-1)?.insights;
   const ready = contactInsightReady(state, conversation, 'analysis');
@@ -441,11 +418,11 @@ function ContactInsightControls({ conversation, state, busy, run }: { conversati
   const processing = conversation.processing || {};
   const analysisReady = contactInsightReady(state, conversation, 'analysis');
   const memoryReady = contactInsightReady(state, conversation, 'memory');
-  const toggle = (field: 'intentEnabled' | 'affinityEnabled' | 'memoryEnabled' | 'autoAnalyzeMessages' | 'autoCompressMemory') => void run(`contact-${field}-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { [field]: !processing[field] } }), `${conversation.name}的处理设置已保存`);
+  const toggle = (field: 'intentEnabled' | 'emotionEnabled' | 'replyReviewEnabled' | 'affinityEnabled' | 'memoryEnabled' | 'autoAnalyzeMessages' | 'autoCompressMemory') => void run(`contact-${field}-${conversation.id}`, () => api(`/conversations/${conversation.id}`, 'PATCH', { processing: { [field]: !processing[field] } }), `${conversation.name}的处理设置已保存`);
   return <div className="contact-insight-controls">
     <section className="contact-processing-group"><h3><Sparkles size={13} />意图与好感度</h3>
-    <div className="processing-controls"><div><span>意图分析<small>在这条消息下展示名称与百分比</small></span><Toggle small checked={!!processing.intentEnabled} disabled={!!busy || (!analysisReady && !processing.intentEnabled)} label={`${conversation.name}的意图分析`} onChange={() => toggle('intentEnabled')} /></div><div><span>好感度估计<small>基于当前互动，可单独关闭</small></span><Toggle small checked={!!processing.affinityEnabled} disabled={!!busy || (!analysisReady && !processing.affinityEnabled)} label={`${conversation.name}的好感度估计`} onChange={() => toggle('affinityEnabled')} /></div></div>
-    {(processing.intentEnabled || processing.affinityEnabled) && <label className="checkbox-label processing-checkbox"><input type="checkbox" disabled={!!busy} checked={!!processing.autoAnalyzeMessages} onChange={() => toggle('autoAnalyzeMessages')} /><span><strong>新来信自动分析</strong><small>只处理此人新收到的文字，历史消息可点击分析。</small></span></label>}
+    <div className="processing-controls"><div><span>意图分析<small>在这条消息下展示名称与百分比</small></span><Toggle small checked={!!processing.intentEnabled} disabled={!!busy || (!analysisReady && !processing.intentEnabled)} label={`${conversation.name}的意图分析`} onChange={() => toggle('intentEnabled')} /></div><div><span>情绪分析<small>与意图区分，共用分析模型</small></span><Toggle small checked={!!processing.emotionEnabled} disabled={!!busy || (!analysisReady && !processing.emotionEnabled)} label={`${conversation.name}的情绪分析`} onChange={() => toggle('emotionEnabled')} /></div><div><span>本人回复复盘<small>按当时上下文和我的习惯评价</small></span><Toggle small checked={!!processing.replyReviewEnabled} disabled={!!busy || (!analysisReady && !processing.replyReviewEnabled)} label={`${conversation.name}的回复复盘`} onChange={() => toggle('replyReviewEnabled')} /></div><div><span>好感度估计<small>基于当前互动，可单独关闭</small></span><Toggle small checked={!!processing.affinityEnabled} disabled={!!busy || (!analysisReady && !processing.affinityEnabled)} label={`${conversation.name}的好感度估计`} onChange={() => toggle('affinityEnabled')} /></div></div>
+    {(processing.intentEnabled || processing.emotionEnabled || processing.affinityEnabled) && <label className="checkbox-label processing-checkbox"><input type="checkbox" disabled={!!busy} checked={!!processing.autoAnalyzeMessages} onChange={() => toggle('autoAnalyzeMessages')} /><span><strong>新来信自动分析</strong><small>只处理此人新收到的文字，历史消息可点击分析。</small></span></label>}
     {!analysisReady && <p className="processing-model-hint">先在“模型设置”中查看分析分工，或前往模型中心配置服务。</p>}
     </section>
     <section className="contact-processing-group"><h3><BookOpen size={13} />档案与记忆</h3><div className="processing-controls"><div><span>使用对话记忆<small>已确认的关键记忆用于后续草稿</small></span><Toggle small checked={!!processing.memoryEnabled} disabled={!!busy} label={`${conversation.name}的对话记忆`} onChange={() => toggle('memoryEnabled')} /></div></div>
@@ -479,7 +456,7 @@ function ContactContextDialog({ conversation, state, busy, run, onClose }: { con
   const topicsValid = topics.length <= 10 && topics.every(item => item.length <= 200);
   const memoryEntry = (entry: ContactMemoryEntry) => <article key={entry.id} className={entry.status}>
     <div className="contact-fact-top"><span>{memoryKindLabels[entry.kind]}</span><span>{entry.origin === 'manual' ? '个人补充' : entry.status === 'approved' ? '已确认' : entry.status === 'rejected' ? '已忽略' : '待确认'}</span></div>
-    <p>{entry.text}</p>
+    <p>{entry.text}</p>{entry.kind==='event'&&<div className="memory-event-status"><span>{EVENT_KINDS[entry.event?.kind??'other']}</span><label>事件状态<select aria-label={`记忆事件${entry.id}的状态`} disabled={!!busy} value={entry.event?.state??'uncertain'} onChange={e=>void run(`event-${entry.id}`,()=>api(`/conversations/${conversation.id}/memory/entries/${entry.id}`,'PATCH',{event:{kind:entry.event?.kind??'other',state:e.target.value,resolvedByMessageIds:[]}}),'事件状态已按个人补充保存')}>{Object.entries(EVENT_STATES).map(([key,label])=><option value={key} key={key}>{label}</option>)}</select></label>{!!entry.event?.resolvedByMessageIds.length&&<details><summary>查看结束／变更依据</summary>{entry.event.resolvedByMessageIds.map(id=><blockquote key={id}>{messages.get(id)?.text||'来源消息已不可用'}</blockquote>)}</details>}</div>}
     {entry.origin !== 'manual' && entry.sourceMessageIds.length > 0 && <details className="memory-source"><summary>查看来源 <ChevronDown size={11} /></summary>{entry.sourceMessageIds.map(id => <blockquote key={id}>{messages.get(id)?.text || '来源消息已不可用'}</blockquote>)}</details>}
     <div className="contact-fact-actions">
       <button disabled={!!busy} type="button" onClick={() => { setEntryEditingId(entry.id); setEntryKind(entry.kind); setEntryText(entry.text); entryInput.current?.focus(); }}>修改</button>
@@ -536,7 +513,7 @@ function InsightSettingsDetails({ state, busy, run, onOpenConversation }: { stat
   const selected = messages.find(message => message.id === messageId) || messages[0];
   const insights = selected?.insights;
   const ready = contactInsightReady(state, conversation, 'analysis');
-  const enabled = conversation?.processing?.intentEnabled || conversation?.processing?.affinityEnabled;
+  const enabled = analysisEnabled(conversation?.processing);
   const key = `analyze-${selected?.id}`;
   return <section className="settings-card insight-detail-settings" aria-label="联系人分析详情">
     <div className="settings-section-title"><span><Users size={19} /></span><div><h2>联系人分析详情</h2><p>在此查看完整意图与依据，开关在此人的对话内调整。</p></div></div>

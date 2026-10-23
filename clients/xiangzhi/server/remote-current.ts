@@ -8,7 +8,7 @@ import {knownRemoteSecrets,MAX_REMOTE_SNAPSHOT_BYTES,remoteProfile,remoteProfile
 export interface RemoteCurrentMessage {
   id:string;revision:string;role:'self'|'peer';text:string;kind:MessageKind;sentAt:string|null;sequence:number;
   mediaSummary?:string;recognition?:{provider:'local'|'qwen'|'compatible'|'codex';modelName:string;recognizedAt:string};
-  analysis?:{intents:ContactInsights['intents'];affinity:{score:number|null;confidence:number}|null;provider:ContactInsights['provider'];modelName:string;analyzedAt:string};
+  analysis?:{intents:ContactInsights['intents'];emotions?:ContactInsights['emotions'];affinity:{score:number|null;confidence:number;coverage?:number;dimensions?:NonNullable<ContactInsights['affinity']>['dimensions'];evidence?:string[]}|null;replyReview?:ContactInsights['replyReview'];rubricVersion?:string;provider:ContactInsights['provider'];modelName:string;analyzedAt:string};
   truncated?:boolean;
 }
 export interface RemoteCurrentDraft {
@@ -40,8 +40,14 @@ function currentAnalysis(state:AppState,conversation:Conversation,message:Messag
   const result=message.insights;
   if(message.role==='system'||!result||result.conversationId!==conversation.id||result.messageId!==message.id||!result.inputDigest||!iso(result.analyzedAt))return;
   try{if(result.inputDigest!==insightsInputDigest(state,conversation.id,message.id))return;}catch{return;}
+  return analysisProjection(result,conversation,secrets);
+}
+function analysisProjection(result:ContactInsights,conversation:Conversation,secrets:readonly string[]):NonNullable<RemoteCurrentMessage['analysis']>{
   return {intents:conversation.processing?.intentEnabled?result.intents.map(item=>({label:item.label,percentage:item.percentage})):[],
-    affinity:conversation.processing?.affinityEnabled&&result.affinity?{score:result.affinity.score,confidence:result.affinity.confidence}:null,
+    ...(result.emotions?{emotions:conversation.processing?.emotionEnabled?result.emotions:[]}:{}),
+    affinity:conversation.processing?.affinityEnabled&&result.affinity?{score:result.affinity.score,confidence:result.affinity.confidence,...(result.affinity.coverage!==undefined?{coverage:result.affinity.coverage}:{}),...(result.affinity.dimensions?{dimensions:result.affinity.dimensions}:{})}:null,
+    ...(result.replyReview?{replyReview:conversation.processing?.replyReviewEnabled?{...result.replyReview,summary:safe(result.replyReview.summary,600,secrets)}:null}:{}),
+    ...(result.rubricVersion?{rubricVersion:safe(result.rubricVersion,80,secrets)}:{}),
     provider:result.provider,modelName:safe(result.modelName,200,secrets),analyzedAt:iso(result.analyzedAt)!};
 }
 
@@ -172,8 +178,7 @@ export function remoteHistoryMessage(state:AppState,conversation:Conversation,me
   else {const emoji=messageEmojiRecognition(message);if(emoji)result.mediaSummary=unicode(sanitizeRemoteText(`表情解析：${emoji.tokens.map(token=>`${token.value} ${token.description}`).join('\n')}`,allSecrets));}
   if(!result.analysis&&message.insights?.conversationId===conversation.id&&message.insights.messageId===message.id&&iso(message.insights.analyzedAt)){
     const saved=message.insights;
-    return {...result,analysis:{intents:conversation.processing?.intentEnabled?saved.intents:[],affinity:conversation.processing?.affinityEnabled&&saved.affinity?{score:saved.affinity.score,confidence:saved.affinity.confidence}:null,
-      provider:saved.provider,modelName:safe(saved.modelName,200,allSecrets),analyzedAt:iso(saved.analyzedAt)!,stale:true}};
+    return {...result,analysis:{...analysisProjection(saved,conversation,allSecrets),stale:true}};
   }
   return result;
 }

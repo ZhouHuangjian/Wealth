@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {AFFINITY_DIMENSIONS} from '../shared/analysis-rubric.js';
 import assert from 'node:assert/strict';
 import type { AppState, Message } from '../shared/types.js';
 import { analyzeContactMessage, insightsInputDigest } from '../server/contact-insights.js';
@@ -25,7 +26,7 @@ export function message(id: string, conversationId: string, sequence: number, te
 }
 const valid = {intents: [{label: '关心', percentage: 80}, {label: '询问', percentage: 20}],
   affinity: {score: 60, confidence: 25, evidence: ['询问下班情况，可能是关心，也可能仅是确认时间。']}, uncertainty: '短句存在歧义。'};
-function response(content: unknown = valid): Response { return Response.json({choices: [{message: {content: typeof content === 'string' ? content : JSON.stringify(content)}}]}); }
+function response(content: unknown = valid, evidenceId='a2'): Response { return Response.json({choices: [{message: {content: typeof content === 'string' ? content : !('intents' in (content as any)) ? JSON.stringify(content) : JSON.stringify({...content as object,emotions:[],replyReview:null,affinity:(content as any)?.affinity?{...(content as any).affinity,dimensions:AFFINITY_DIMENSIONS.map(d=>({key:d.key,score:(content as any).affinity.score,evidenceMessageIds:[evidenceId]}))}:null})}}]}); }
 
 test('sentence insights use only this contact up to the target, selected model and scoped manual basis', async () => {
   const state = insightState();
@@ -203,7 +204,7 @@ test('complete history plus a full reviewed memory and manual basis still fits e
   await analyzeContactMessage(state,'A',state.messages.at(-1)!.id,undefined,{fetch:async(_url,init)=>{
     const body=JSON.parse(String(init!.body)),context=JSON.parse(body.messages[1].content);assert.ok(Buffer.byteLength(JSON.stringify(body.messages))<=128_000);
     if(context.level!==undefined)return response({summary:'有来源的合成摘要'});
-    finalCalls++;assert.equal(context.fullHistory.coveredMessages,40);return response();
+    finalCalls++;assert.equal(context.fullHistory.coveredMessages,40);return response(valid,state.messages.at(-1)!.id);
   }});
   assert.equal(finalCalls,1);
 });

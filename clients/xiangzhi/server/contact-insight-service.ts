@@ -1,3 +1,5 @@
+import {eventSchema} from './event-schema.js';
+import {analysisEnabled} from '../shared/analysis-rubric.js';
 import {randomUUID} from 'node:crypto';
 import {messageEvidenceHash} from './contact-evidence.js';
 import type {Express,Request} from 'express';
@@ -13,7 +15,7 @@ import type {Store} from './store.js';
 const basisSchema=z.object({category:z.enum(['current_status','interest','preference','fact','boundary','plan']),content:z.string().trim().min(1).max(1000),sourceNote:z.string().trim().max(500).default('')}).strict();
 const basisPatchSchema=basisSchema.omit({sourceNote:true}).partial().extend({sourceNote:z.string().trim().max(500).optional()}).strict().refine(v=>Object.keys(v).length>0);
 const memoryKind=z.enum(['fact','event','preference','openTopic']);
-const memoryEntrySchema=z.object({kind:memoryKind,text:z.string().trim().min(1).max(600)}).strict();
+const memoryEntrySchema=z.object({kind:memoryKind,text:z.string().trim().min(1).max(600),event:eventSchema.nullable().optional()}).strict();
 const memoryPatchSchema=z.object({summary:z.string().trim().max(1600).optional(),openTopics:z.array(z.string().trim().min(1).max(200)).max(10).optional()}).strict().refine(v=>Object.keys(v).length>0);
 const memoryEntryPatchSchema=memoryEntrySchema.partial().extend({status:z.enum(['pending','approved','rejected']).optional()}).strict().refine(v=>Object.keys(v).length>0);
 const cid=(req:Request)=>String(req.params.id);
@@ -30,11 +32,11 @@ function modelConfiguration(state:AppState,cid:string,kind:'analysis'|'memory'):
   return JSON.stringify([effectiveContactModelSettings(state.settings,c,kind),state.settings.apiKey,state.settings.modelUrl,state.settings.provider,c.channel,c.externalId,c.wechat?.accountFingerprint,c.wechat?.enabled]);
 }
 export function validateContactFeatures(settings:Settings,c:Conversation,scope:{analysis?:boolean;memory?:boolean}={analysis:true,memory:true}):void {
-  if(scope.analysis&&(c.processing?.intentEnabled||c.processing?.affinityEnabled)){
+  if(scope.analysis&&(analysisEnabled(c.processing))){
     const model=effectiveContactModelSettings(settings,c,'analysis');
     if(!model||model.provider==='disabled')throw new Error('请先在设置中配置意图与好感分析模型。');
   }
-  if(c.processing?.autoAnalyzeMessages&&!c.processing.intentEnabled&&!c.processing.affinityEnabled)throw new Error('请先为此人开启意图或好感分析。');
+  if(c.processing?.autoAnalyzeMessages&&!analysisEnabled(c.processing))throw new Error('请先为此人开启意图或好感分析。');
   if(c.processing?.autoCompressMemory&&!c.processing.memoryEnabled)throw new Error('请先为此人开启记忆功能。');
   if(scope.memory&&c.processing?.autoCompressMemory){
     const model=effectiveContactModelSettings(settings,c,'memory');
@@ -115,7 +117,7 @@ export class ContactInsightService {
       if(!c||(c.channel==='wechat'&&!c.wechat?.enabled))return;
       const target=state.messages.find(m=>m.id===messageId&&m.conversationId===id);
       const utterance=target&&(!target.kind||target.kind==='text'||(target.kind==='voice'&&target.mediaStatus==='recognized'&&target.audioRecognition)||(target.kind==='emoji'&&target.mediaStatus==='recognized'&&target.imageRecognition));
-      if(utterance&&c.processing?.autoAnalyzeMessages&&(c.processing.intentEnabled||c.processing.affinityEnabled)){
+      if(utterance&&c.processing?.autoAnalyzeMessages&&(c.processing.intentEnabled||c.processing.emotionEnabled||c.processing.affinityEnabled)){
         try{await this.analyze(id,messageId);}catch{
           const current=this.closed?undefined:this.store.read().conversations.find(c=>c.id===id);
           if(current?.processing?.autoAnalyzeMessages&&(current.channel!=='wechat'||current.wechat?.enabled))this.record(id,'自动分析未完成','可在这句话旁手动分析。','warning');
@@ -138,7 +140,7 @@ export class ContactInsightService {
     if(this.closed)throw new Error('分析服务已停止。');
     const before=this.store.read(),c=conversation(before,id);
     assertFullHistoryReady(before,id);
-    if(!c.processing?.intentEnabled&&!c.processing?.affinityEnabled)throw new Error('请先为此人开启意图或好感分析。');
+    if(!analysisEnabled(c.processing))throw new Error('请先为此人开启意图或好感分析。');
     const target=targetId?before.messages.find(m=>m.id===targetId&&m.conversationId===id):before.messages.filter(m=>m.conversationId===id&&m.role==='peer').sort((a,b)=>a.sequence-b.sequence).at(-1);
     if(!target)throw new Error('请先选择这段对话中的一句话。');
     const inputDigest=insightsInputDigest(before,id,target.id);
@@ -152,7 +154,8 @@ export class ContactInsightService {
       controller.signal.throwIfAborted();
       const state=this.store.read();
       if(this.closed||modelConfiguration(state,id,'analysis')!==configuration||insightsInputDigest(state,id,target.id)!==inputDigest||result.conversationId!==id||result.messageId!==target.id)throw Object.assign(new Error('这句话或分析配置已变化，旧结果未保存。'),{status:409});
-      const saved={...result,inputDigest,intents:c.processing.intentEnabled?result.intents:[],affinity:c.processing.affinityEnabled?result.affinity:null};
+      const saved={...result,inputDigest,intents:c.processing?.intentEnabled?result.intents:[],emotions:c.processing?.emotionEnabled?result.emotions:[],
+        affinity:c.processing?.affinityEnabled?result.affinity:null,replyReview:c.processing?.replyReviewEnabled?result.replyReview:null};
       this.store.update(s=>{const m=s.messages.find(m=>m.id===target.id&&m.conversationId===id);if(!m)throw missing();m.insights=saved;});
       this.record(id,'已保存交流分析','百分比是模型对语境的估计，原结果保存在本机。');
       return {insights:saved,cached:false};
@@ -264,10 +267,13 @@ export class ContactInsightService {
     conversation(this.store.read(),id);this.changed(id);this.options.onContextChanged(id);
     this.store.update(s=>{const c=conversation(s,id);c.basisFacts=(c.basisFacts??[]).filter(f=>f.id!==factId);for(const m of s.messages.filter(m=>m.conversationId===id))delete m.insights;});
   }
+  private validateEvent(id:string,event:ContactMemory['entries'][number]['event']|null|undefined){
+    if(event?.resolvedByMessageIds.some(mid=>!this.store.read().messages.some(m=>m.id===mid&&m.conversationId===id)))throw new Error('事件依据必须属于当前会话。');
+  }
   addMemoryEntry(id:string,input:unknown){
-    const body=memoryEntrySchema.parse(input),c=conversation(this.store.read(),id);
+    const body=memoryEntrySchema.parse(input);this.validateEvent(id,body.event);if(body.event&&body.kind!=='event')throw new Error('仅事件条目可设置事件状态。');const c=conversation(this.store.read(),id);
     if((c.memory?.entries.filter(e=>e.status!=='rejected').length??0)>=100)throw new Error('记忆条目已达到上限，请先整理已有内容。');
-    const at=new Date().toISOString();return this.memoryChanged(id,memory=>memory.entries.push({id:randomUUID(),...body,origin:'manual',status:'approved',sourceMessageIds:[],sourceMessageHashes:{},createdAt:at,updatedAt:at}));
+    const at=new Date().toISOString();return this.memoryChanged(id,memory=>memory.entries.push({id:randomUUID(),...body,event:body.event??undefined,origin:'manual',status:'approved',sourceMessageIds:[],sourceMessageHashes:{},createdAt:at,updatedAt:at}));
   }
   patchMemory(id:string,input:unknown){
     const body=memoryPatchSchema.parse(input);
@@ -279,11 +285,14 @@ export class ContactInsightService {
     });
   }
   patchMemoryEntry(id:string,entryId:string,input:unknown){
-    const body=memoryEntryPatchSchema.parse(input);
+    const body=memoryEntryPatchSchema.parse(input);this.validateEvent(id,body.event);
+    const previous=conversation(this.store.read(),id).memory?.entries.find(e=>e.id===entryId);
+    if(body.event&&(body.kind??previous?.kind)!=='event')throw new Error('仅事件条目可设置事件状态。');
     if(!conversation(this.store.read(),id).memory?.entries.some(e=>e.id===entryId))throw Object.assign(new Error('找不到这条记忆。'),{status:404});
     return this.memoryChanged(id,memory=>{
       const entry=memory.entries.find(e=>e.id===entryId)!;Object.assign(entry,body,{updatedAt:new Date().toISOString()});
-      if(body.text!==undefined||body.kind!==undefined){entry.origin='manual';entry.status=body.status??'approved';entry.sourceMessageIds=[];entry.sourceMessageHashes={};}
+      if(body.event===null||body.kind&&body.kind!=='event')delete entry.event;
+      if(body.text!==undefined||body.kind!==undefined||body.event!==undefined){entry.origin='manual';entry.status=body.status??'approved';entry.sourceMessageIds=[];entry.sourceMessageHashes={};}
     });
   }
   deleteMemoryEntry(id:string,entryId:string){

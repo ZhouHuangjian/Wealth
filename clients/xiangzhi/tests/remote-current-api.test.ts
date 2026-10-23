@@ -112,6 +112,7 @@ test('real message analysis targets the chosen utterance, caches it, and survive
     h.setRows(h.a,[record(1,{text:old.text}),record(2,{text:'合成新话'})]);const latest=await h.run('conversation.refresh',{id:h.a});
     assert.ok(latest.result.currentView.messages.find((m:any)=>m.id===old.id)?.analysis);
     assert.equal((await h.invoke('conversation.message.analyze',h.b,old.id)).status,'failed');assert.equal(h.counters().analysisCalls,1);
+    h.store.update(s=>{s.conversations.find(c=>c.id===h.a)!.processing!.replyReviewEnabled=true;});
     h.setRows(h.a,[record(1,{text:old.text}),record(2,{role:'self',text:'合成自己的话'})]);await h.run('conversation.refresh',{id:h.a});
     assert.equal((await h.invoke('conversation.message.analyze',h.a,h.latest(h.a).id)).status,'succeeded');assert.equal(h.counters().analysisCalls,2);
     assert.doesNotMatch(JSON.stringify(h.polls),/inputDigest|evidence|uncertainty/);

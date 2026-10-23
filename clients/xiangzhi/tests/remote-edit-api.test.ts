@@ -53,7 +53,7 @@ async function harness(overrides: Partial<Options> = {}) {
     compressContactMemory: (state, cid, signal) => compressContactMemory(state, cid, signal, { fetch: async () => {
       modelCalls++; const source = state.messages.filter(m => m.conversationId === cid).at(-1)!;
       return modelResponse({ summary: '模型回顾', openTopics: ['模型待确认话题'],
-        entries: Array.from({ length: 32 }, (_, index) => ({ kind: 'event', text: `模型记忆 ${index}`, sourceMessageIds: [source.id] })) });
+        entries: Array.from({ length: 32 }, (_, index) => ({ kind: 'event', event:{kind:'other',state:'active',resolvedByMessageIds:[]},text: `模型记忆 ${index}`, sourceMessageIds: [source.id] })) });
     } }),
     remoteFetch: async (input, init) => {
       assert.equal(String(input), 'http://127.0.0.1:9876/api/v1/chat/device/poll');

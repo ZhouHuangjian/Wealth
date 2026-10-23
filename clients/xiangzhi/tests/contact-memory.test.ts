@@ -24,7 +24,7 @@ function message(id: string, conversationId: string, sequence: number, text: str
 const result = {summary: '对方说喜欢跑步，双方暂定周六去公园，具体时间待定。',
   entries: [{kind: 'preference', text: '对方说自己喜欢跑步。', sourceMessageIds: ['a1']},
     {kind: 'openTopic', text: '周六去公园的具体时间尚未定。', sourceMessageIds: ['a2', 'a3']}], openTopics: ['确认周六去公园的时间']};
-function response(value: unknown = result) {return Response.json({choices: [{message: {content: JSON.stringify(value)}}]});}
+function response(value: unknown = result) {return Response.json({choices: [{message: {content: JSON.stringify({...value as any,entries:(value as any).entries?.map((entry:any)=>({...entry,event:entry.kind==='event'?{kind:'other',state:'active',resolvedByMessageIds:[]}:null}))})}}]});}
 
 test('memory compressor scopes evidence, respects independent model, and saves pending entries with hashes', async () => {
   const app = state(); app.conversations[0].processing!.memoryModel = {id: 'mem-choice', provider: 'compatible', modelPreset: 'qwen', modelName: 'picked-memory'};

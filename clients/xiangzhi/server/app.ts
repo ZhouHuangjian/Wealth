@@ -1,3 +1,4 @@
+import {analysisEnabled} from '../shared/analysis-rubric.js';
 import {HistorySync} from './history-sync.js';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
@@ -596,14 +597,14 @@ export function createApplication(options: {
       else if(replyModels!==undefined)next.processing.replyModels=replyModels;
       if(analysisModel===null)delete next.processing.analysisModel;else if(analysisModel!==undefined)next.processing.analysisModel=analysisModel;
       if(memoryModel===null)delete next.processing.memoryModel;else if(memoryModel!==undefined)next.processing.memoryModel=memoryModel;
-      if(!next.processing.intentEnabled&&!next.processing.affinityEnabled&&(processing.intentEnabled===false||processing.affinityEnabled===false))next.processing.autoAnalyzeMessages=false;
+      if(!next.processing.intentEnabled&&!next.processing.emotionEnabled&&!next.processing.affinityEnabled&&(processing.intentEnabled===false||processing.emotionEnabled===false||processing.affinityEnabled===false))next.processing.autoAnalyzeMessages=false;
       if(processing.memoryEnabled===false)next.processing.autoCompressMemory=false;
     }
     for(const choice of [...(processing?.replyModels??[]),processing?.analysisModel,processing?.memoryModel]){
       if(choice?.provider==='codex'&&/^qwen/i.test(choice.modelName))throw new Error('Codex 请选择本机可用的 OpenAI 模型。');
     }
     validateContactFeatures(state.settings,next,{
-      analysis:processing?.intentEnabled===true||processing?.affinityEnabled===true||processing?.autoAnalyzeMessages===true||!!processing?.analysisModel,
+      analysis:analysisEnabled(processing)||processing?.autoAnalyzeMessages===true||!!processing?.analysisModel,
       memory:processing?.autoCompressMemory===true||!!processing?.memoryModel,
     });
     const effective=effectiveContactSettings(state.settings,next);
@@ -630,7 +631,7 @@ export function createApplication(options: {
         if(!contactAutoMediaEnabled(next,message.kind==='emoji'?'image':message.kind as 'image'|'voice'))message.autoMediaEligible=false;
       }
       if(replyChanged)s.drafts=s.drafts.filter(d=>d.conversationId!==cid);
-      if(Object.keys(information).length>0||processing?.intentEnabled!==undefined||processing?.affinityEnabled!==undefined||processing?.analysisModel!==undefined||processing?.memoryEnabled!==undefined)for(const m of s.messages.filter(m=>m.conversationId===cid))delete m.insights;
+      if(Object.keys(information).length>0||processing?.intentEnabled!==undefined||processing?.emotionEnabled!==undefined||processing?.replyReviewEnabled!==undefined||processing?.affinityEnabled!==undefined||processing?.analysisModel!==undefined||processing?.memoryEnabled!==undefined)for(const m of s.messages.filter(m=>m.conversationId===cid))delete m.insights;
       addActivity(s,'info','对话设置已更新',body.autoReplyEnabled===true?'此联系人已加入自动处理范围。':body.autoReplyEnabled===false?'此联系人已暂停自动处理。':'已保存对话信息。',cid);
     });
     mediaAutomation.invalidate(cid);

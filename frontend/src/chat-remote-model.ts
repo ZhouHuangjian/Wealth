@@ -49,6 +49,8 @@ export type RemoteProcessing = {
   autoRecognizeImages?: boolean;
   autoTranscribeVoice?: boolean;
   intentEnabled?: boolean;
+  emotionEnabled?: boolean;
+  replyReviewEnabled?: boolean;
   affinityEnabled?: boolean;
   memoryEnabled?: boolean;
   autoAnalyzeMessages?: boolean;
@@ -72,6 +74,11 @@ export type RemoteBasisFact = {
   updatedAt: string;
 };
 export type RemoteMemoryEntry = {
+  event?: {
+    kind: string;
+    state: "active" | "resolved" | "uncertain";
+    resolvedByMessageIds: string[];
+  };
   id: string;
   kind: "fact" | "event" | "preference" | "openTopic";
   text: string;
@@ -267,6 +274,8 @@ export function changedRemoteConversation(
     "autoRecognizeImages",
     "autoTranscribeVoice",
     "intentEnabled",
+    "emotionEnabled",
+    "replyReviewEnabled",
     "affinityEnabled",
     "memoryEnabled",
     "autoAnalyzeMessages",

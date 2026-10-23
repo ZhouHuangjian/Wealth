@@ -953,7 +953,11 @@ export default function DeviceRemoteControl({
             onValuesChange={(changed) => {
               if (!changed.processing) return;
               const processing = conversationForm.getFieldValue("processing");
-              if (!processing?.intentEnabled && !processing?.affinityEnabled)
+              if (
+                !processing?.intentEnabled &&
+                !processing?.emotionEnabled &&
+                !processing?.affinityEnabled
+              )
                 conversationForm.setFieldValue(
                   ["processing", "autoAnalyzeMessages"],
                   false,
@@ -1027,6 +1031,8 @@ export default function DeviceRemoteControl({
                         name: "自动转写此人的语音",
                       },
                       { key: "intentEnabled", name: "意图分析" },
+                      { key: "emotionEnabled", name: "情绪分析" },
+                      { key: "replyReviewEnabled", name: "本人回复复盘" },
                       { key: "affinityEnabled", name: "好感度估计" },
                       { key: "memoryEnabled", name: "记忆功能" },
                     ] as const
@@ -1049,7 +1055,8 @@ export default function DeviceRemoteControl({
                       disabled={
                         busy ||
                         !available ||
-                        (!watchedProcessing?.intentEnabled &&
+                        (!watchedProcessing?.emotionEnabled &&
+                          !watchedProcessing?.intentEnabled &&
                           !watchedProcessing?.affinityEnabled)
                       }
                     />

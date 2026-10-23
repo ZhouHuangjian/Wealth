@@ -1,3 +1,16 @@
+const eventKindLabels: Record<string, string> = {
+  invitation: "邀约",
+  confirmation: "安排确认",
+  cancellation: "取消或改期",
+  care: "关心支持",
+  preference: "明确偏好",
+  disclosure: "个人分享",
+  boundary: "相处边界",
+  correction: "澄清纠正",
+  commitment: "明确承诺",
+  question: "待答问题",
+  other: "其他事件",
+};
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -383,6 +396,38 @@ export default function RemoteContactProfile({
                       </Tag>
                     </Space>
                     <p>{entry.text}</p>
+                    {entry.kind === "event" && (
+                      <Space wrap>
+                        <Tag>
+                          {eventKindLabels[entry.event?.kind ?? "other"] ??
+                            "事件"}
+                        </Tag>
+                        <Select
+                          size="small"
+                          aria-label="事件状态"
+                          value={entry.event?.state ?? "uncertain"}
+                          disabled={
+                            blocked ||
+                            !supports("conversation.memory.entry.patch")
+                          }
+                          options={[
+                            { value: "active", label: "仍有效／待完成" },
+                            { value: "resolved", label: "已结束／已变更" },
+                            { value: "uncertain", label: "状态待确认" },
+                          ]}
+                          onChange={(state) =>
+                            void mutate("conversation.memory.entry.patch", {
+                              entryId: entry.id,
+                              event: {
+                                kind: entry.event?.kind ?? "other",
+                                state,
+                                resolvedByMessageIds: [],
+                              },
+                            })
+                          }
+                        />
+                      </Space>
+                    )}
                     <Space wrap>
                       <Button
                         size="small"

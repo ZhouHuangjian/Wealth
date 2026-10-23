@@ -25,7 +25,28 @@ export type RemoteCurrentMessage = {
   recognition?: { provider: string; modelName: string; recognizedAt: string };
   analysis?: {
     intents: { label: string; percentage: number }[];
-    affinity?: { score: number | null; confidence: number } | null;
+    emotions?: { label: string; percentage: number }[];
+    replyReview?: {
+      score: number | null;
+      summary: string;
+      criteria: {
+        key: string;
+        score: number | null;
+        evidenceMessageIds: string[];
+      }[];
+    } | null;
+    rubricVersion?: string;
+    affinity?: {
+      score: number | null;
+      confidence: number;
+      coverage?: number;
+      evidence?: string[];
+      dimensions?: {
+        key: string;
+        score: number | null;
+        evidenceMessageIds: string[];
+      }[];
+    } | null;
     provider: string;
     modelName: string;
     analyzedAt: string;
