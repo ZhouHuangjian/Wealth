@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Activity as ActivityIcon, ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check,
   CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Cloud, Copy, FileText, HeartHandshake,
-  Image as ImageIcon, Leaf, LoaderCircle, MessageCircle, Mic, MoreHorizontal, Pause, Plus, Search, Send,
+  Image as ImageIcon, Leaf, LoaderCircle, MessageCircle, Mic, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pause, Plus, Search, Send,
   Settings2, ShieldCheck, Sparkles, Trash2, UserRound, Users, X, Zap,
 } from 'lucide-react';
 import type { AudioRecognition, AudioSettings, ContactBasisFact, ContactInsights, ContactMemoryEntry, ContactModelSettings, Conversation, Draft, DraftSyncConnectionStatus, ImageRecognition, ImportInput, ImportPreview, Message, ProfileClaim, PublicState, ReplyModelChoice, Settings, VisionSettings } from '../shared/types';
@@ -84,6 +84,16 @@ function Modal({ title, description, onClose, children, wide = false }: {
 
 export default function App() { return <ModelCatalogProvider><AppContent /></ModelCatalogProvider>; }
 
+function useLayoutPreference(key: string) {
+  const [value, setValue] = useState(() => {
+    try { return localStorage.getItem(key) === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(key, String(value)); } catch { /* Layout still works when storage is unavailable. */ }
+  }, [key, value]);
+  return [value, setValue] as const;
+}
+
 function AppContent() {
   const [state, setState] = useState<PublicState | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -98,6 +108,8 @@ function AppContent() {
   const [showContactContext, setShowContactContext] = useState(false);
   const [showImageUpload, setShowImageUpload] = useState(false);
   const [mobileConversation, setMobileConversation] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useLayoutPreference('xiangzhi.layout.navCollapsed');
+  const [contactsCollapsed, setContactsCollapsed] = useLayoutPreference('xiangzhi.layout.contactsCollapsed');
   const [textById, setTextById] = useState<Record<string, string>>({});
   const [role, setRole] = useState<'self' | 'peer'>('self');
   const [intent, setIntent] = useState('');
@@ -226,39 +238,39 @@ function AppContent() {
       : <><LoaderCircle className="spin" size={23} /><p>正在打开你的沟通工作台…</p></>}
   </div>;
 
-  return <div className="app-shell">
-    <aside className="sidebar">
+  return <div className={`app-shell ${navCollapsed ? 'nav-collapsed' : ''}`}>
+    <aside className="sidebar" id="workspace-navigation">
       <a className="brand" href="#" aria-label="相知首页" onClick={event => { event.preventDefault(); setPage('conversations'); }}>
-        <span className="brand-symbol"><Leaf size={26} strokeWidth={1.7} /></span><span>相知<small>让了解，自然发生</small></span>
+        <span className="brand-symbol"><Leaf size={26} strokeWidth={1.7} /></span><span>相知</span>
       </a>
       <div className="workspace-label">个人工作台 <span>LOCAL</span></div>
-      <nav aria-label="主导航">{navigation.map(item => <button key={item.id} aria-label={item.label} className={`nav-item ${page === item.id ? 'active' : ''}`}
+      <nav aria-label="主导航">{navigation.map(item => <button key={item.id} aria-label={item.label} title={item.label} aria-current={page === item.id ? 'page' : undefined} className={`nav-item ${page === item.id ? 'active' : ''}`}
         onClick={() => setPage(item.id)}><item.icon size={19} /><span>{item.label}</span>
         {item.id === 'profile' && pending > 0 && <span className="nav-count">{pending}</span>}
         {item.id === 'conversations' && <span className="nav-count">{state.conversations.length}</span>}
         {item.id === 'drafts' && !!state.cloudDrafts?.length && <span className="nav-count">{state.cloudDrafts.length}</span>}
       </button>)}</nav>
-      <div className="sidebar-note"><div className="note-leaf"><HeartHandshake size={23} strokeWidth={1.5} /></div>
-        <p>好的关系，<br />从好好说话开始。</p><span>理解自己，也尊重彼此。</span></div>
-      <div className="sidebar-bottom"><button aria-label="设置" className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}><Settings2 size={19} /><span>设置</span></button>
+      <div className="sidebar-bottom"><button aria-label="设置" title="设置" aria-current={page === 'settings' ? 'page' : undefined} className={`nav-item ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}><Settings2 size={19} /><span>设置</span></button>
         <div className="local-status"><span className="status-dot" />本地工作空间<ShieldCheck size={14} /></div>
         <div className="user-block"><div className="avatar owner-avatar">我</div><div><strong>我的空间</strong><small>个人沟通助手</small></div><span className="version">v0.1</span></div>
       </div>
     </aside>
 
     <main className="main-workspace">
-      <header className="topbar"><div className="breadcrumb">我的工作台<ChevronRight size={14} /><strong>{page === 'settings' ? '设置' : navigation.find(n => n.id === page)?.label}</strong></div>
-        <div className="topbar-actions"><span className={`runtime-badge ${state.runtime.channel === 'webhook' ? 'real' : ''}`}><span className="status-dot" />{state.runtime.bridgeSendConfigured ? '消息桥 · 可发送' : state.runtime.bridgeReceiveConfigured ? '消息桥 · 仅接收' : state.conversations.some(item => item.channel === 'wechat') ? '微信 · 仅读取' : '本机演练'}</span>
+      <header className="topbar"><div className="workspace-tools">
+        <button className="icon-button navigation-toggle" onClick={() => setNavCollapsed(value => !value)} aria-label={navCollapsed ? '展开导航栏' : '折叠导航栏'} title={navCollapsed ? '展开导航栏' : '折叠导航栏'} aria-expanded={!navCollapsed} aria-controls="workspace-navigation">{navCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
+        <div className="breadcrumb"><span>我的工作台</span><ChevronRight size={14} /><h1>{page === 'settings' ? '设置' : navigation.find(n => n.id === page)?.label}</h1></div>
+        {page === 'conversations' && <button className="icon-button contacts-toggle" onClick={() => setContactsCollapsed(value => !value)} aria-label={contactsCollapsed ? '展开联系人列表' : '折叠联系人列表'} title={contactsCollapsed ? '展开联系人列表' : '折叠联系人列表'} aria-expanded={!contactsCollapsed} aria-controls="conversation-contacts"><Users size={18} /></button>}
+      </div>
+        <div className="topbar-actions">{page === 'conversations' && <button className="button secondary import-history-button" onClick={() => setShowImport(true)} aria-label="导入聊天记录" title="导入聊天记录"><ArrowDownToLine size={15} /><span>导入聊天记录</span></button>}<span className={`runtime-badge ${state.runtime.channel === 'webhook' ? 'real' : ''}`}><span className="status-dot" />{state.runtime.bridgeSendConfigured ? '消息桥 · 可发送' : state.runtime.bridgeReceiveConfigured ? '消息桥 · 仅接收' : state.conversations.some(item => item.channel === 'wechat') ? '微信 · 仅读取' : '本机演练'}</span>
           <div className="global-switch"><span>{autoLabel}</span><Toggle checked={globalOn} disabled={!!busy} label={`全局${autoLabel}`} onChange={() => void run('global', () => api('/settings', 'PATCH', { autoReplyEnabled: !globalOn }), !globalOn ? `${autoLabel}已开启，仅作用于已开启的联系人${autoMode === 'draft' ? '；草稿不会自动发送' : ''}` : `${autoLabel}已关闭`)} /></div>
           <button className="pause-button" onClick={pause} disabled={!!busy} title="暂停全部自动草稿与自动发送"><Pause size={14} /><span>暂停回复</span></button>
         </div>
       </header>
       {loadError && <div className="connection-error" role="alert">连接暂时中断：{loadError}。正在尝试重新连接。</div>}
       {page === 'conversations' ? <>
-        <div className="page-heading"><div><div className="eyebrow">A LITTLE CLOSER, EVERY DAY</div><h1>每一次对话，都多一点了解<span className="heading-dot">。</span></h1>
-          <p>保留你的表达方式，让沟通更自然、更有回应。</p></div><Button kind="secondary" onClick={() => setShowImport(true)}><ArrowDownToLine size={16} />导入聊天记录</Button></div>
-        <div className={`conversation-layout ${mobileConversation ? 'mobile-open' : ''}`}>
-          <section className="contacts-panel" aria-label="对话列表"><div className="panel-heading"><h2>我的对话 <span>{state.conversations.length}</span></h2><button className="icon-button" onClick={() => setShowNew(true)} aria-label="添加联系人或演练对话" title="添加联系人或演练对话"><Plus size={18} /></button></div>
+        <div className={`conversation-layout ${mobileConversation ? 'mobile-open' : ''} ${contactsCollapsed ? 'contacts-collapsed' : ''}`}>
+          <section className="contacts-panel" id="conversation-contacts" aria-label="对话列表"><div className="panel-heading"><h2>我的对话 <span>{state.conversations.length}</span></h2><button className="icon-button" onClick={() => setShowNew(true)} aria-label="添加联系人或演练对话" title="添加联系人或演练对话"><Plus size={18} /></button></div>
             <label className="search-field"><Search size={16} /><input placeholder="搜索联系人" value={search} onChange={event => setSearch(event.target.value)} aria-label="搜索联系人" /><span>⌕</span></label>
             <div className="contact-list">{state.conversations.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => {
               const last = state.messages.filter(m => m.conversationId === c.id).at(-1);
@@ -292,7 +304,6 @@ function AppContent() {
           </section>
 
           <aside className="suggestions-panel" aria-label="表达建议"><div className="panel-heading"><h2><Sparkles size={17} />表达建议</h2><span className="label-pill">{replyChoices.length > 1 ? `${replyChoices.length} 个模型` : modelIsDemo ? '规则演示' : currentReplyProvider === 'codex' ? 'Codex' : (replyChoices[0]?.modelPreset || contactSettings?.modelPreset) === 'qwen' ? '千问' : 'AI 辅助'}</span></div>
-            <p className="panel-description">多一种表达，仍然是你。</p>
             <div className="context-card"><div className="context-icon"><UserRound size={17} /></div><div><strong>{state.runtime.learnedProfileError ? '习惯档案加载异常' : state.learnedProfile ? `习惯档案 v${state.learnedProfile.version} 已加载` : '个人信息档案'}</strong><p>{approved} 条已确认信息 · <button onClick={() => setPage('profile')}>查看档案 <ChevronRight size={12} /></button></p></div></div>
             {conversation && <ContactContextCard conversation={conversation} messages={messages} state={state} busy={busy} run={run} onOpen={() => setShowContactContext(true)} />}
             <label className="intent-label" htmlFor="intent">这一次，你想表达什么？</label><textarea id="intent" className="intent-input" rows={2} placeholder="例如：关心一下，顺便聊聊周末安排" value={intent} onChange={event => setIntent(event.target.value)} />
@@ -301,12 +312,11 @@ function AppContent() {
             {pendingMedia.length > 0 && <p className="pending-media-notice" role="status"><CircleHelp size={14} /><span>最近 20 条消息中有 {pendingMedia.length} 条媒体未解析。{mediaBlocksGeneration ? '自动发送模式下需先查看，或切回草稿模式继续生成。' : '可先生成草稿，或在图片下点击识别后重新生成。'}未识别的媒体只作为占位提示。</span></p>}
             {modelIsDemo && <p className="demo-disclosure">当前为本地规则演示，未调用 AI 模型。<button onClick={() => setPage('settings')}>配置模型</button></p>}
             {conversation && <div className="draft-sync-panel"><Button kind="secondary" disabled={!state.runtime.draftSyncConfigured || !drafts.length || !!busy || currentUpload?.status === 'uploading' || currentDraftsUploaded} onClick={syncDrafts}>{busy === 'sync-drafts' || currentUpload?.status === 'uploading' ? <LoaderCircle size={14} className="spin" /> : <Cloud size={14} />}{currentDraftsUploaded ? '当前草稿已同步' : currentUpload?.status === 'failed' && uploadMatchesCurrentDrafts ? '重试同步草稿至服务器' : '同步草稿至服务器'}</Button><p>{state.runtime.draftSyncConfigured ? '仅上传候选回复、联系人显示名和档案版本。' : '先在设置中查看草稿同步配置。'}</p>{currentUpload && <p className={`draft-upload-status ${currentUpload.status}`} role="status"><strong>最近同步：{currentUpload.status === 'uploaded' ? '服务器已确认' : currentUpload.status === 'uploading' ? '正在同步' : '结果未确认'}</strong> · {timeLabel(currentUpload.finishedAt || currentUpload.createdAt)}<span>{currentUpload.detail}</span></p>}</div>}
-            <div className="draft-list">{drafts.length ? drafts.map((draft, index) => <article className="draft-card" key={draft.id}><div className="draft-top"><span className="draft-number">{String(index + 1).padStart(2, '0')}</span><h3>{draft.label}</h3></div><span className="draft-model-source">{draft.provider === 'codex' ? 'Codex' : draft.provider === 'compatible' ? '兼容 API' : draft.provider === 'ollama' ? 'Ollama' : '本地规则'} · {draft.modelName || (draft.provider === 'codex' ? 'Codex 默认模型' : draft.provider === 'demo' ? '本地规则演示' : draft.provider)}{draft.modelChoiceId && replyChoices.find(choice => choice.id === draft.modelChoiceId)?.label && ` · ${replyChoices.find(choice => choice.id === draft.modelChoiceId)?.label}`}</span><p className="draft-text">{draft.text}</p><p className="draft-reason">{draft.reason}{draft.provider === 'codex' && <span className="draft-profile">由 Codex 生成</span>}{draft.profileVersion && <span className="draft-profile">参考习惯档案 v{draft.profileVersion}</span>}</p><div className="draft-actions"><button onClick={() => { setRole('self'); setText(draft.text); if (adoptedDrafts[selectedId] !== draft.id) setFeedbackReasonById(previous => ({ ...previous, [selectedId]: '' })); setAdoptedDrafts(previous => ({ ...previous, [selectedId]: draft.id })); notify('已放入回复框，可以继续修改'); }}>采用并编辑 <ArrowRight size={13} /></button>{canSend ? <button className="draft-send" disabled={!!busy} title="发送这条建议" onClick={() => void sendText(draft.text, draft.id)} aria-label={isDemo ? '将建议发送到演练' : '发送这条建议'}><Send size={14} /></button> : <button className="draft-send" title="复制这条建议" onClick={() => void copyReply(draft.text)} aria-label="复制这条建议"><Copy size={14} /></button>}</div></article>) : <div className="suggestion-empty"><span><MessageCircle size={26} strokeWidth={1.4} /></span><p>听懂对方，再认真回应。</p><small>有了对方的消息，就可以生成表达建议。</small></div>}</div>
+            <div className="draft-list">{drafts.length ? drafts.map((draft, index) => <article className="draft-card" key={draft.id}><div className="draft-top"><span className="draft-number">{String(index + 1).padStart(2, '0')}</span><h3>{draft.label}</h3></div><span className="draft-model-source">{draft.provider === 'codex' ? 'Codex' : draft.provider === 'compatible' ? '兼容 API' : draft.provider === 'ollama' ? 'Ollama' : '本地规则'} · {draft.modelName || (draft.provider === 'codex' ? 'Codex 默认模型' : draft.provider === 'demo' ? '本地规则演示' : draft.provider)}{draft.modelChoiceId && replyChoices.find(choice => choice.id === draft.modelChoiceId)?.label && ` · ${replyChoices.find(choice => choice.id === draft.modelChoiceId)?.label}`}</span><p className="draft-text">{draft.text}</p><p className="draft-reason">{draft.reason}{draft.provider === 'codex' && <span className="draft-profile">由 Codex 生成</span>}{draft.profileVersion && <span className="draft-profile">参考习惯档案 v{draft.profileVersion}</span>}</p><div className="draft-actions"><button onClick={() => { setRole('self'); setText(draft.text); if (adoptedDrafts[selectedId] !== draft.id) setFeedbackReasonById(previous => ({ ...previous, [selectedId]: '' })); setAdoptedDrafts(previous => ({ ...previous, [selectedId]: draft.id })); notify('已放入回复框，可以继续修改'); }}>采用并编辑 <ArrowRight size={13} /></button>{canSend ? <button className="draft-send" disabled={!!busy} title="发送这条建议" onClick={() => void sendText(draft.text, draft.id)} aria-label={isDemo ? '将建议发送到演练' : '发送这条建议'}><Send size={14} /></button> : <button className="draft-send" title="复制这条建议" onClick={() => void copyReply(draft.text)} aria-label="复制这条建议"><Copy size={14} /></button>}</div></article>) : <div className="suggestion-empty"><span><MessageCircle size={26} strokeWidth={1.4} /></span><small>有了对方的消息，就可以生成表达建议。</small></div>}</div>
             {conversation && <FeedbackHistory state={state} conversationId={selectedId} busy={busy} run={run} compact />}
-            <div className="gentle-tip"><Leaf size={15} /><p>建议是灵感，真实的感受由你决定。<br />不要把聊天热度当作对方的承诺。</p></div>
           </aside>
         </div>
-        <footer className="workspace-footer"><span>相知 · 每段关系，都有自己的节奏</span><span><span className="status-dot" />{globalOn ? `${autoLabel}已开启 · ${state.conversations.filter(c => c.autoReplyEnabled).length} 个对话` : `${autoLabel}已暂停`}<span className="footer-divider" />{state.runtime.modelLabel}</span></footer>
+        <footer className="workspace-footer"><span><span className="status-dot" />{globalOn ? `${autoLabel}已开启 · ${state.conversations.filter(c => c.autoReplyEnabled).length} 个对话` : `${autoLabel}已暂停`}<span className="footer-divider" />{state.runtime.modelLabel}</span></footer>
       </> : <div className="other-page">
         {page === 'profile' && <ProfilePage state={state} selectedId={selectedId} busy={busy} run={run} />}
         {page === 'knowledge' && <KnowledgePage state={state} />}
@@ -793,8 +803,8 @@ function ProfilePage({ state, selectedId, busy, run }: { state: PublicState; sel
   const [editText, setEditText] = useState('');
   const [extractId, setExtractId] = useState(selectedId || state.conversations[0]?.id || '');
   const claims = state.claims.filter(c => filter === 'all' || c.status === filter);
-  return <><div className="section-heading"><div className="eyebrow">GET TO KNOW YOURSELF</div><h1>更了解你，才能更像你。</h1><p>由你确认的事实与偏好，才会成为回复的参考。</p></div>
-    <div className="profile-overview"><div><span className="large-avatar"><UserRound size={27} /></span><div><h2>我的沟通档案</h2><p>随时修正，不给自己贴固定标签。</p></div></div><div className="profile-stats"><span><strong>{state.claims.filter(c => c.status === 'approved').length}</strong>已确认</span><span><strong>{state.claims.filter(c => c.status === 'pending').length}</strong>待你确认</span></div></div>
+  return <>
+    <div className="profile-overview"><div><span className="large-avatar"><UserRound size={27} /></span><div><h2>我的沟通档案</h2></div></div><div className="profile-stats"><span><strong>{state.claims.filter(c => c.status === 'approved').length}</strong>已确认</span><span><strong>{state.claims.filter(c => c.status === 'pending').length}</strong>待你确认</span></div></div>
     <section className="learned-profile-card"><div className="learned-profile-heading"><div><h2>{state.learnedProfile ? `习惯档案 v${state.learnedProfile.version}` : '习惯档案尚未加载'}</h2><p>{state.learnedProfile ? `${state.learnedProfile.rules.length} 条表达规则 · ${state.learnedProfile.examples.length} 个校准例子` : '加载本机已有的习惯档案，让新回复参考你的校准结果。'}</p></div><Button kind="secondary" disabled={!!busy} onClick={() => void run('reload-profile', () => api('/profile/reload', 'POST'), '习惯档案已重新加载')}><ArrowDownToLine size={14} />{busy === 'reload-profile' ? '加载中…' : '重新加载'}</Button></div>
       {state.runtime.learnedProfileError && <div className="inline-error" role="alert">加载未完成：{state.runtime.learnedProfileError}</div>}
       {state.learnedProfile && <><p className="learned-profile-caption">{state.learnedProfile.title} · {dateLabel(state.learnedProfile.loadedAt)} {timeLabel(state.learnedProfile.loadedAt)} 加载{state.settings.provider === 'demo' ? '。当前规则演示不会调用模型学习这些规则。' : '。新生成的回复会参考这些规则，并记录档案版本。'}</p><details className="learned-profile-details"><summary>查看表达规则与校准例子<ChevronDown size={14} /></summary><div className="learned-rule-list">{state.learnedProfile.rules.map(rule => <article key={rule.id}><strong>{rule.rule}</strong>{rule.limitation && <p>适用限制：{rule.limitation}</p>}{rule.evidenceIds.length > 0 && <small>校准来源：{rule.evidenceIds.join('、')}</small>}</article>)}</div><h3>校准例子</h3>{state.learnedProfile.examples.slice(0, 5).map(example => <article className="learned-example" key={example.id}><p>{example.situation}</p><blockquote>{example.reply}</blockquote></article>)}{state.learnedProfile.examples.length > 5 && <p className="learned-profile-caption">这里展示前 5 个例子，生成时会按当前对话选择参考。</p>}{state.learnedProfile.limitations.length > 0 && <div className="learned-limitations">{state.learnedProfile.limitations.map((limitation, index) => <p key={index}>{limitation}</p>)}</div>}</details></>}
@@ -815,7 +825,7 @@ function ProfilePage({ state, selectedId, busy, run }: { state: PublicState; sel
 
 function KnowledgePage({ state }: { state: PublicState }) {
   const [query, setQuery] = useState('');
-  return <><div className="section-heading"><div className="eyebrow">THOUGHTFUL COMMUNICATION</div><h1>理解关系，也理解分寸。</h1><p>有出处的沟通知识，为表达提供参考。每一段关系，都需要具体理解。</p></div><div className="knowledge-intro"><BookOpen size={26} strokeWidth={1.5} /><div><h2>带着理解去沟通</h2><p>研究提供线索，不能预测某个人的感受，也不能保证关系的结果。</p></div><span>{state.knowledge.length} 篇参考</span></div>
+  return <><div className="knowledge-intro"><BookOpen size={26} strokeWidth={1.5} /><div><h2>沟通研究参考</h2><p>研究提供线索，不能预测某个人的感受，也不能保证关系的结果。</p></div><span>{state.knowledge.length} 篇参考</span></div>
     <label className="search-field knowledge-search"><Search size={17} /><input aria-label="搜索沟通知识" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索倾听、表达、边界…" /></label>
     <div className="knowledge-grid">{state.knowledge.filter(k => `${k.title} ${k.summary} ${k.application}`.includes(query)).map((k, index) => <article className="knowledge-card" key={k.id}><div className="knowledge-card-top"><span className="knowledge-number">0{index + 1}</span><span className="label-pill">{k.kind === 'research' ? '研究参考' : '沟通原则'}</span></div><h2>{k.title}</h2><p>{k.summary}</p><div className="knowledge-application"><h3><Leaf size={14} />可以怎样用</h3><p>{k.application}</p></div><div className="knowledge-limit"><strong>适用边界</strong><p>{k.limitation}</p></div><div className="knowledge-source"><span>{k.author} · {k.year}</span><a href={k.url} target="_blank" rel="noreferrer">阅读来源<ArrowRight size={13} /></a></div></article>)}</div>
     {!state.knowledge.filter(k => `${k.title} ${k.summary} ${k.application}`.includes(query)).length && <Empty icon={BookOpen} title="没有找到相关内容">试试其他关键词。</Empty>}
@@ -827,7 +837,7 @@ function CloudDraftsPage({ state, busy, run, copyReply }: {
 }) {
   const batches = [...(state.cloudDrafts ?? [])].sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
   const providerNames: Record<Settings['provider'], string> = { demo: '本地规则演示', codex: 'Codex', ollama: 'Ollama', compatible: '兼容 API' };
-  return <><div className="section-heading"><div className="eyebrow">YOUR REPLIES, READY TO REVIEW</div><h1>草稿在这里，决定仍由你。</h1><p>Mac 生成回复后同步到服务器，方便你查看和复制。此页面只管理草稿。</p></div>
+  return <>
     <div className="cloud-inbox-intro"><Cloud size={23} /><div><strong>{state.runtime.draftInboxConfigured ? '草稿接收已配置' : '草稿接收尚未配置'}</strong><p>{state.runtime.draftInboxConfigured ? '显示这台服务器收到的候选回复；复制后可到微信手动发送。' : '在腾讯云服务器配置草稿接收后，Mac 即可向这里同步回复。'}</p></div><span>{batches.length} 批草稿</span></div>
     <p className="cloud-history-note">这里保留的是上传时的候选回复；Mac 收到新消息后，已上传批次不会自动删除。使用前请以 Mac 的最新对话为准。</p>
     <div className="cloud-draft-list">{batches.map(batch => <section className="cloud-draft-batch" key={batch.id}><div className="cloud-draft-heading"><div><h2>{batch.conversationName}</h2><p>{providerNames[batch.provider]}{batch.profileVersion && ` · 习惯档案 v${batch.profileVersion}`}<span>生成于 {dateLabel(batch.createdAt)} {timeLabel(batch.createdAt)} · 收到于 {dateLabel(batch.receivedAt)} {timeLabel(batch.receivedAt)}</span></p></div><button className="icon-button" aria-label={`删除${batch.conversationName}的这批云端草稿`} title="删除这批云端草稿" disabled={!!busy} onClick={() => void run(`delete-cloud-${batch.id}`, () => api(`/sync/drafts/${batch.id}`, 'DELETE'), '已删除这批云端草稿，本机原稿不受影响')}>{busy === `delete-cloud-${batch.id}` ? <LoaderCircle size={16} className="spin" /> : <Trash2 size={16} />}</button></div><div className="cloud-draft-grid">{batch.drafts.map((draft, index) => <article className="cloud-draft-candidate" key={index}><div className="cloud-candidate-title"><span>0{index + 1}</span><h3>{draft.label}</h3></div><p className="cloud-candidate-text">{draft.text}</p>{draft.reason && <p className="cloud-candidate-reason">{draft.reason}</p>}<Button kind="secondary" onClick={() => void copyReply(draft.text)}><Copy size={13} />复制回复</Button></article>)}</div></section>)}</div>
@@ -1047,7 +1057,7 @@ export function SettingsPage({ state, notify, refresh, busy, run, onOpenConversa
     } catch (error) { notify(error instanceof Error ? error.message : '本机检测未完成', true); }
     finally { setSaving(''); }
   }
-  return <><div className="section-heading"><div className="eyebrow">MAKE IT YOURS</div><h1>按照你的节奏工作。</h1><p>选择模型、控制回复节奏，明确每一次数据的去向。</p></div>
+  return <>
     <div className="settings-group-tabs" aria-label="设置分类">{([
       { id: 'models', title: '模型中心', detail: '回复 · 识图 · 语音 · 分析 · 记忆', icon: Sparkles },
       { id: 'automation', title: '自动处理', detail: '草稿模式 · 等待与发送节奏', icon: Clock3 },
@@ -1144,7 +1154,7 @@ export function SettingsPage({ state, notify, refresh, busy, run, onOpenConversa
 }
 
 function ActivityPage({ state, now }: { state: PublicState; now: number }) {
-  return <><div className="section-heading"><div className="eyebrow">CLEAR, AT EVERY STEP</div><h1>每一步，都清楚可见。</h1><p>查看草稿与发送队列、运行结果和需要你关注的情况。</p></div><section className="activity-jobs"><div className="panel-heading"><h2><Clock3 size={18} />自动处理任务</h2><span className="label-pill">最近 {Math.min(12, state.jobs.length)} 条</span></div>{state.jobs.length ? <div className="jobs-list">{state.jobs.slice(-12).reverse().map(job => <div className="job-row" key={job.id}><span className={`job-state ${job.status}`}>{['queued', 'generating'].includes(job.status) ? <LoaderCircle size={15} className="spin" /> : ['sent', 'drafted'].includes(job.status) ? <Check size={15} /> : <Pause size={15} />}</span><div><strong>{state.conversations.find(c => c.id === job.conversationId)?.name || '已删除对话'}</strong><p>{job.detail || jobLabels[job.status]}</p>{job.replyText && <blockquote>{job.replyText}</blockquote>}</div><span className={`job-status ${job.status}`}>{job.status === 'queued' ? `${Math.max(0, Math.ceil((new Date(job.dueAt).getTime() - now) / 1000))} 秒后${(job.mode ?? 'send') === 'draft' ? '生成草稿' : '发送'}` : jobLabels[job.status]}<small>{timeLabel(job.createdAt)}</small></span></div>)}</div> : <Empty icon={Clock3} title="还没有自动处理任务">开启全局和联系人开关，再加入一条模拟来信即可体验。</Empty>}</section>
+  return <><section className="activity-jobs"><div className="panel-heading"><h2><Clock3 size={18} />自动处理任务</h2><span className="label-pill">最近 {Math.min(12, state.jobs.length)} 条</span></div>{state.jobs.length ? <div className="jobs-list">{state.jobs.slice(-12).reverse().map(job => <div className="job-row" key={job.id}><span className={`job-state ${job.status}`}>{['queued', 'generating'].includes(job.status) ? <LoaderCircle size={15} className="spin" /> : ['sent', 'drafted'].includes(job.status) ? <Check size={15} /> : <Pause size={15} />}</span><div><strong>{state.conversations.find(c => c.id === job.conversationId)?.name || '已删除对话'}</strong><p>{job.detail || jobLabels[job.status]}</p>{job.replyText && <blockquote>{job.replyText}</blockquote>}</div><span className={`job-status ${job.status}`}>{job.status === 'queued' ? `${Math.max(0, Math.ceil((new Date(job.dueAt).getTime() - now) / 1000))} 秒后${(job.mode ?? 'send') === 'draft' ? '生成草稿' : '发送'}` : jobLabels[job.status]}<small>{timeLabel(job.createdAt)}</small></span></div>)}</div> : <Empty icon={Clock3} title="还没有自动处理任务">开启全局和联系人开关，再加入一条模拟来信即可体验。</Empty>}</section>
     <div className="section-subtitle"><h2>工作空间动态</h2><span>{state.activity.length} 条记录</span></div><div className="activity-timeline">{state.activity.slice().reverse().map(item => <article className={`activity-item ${item.kind}`} key={item.id}><span className="timeline-marker">{item.kind === 'success' ? <Check size={13} /> : item.kind === 'warning' || item.kind === 'error' ? <CircleHelp size={13} /> : <ActivityIcon size={13} />}</span><div><h3>{item.title}</h3><p>{item.detail}</p></div><time>{dateLabel(item.createdAt)} {timeLabel(item.createdAt)}</time></article>)}{!state.activity.length && <Empty icon={ActivityIcon} title="新的开始">你的操作与运行结果会显示在这里。</Empty>}</div></>;
 }
 

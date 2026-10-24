@@ -101,7 +101,7 @@ export function VirtualMessageList<T extends { id: string }>({
         <>
           {header}
           {items.map(renderItem)}
-          {empty}
+          {items.length === 0 && empty}
         </>
       )}
       {footer}
