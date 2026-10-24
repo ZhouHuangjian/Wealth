@@ -214,3 +214,31 @@ test('long task heartbeats update the snapshot without duplicating work or ackno
   release();await work;await worker.tick();
   assert.equal(executions,1);assert.equal(requests[2].completed[0].id,queued.id);assert.equal(requests[2].completed[0].status,'succeeded');
 });
+
+test('a rejected heartbeat cancels running model work after device authorization is revoked',async t=>{
+  const store=new Store(':memory:'),queued=command('conversation.message.analyze',{id:randomUUID(),messageId:randomUUID()},Date.now()+900_000);
+  let pulse:(()=>void)|undefined,started!:()=>void,observed:AbortSignal|undefined,calls=0;
+  const entered=new Promise<void>(resolve=>{started=resolve;}),original=setInterval;
+  t.mock.method(globalThis,'setInterval',((callback:()=>void,ms:number)=>{if(ms===30_000)pulse=callback;return original(callback,ms);}) as typeof setInterval);
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,snapshot:()=>({version:1}),
+    execute:async(_command,signal)=>{observed=signal;started();return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));},
+    fetch:async()=>++calls===1?response([queued]):new Response('{}',{status:403})});
+  t.after(()=>{worker.stop();store.close();});
+  const work=worker.tick();await entered;pulse!();await work;
+  const scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex');
+  assert.equal(observed!.aborted,true);assert.equal(store.remoteReceipts(scope)[0].status,'failed');assert.equal(calls,2);
+});
+
+test('a bounded history job reports resumable cached work instead of claiming a configuration failure',async t=>{
+  const store=new Store(':memory:');let now=Date.now();
+  store.cacheSet('history:contact','completed',{summary:'合成已完成分段'});
+  const timers:{at:number;controller:AbortController}[]=[];
+  t.mock.method(AbortSignal,'timeout',(ms:number)=>{const controller=new AbortController();timers.push({at:now+ms,controller});return controller.signal;});
+  const queued=command('conversation.message.analyze',{id:randomUUID(),messageId:randomUUID()},now+900_000);
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,now:()=>now,snapshot:()=>({}),
+    execute:async()=>{now+=840_001;for(const timer of timers)if(timer.at<=now)timer.controller.abort();return {};},fetch:async()=>response([queued])});
+  t.after(()=>{worker.stop();store.close();});await worker.tick();
+  const scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex');
+  const receipt=store.remoteReceipts(scope,now)[0];assert.equal(receipt.status,'failed');assert.match(receipt.error,/任务时限.*保存在本机.*复用/);
+  assert.deepEqual(store.cacheGet('history:contact','completed'),{summary:'合成已完成分段'});
+});

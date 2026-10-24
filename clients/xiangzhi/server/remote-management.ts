@@ -14,6 +14,7 @@ type Options = {
   fetch?:typeof fetch; now?:()=>number; intervalMs?:number;
 };
 const MAX_RESPONSE = 64*1024;
+const HISTORY_COMMANDS:readonly RemoteCommand['type'][]=['conversation.basis.generate','conversation.memory.compress','conversation.message.analyze','conversation.drafts.generate'];
 type Receipt=ReturnType<Store['remoteReceipts']>[number];
 /** Keep unsent receipts durable; only the prefix acknowledged by this poll is removed. */
 export function batchRemoteReceipts(snapshot:Record<string,unknown>,receipts:readonly Receipt[]):Receipt[]{
@@ -29,7 +30,7 @@ export function batchRemoteReceipts(snapshot:Record<string,unknown>,receipts:rea
   return selected;
 }
 export function remoteCommandTimeout(command:RemoteCommand,now:number,serverTime:number):number{
-  const historyJob=['conversation.basis.generate','conversation.memory.compress','conversation.message.analyze','conversation.drafts.generate'].includes(command.type);
+  const historyJob=HISTORY_COMMANDS.includes(command.type);
   return Math.min(historyJob?HISTORY_JOB_TIMEOUT_MS:command.type==='conversation.message.recognize'?120_000:command.type==='conversation.refresh'?65_000:30_000,Math.max(1,Date.parse(command.expires_at)-now),Math.max(1,Date.parse(command.expires_at)-serverTime));
 }
 /** Outbound polling uses only the bound Wealth origin. Receipts survive process restarts. */
@@ -54,7 +55,7 @@ export class RemoteManagement {
   invalidate(paused=false) {this.revision++;this.active?.abort();this.lastConnectedAt=null;this.error=false;if(paused){this.store.remoteRequestPause();this.disabledReportAttempted=false;}}
   stop() {this.closed=true;this.invalidate();if(this.timer)clearInterval(this.timer);this.timer=null;}
   /** Keep the device online while one long task runs; never execute polled work here. */
-  private keepAlive(signal:AbortSignal,current:()=>boolean,legacyMode:boolean) {
+  private keepAlive(controller:AbortController,signal:AbortSignal,current:()=>boolean,legacyMode:boolean) {
     let pending:Promise<void>|null=null;
     const pulse=()=>{
       if(pending||signal.aborted||!current())return;
@@ -68,6 +69,7 @@ export class RemoteManagement {
             method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:`Bearer ${this.options.config().token}`},
             body:JSON.stringify({snapshot,completed:[]}),signal:AbortSignal.any([signal,AbortSignal.timeout(15_000)])});
           await response.body?.cancel();
+          if(response.status===401||response.status===403){controller.abort();return;}
           if(current()&&!signal.aborted){
             this.error=!response.ok;
             if(response.ok)this.lastConnectedAt=new Date(this.options.now?.()??Date.now()).toISOString();
@@ -128,16 +130,25 @@ export class RemoteManagement {
           if(!this.store.remoteClaim(scope,command.id,expires)){this.store.remoteReplay(scope,command.id);continue;}
           let result:Record<string,unknown>={},error='',status:'succeeded'|'failed'='succeeded';
           let stopHeartbeat:(()=>Promise<void>)|undefined;
+          let deadline:AbortSignal|undefined;
           try {
             if(expires<=now||expires<=Date.parse(receipt.server_time))throw new Error('远程操作已过期。');
             if(legacyMode&&!['settings.patch','contacts.search','conversation.add','conversation.patch'].includes(command.type))throw new Error('服务器尚未更新，请稍后重试此功能。');
-            const commandSignal=AbortSignal.any([controller.signal,AbortSignal.timeout(remoteCommandTimeout(command,now,Date.parse(receipt.server_time)))]);
-            stopHeartbeat=this.keepAlive(commandSignal,current,legacyMode);
+            deadline=AbortSignal.timeout(remoteCommandTimeout(command,now,Date.parse(receipt.server_time)));
+            const commandSignal=AbortSignal.any([controller.signal,deadline]);
+            stopHeartbeat=this.keepAlive(controller,commandSignal,current,legacyMode);
             result=await this.options.execute(command,commandSignal);
             commandSignal.throwIfAborted();
             if(Buffer.byteLength(JSON.stringify({snapshot,completed:[{id:command.id,status:'succeeded',result,error:''}]}))>MAX_REMOTE_POLL_BYTES)throw new Error('远程结果过大，请先在 Mac 整理。');
             if(!current())throw new Error('连接或远程管理设置已更改。');
-          } catch (cause) {status='failed';result={};error='本地执行未完成，请核对当前配置后重试。';if(!this.closed)this.options.onFailure?.(cause);}
+          } catch (cause) {
+            status='failed';result={};
+            const timedOut=deadline?.aborted&&!controller.signal.aborted;
+            error=timedOut&&HISTORY_COMMANDS.includes(command.type)
+              ?'本次整理达到任务时限，已完成的历史分段保存在本机；再次操作会复用这些分段。'
+              :'本地执行未完成，请核对当前配置后重试。';
+            if(!this.closed)this.options.onFailure?.(timedOut?new Error(error):cause);
+          }
           finally {await stopHeartbeat?.();}
           if(this.closed)return;
           if(!current()){status='failed';result={};error='连接或远程管理设置已更改，本次结果未采用。';}
