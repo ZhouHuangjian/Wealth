@@ -1,0 +1,332 @@
+{
+  "observation_type": "Read-only direct public endpoint recheck; original responses only in ignored runtime. No production data or code mutation.",
+  "observed_at": "2026-10-13T11:40:24.003596+00:00",
+  "prior_record": "sina-reference-source-probe.json",
+  "observations": [
+    {
+      "code": "017641",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=017641",
+      "request_started_at": "2026-10-13T11:40:24.003987+00:00",
+      "fetched_at": "2026-10-13T11:40:24.527878+00:00",
+      "http_status": 200,
+      "response_sha256": "8c3f30c70553dfdb81f1b541df27f934ab5804951a34f046efb5f147aedd7fec",
+      "old_fetched_at": "2026-10-13T10:41:22.660698+00:00",
+      "old_response_sha256": "cf50ac82424737ec4214cf6abf6a5b4748b8c2a3344e3b23714af828146bde7b",
+      "old_baseline": {
+        "worth": "1.7251",
+        "worth_date": "20261009",
+        "worth_rate": "0.0050101951645792"
+      },
+      "new_baseline": {
+        "worth": "1.7237",
+        "worth_date": "20261012",
+        "worth_rate": "-0.00081154715668661"
+      },
+      "count": 455,
+      "old_count": 455,
+      "old_last": {
+        "symbol": "017641",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "1.7203",
+        "growthrate": "-0.002788",
+        "nav_pct": "-0.2788",
+        "pre_nav2": "1.7199",
+        "growthrate2": "-0.003038",
+        "nav2_pct": "-0.3038"
+      },
+      "new_last": {
+        "symbol": "017641",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "1.7203",
+        "growthrate": "-0.002788",
+        "nav_pct": "-0.2788",
+        "pre_nav2": "1.7199",
+        "growthrate2": "-0.003038",
+        "nav2_pct": "-0.3038"
+      },
+      "last_point_same": true,
+      "entire_networth_series_same": true,
+      "new_series_sha256": "ef6e56832c342afc681906fb6b3839d7423fc1335bf590098433fa1f2b5666bf",
+      "old_series_sha256": "ef6e56832c342afc681906fb6b3839d7423fc1335bf590098433fa1f2b5666bf",
+      "top_level_changed_keys": [
+        "worth",
+        "worth_date",
+        "worth_rate"
+      ],
+      "against_current_baseline": {
+        "computed_price": "1.7188943244",
+        "absolute_mismatch": "0.0014056756",
+        "rounding_tolerance": "0.00010072245",
+        "consistent": false
+      },
+      "against_previous_observed_baseline": {
+        "computed_price": "1.7202904212",
+        "absolute_mismatch": "0.0000095788",
+        "rounding_tolerance": "0.00010072315",
+        "consistent": true
+      }
+    },
+    {
+      "code": "019305",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=019305",
+      "request_started_at": "2026-10-13T11:40:24.004976+00:00",
+      "fetched_at": "2026-10-13T11:40:24.597732+00:00",
+      "http_status": 200,
+      "response_sha256": "7d981f05d56358d91d01b8cc8ab085f5e09c06829a75383bd8b8ab3f471d1d07",
+      "old_fetched_at": "2026-10-13T10:41:22.660903+00:00",
+      "old_response_sha256": "252ea8ece1652ffeefedc7ce1f0ecbe46cefb3b41706c9c4ebb83390969f8fdb",
+      "old_baseline": {
+        "worth": "1.7083",
+        "worth_date": "20261009",
+        "worth_rate": "0.0050005883045064"
+      },
+      "new_baseline": {
+        "worth": "1.7068",
+        "worth_date": "20261012",
+        "worth_rate": "-0.00087806591348114"
+      },
+      "count": 455,
+      "old_count": 455,
+      "old_last": {
+        "symbol": "019305",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "1.7035",
+        "growthrate": "-0.002797",
+        "nav_pct": "-0.2797",
+        "pre_nav2": "1.7031",
+        "growthrate2": "-0.003038",
+        "nav2_pct": "-0.3038"
+      },
+      "new_last": {
+        "symbol": "019305",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "1.7035",
+        "growthrate": "-0.002797",
+        "nav_pct": "-0.2797",
+        "pre_nav2": "1.7031",
+        "growthrate2": "-0.003038",
+        "nav2_pct": "-0.3038"
+      },
+      "last_point_same": true,
+      "entire_networth_series_same": true,
+      "new_series_sha256": "ef65e3f267329d13afd3e7edaa49f4fbe5de8e260c87b28535c1e1578c543cce",
+      "old_series_sha256": "ef65e3f267329d13afd3e7edaa49f4fbe5de8e260c87b28535c1e1578c543cce",
+      "top_level_changed_keys": [
+        "worth",
+        "worth_date",
+        "worth_rate"
+      ],
+      "against_current_baseline": {
+        "computed_price": "1.7020260804",
+        "absolute_mismatch": "0.0014739196",
+        "rounding_tolerance": "0.00010071355",
+        "consistent": false
+      },
+      "against_previous_observed_baseline": {
+        "computed_price": "1.7035218849",
+        "absolute_mismatch": "0.0000218849",
+        "rounding_tolerance": "0.00010071430",
+        "consistent": true
+      }
+    },
+    {
+      "code": "019172",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=019172",
+      "request_started_at": "2026-10-13T11:40:24.005284+00:00",
+      "fetched_at": "2026-10-13T11:40:24.563394+00:00",
+      "http_status": 200,
+      "response_sha256": "3d86dc2929aa1dd009531f38b9c960fcaddb809f5cb9789966bfac6d9fe14ce9",
+      "old_fetched_at": "2026-10-13T10:41:22.660976+00:00",
+      "old_response_sha256": "5c4804b88173ad2beeec19bd77b34b603e5e8b8651e22f3a5b1ad95287c4c38f",
+      "old_baseline": {
+        "worth": "1.8179",
+        "worth_date": "20261009",
+        "worth_rate": "0.0042536736272235"
+      },
+      "new_baseline": {
+        "worth": "1.8053",
+        "worth_date": "20261012",
+        "worth_rate": "-0.0069310743165192"
+      },
+      "count": 455,
+      "old_count": 455,
+      "old_last": {
+        "symbol": "019172",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "1.8066",
+        "growthrate": "-0.006202",
+        "nav_pct": "-0.6202",
+        "pre_nav2": "1.8003",
+        "growthrate2": "-0.009663",
+        "nav2_pct": "-0.9663"
+      },
+      "new_last": {
+        "symbol": "019172",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "1.8066",
+        "growthrate": "-0.006202",
+        "nav_pct": "-0.6202",
+        "pre_nav2": "1.8003",
+        "growthrate2": "-0.009663",
+        "nav2_pct": "-0.9663"
+      },
+      "last_point_same": true,
+      "entire_networth_series_same": true,
+      "new_series_sha256": "948e44c4d63ae0d6f8efe8811b47da09cff7c332e23f5c8aa10262e9ae8dd643",
+      "old_series_sha256": "948e44c4d63ae0d6f8efe8811b47da09cff7c332e23f5c8aa10262e9ae8dd643",
+      "top_level_changed_keys": [
+        "worth",
+        "worth_date",
+        "worth_rate"
+      ],
+      "against_current_baseline": {
+        "computed_price": "1.7941035294",
+        "absolute_mismatch": "0.0124964706",
+        "rounding_tolerance": "0.00010059255",
+        "consistent": false
+      },
+      "against_previous_observed_baseline": {
+        "computed_price": "1.8066253842",
+        "absolute_mismatch": "0.0000253842",
+        "rounding_tolerance": "0.00010059885",
+        "consistent": true
+      }
+    },
+    {
+      "code": "021778",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=021778",
+      "request_started_at": "2026-10-13T11:40:24.005388+00:00",
+      "fetched_at": "2026-10-13T11:40:24.563313+00:00",
+      "http_status": 200,
+      "response_sha256": "d0dd2daed163ca051a292e9a3cb3c85cbe35e2d386dc7b4ff12e6bce6980f689",
+      "old_fetched_at": "2026-10-13T10:41:22.661930+00:00",
+      "old_response_sha256": "ae7919f789a6f988aee37bc3d29b08dd9dfa8de1d747f24421b3d227a9a4d03c",
+      "old_baseline": {
+        "worth": "8.4426",
+        "worth_date": "20261009",
+        "worth_rate": "0.0040793025938656"
+      },
+      "new_baseline": {
+        "worth": "8.3802",
+        "worth_date": "20261012",
+        "worth_rate": "-0.0073910880534433"
+      },
+      "count": 455,
+      "old_count": 455,
+      "old_last": {
+        "symbol": "021778",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "8.4560",
+        "growthrate": "0.001586",
+        "nav_pct": "0.1586",
+        "pre_nav2": "8.4378",
+        "growthrate2": "-0.000565",
+        "nav2_pct": "-0.0565"
+      },
+      "new_last": {
+        "symbol": "021778",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "8.4560",
+        "growthrate": "0.001586",
+        "nav_pct": "0.1586",
+        "pre_nav2": "8.4378",
+        "growthrate2": "-0.000565",
+        "nav2_pct": "-0.0565"
+      },
+      "last_point_same": true,
+      "entire_networth_series_same": true,
+      "new_series_sha256": "3befd6f6d32e33022c97a59c4260f55be07faf8415dc5b7d8950be59807a6434",
+      "old_series_sha256": "3befd6f6d32e33022c97a59c4260f55be07faf8415dc5b7d8950be59807a6434",
+      "top_level_changed_keys": [
+        "worth",
+        "worth_date",
+        "worth_rate"
+      ],
+      "against_current_baseline": {
+        "computed_price": "8.3934909972",
+        "absolute_mismatch": "0.0625090028",
+        "rounding_tolerance": "0.00010426940",
+        "consistent": false
+      },
+      "against_previous_observed_baseline": {
+        "computed_price": "8.4559899636",
+        "absolute_mismatch": "0.0000100364",
+        "rounding_tolerance": "0.00010430060",
+        "consistent": true
+      }
+    },
+    {
+      "code": "270042",
+      "url": "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/FdFundService.getEstimateNetworthPic?symbol=270042",
+      "request_started_at": "2026-10-13T11:40:24.008299+00:00",
+      "fetched_at": "2026-10-13T11:40:24.528051+00:00",
+      "http_status": 200,
+      "response_sha256": "dae980fd2af756e0de1def3f708c25d78f073578b364c4822beecd4e95684134",
+      "old_fetched_at": "2026-10-13T10:41:23.112249+00:00",
+      "old_response_sha256": "9361a09aaf732088faa5d295bf64c53fc01d3a4873afee214c65abe6638f6a45",
+      "old_baseline": {
+        "worth": "8.4745",
+        "worth_date": "20261009",
+        "worth_rate": "0.0040876777251186"
+      },
+      "new_baseline": {
+        "worth": "8.4119",
+        "worth_date": "20261012",
+        "worth_rate": "-0.0073868664817985"
+      },
+      "count": 455,
+      "old_count": 455,
+      "old_last": {
+        "symbol": "270042",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "8.4880",
+        "growthrate": "0.001589",
+        "nav_pct": "0.1589",
+        "pre_nav2": "8.4697",
+        "growthrate2": "-0.000565",
+        "nav2_pct": "-0.0565"
+      },
+      "new_last": {
+        "symbol": "270042",
+        "pre_date": "2026-10-13",
+        "min_time": "05:04:00",
+        "pre_nav": "8.4880",
+        "growthrate": "0.001589",
+        "nav_pct": "0.1589",
+        "pre_nav2": "8.4697",
+        "growthrate2": "-0.000565",
+        "nav2_pct": "-0.0565"
+      },
+      "last_point_same": true,
+      "entire_networth_series_same": true,
+      "new_series_sha256": "32ae3a78a0a815dcfc727c3748448dc66865ba46abe2d88db1827712865f4e55",
+      "old_series_sha256": "32ae3a78a0a815dcfc727c3748448dc66865ba46abe2d88db1827712865f4e55",
+      "top_level_changed_keys": [
+        "worth",
+        "worth_date",
+        "worth_rate"
+      ],
+      "against_current_baseline": {
+        "computed_price": "8.4252665091",
+        "absolute_mismatch": "0.0627334909",
+        "rounding_tolerance": "0.00010428540",
+        "consistent": false
+      },
+      "against_previous_observed_baseline": {
+        "computed_price": "8.4879659805",
+        "absolute_mismatch": "0.0000340195",
+        "rounding_tolerance": "0.00010431670",
+        "consistent": true
+      }
+    }
+  ]
+}

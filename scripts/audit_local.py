@@ -136,6 +136,7 @@ def main():
     elif options.action == "probe":
         choices = {
             "concurrency",
+            "dca-top-up-concurrency",
             "restart-prepare",
             "restart-completed-prepare",
             "restart-recover",

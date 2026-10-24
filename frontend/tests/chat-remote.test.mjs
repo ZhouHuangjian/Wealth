@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   changedRemoteSettings,
+  changedRemoteConversation,
   commandPending,
   remoteConnectionState,
   remoteResponseMatches,
@@ -81,4 +82,220 @@ test("queued and received commands are not presented as completed operations", (
     assert.equal(commandPending({ status }), true);
   for (const status of ["succeeded", "failed", "expired", "cancelled"])
     assert.equal(commandPending({ status }), false);
+});
+
+test("nested model choices are allowlisted and do not submit local credentials", () => {
+  const current = {
+    provider: "codex",
+    modelName: "",
+    replyModels: [],
+    analysis: { provider: "qwen", modelName: "small", thinkingEnabled: false },
+  };
+  const edited = {
+    ...current,
+    revision: "private-snapshot-revision",
+    analysis: {
+      provider: "qwen",
+      modelName: "large",
+      thinkingEnabled: true,
+      apiKey: "synthetic-secret",
+      modelUrl: "https://invalid.example",
+      allowRemoteModel: true,
+    },
+    replyModels: [
+      {
+        id: "choice-a",
+        provider: "compatible",
+        modelPreset: "qwen",
+        modelName: "large",
+        label: "比较",
+        apiKey: "synthetic-secret",
+      },
+    ],
+  };
+  assert.deepEqual(changedRemoteSettings(current, edited), {
+    analysis: { provider: "qwen", modelName: "large", thinkingEnabled: true },
+    replyModels: [
+      {
+        id: "choice-a",
+        provider: "compatible",
+        modelPreset: "qwen",
+        modelName: "large",
+        label: "比较",
+      },
+    ],
+  });
+  assert.deepEqual(
+    changedRemoteSettings(current, {
+      ...current,
+      analysis: { ...current.analysis },
+    }),
+    {},
+  );
+});
+
+test("contact edits preserve inheritance, scope changed fields, and strip hidden settings", async () => {
+  const { changedRemoteConversation } = await import(
+    "../src/chat-remote-model.ts"
+  );
+  const current = {
+    id: "person-a",
+    name: "A",
+    note: "",
+    enabled: true,
+    autoReplyEnabled: false,
+    processing: {
+      intentEnabled: true,
+      replyModels: [{ id: "model-a", provider: "codex", modelName: "" }],
+    },
+  };
+  assert.deepEqual(
+    changedRemoteConversation(current, {
+      ...current,
+      processing: {
+        ...current.processing,
+        autoRecognizeImages: false,
+        affinityEnabled: false,
+        analysisModel: null,
+        memoryModel: null,
+      },
+    }),
+    { id: "person-a" },
+  );
+  assert.deepEqual(
+    changedRemoteConversation(current, {
+      ...current,
+      name: " A ",
+      processing: {
+        intentEnabled: false,
+        autoRecognizeImages: true,
+        replyModels: null,
+        analysisModel: {
+          id: "analysis-a",
+          provider: "compatible",
+          modelPreset: "qwen",
+          modelName: "small",
+          modelUrl: "https://invalid.example",
+          apiKey: "synthetic-secret",
+        },
+        unknownFlag: true,
+      },
+    }),
+    {
+      id: "person-a",
+      processing: {
+        intentEnabled: false,
+        autoRecognizeImages: true,
+        replyModels: null,
+        analysisModel: {
+          id: "analysis-a",
+          provider: "compatible",
+          modelPreset: "qwen",
+          modelName: "small",
+        },
+      },
+    },
+  );
+});
+
+test("legacy devices cannot receive new profile or memory commands", async () => {
+  const { supportsRemoteCommand } = await import("../src/chat-remote-model.ts");
+  assert.equal(supportsRemoteCommand(null, "conversation.profile.get"), false);
+  assert.equal(
+    supportsRemoteCommand(
+      { version: 1, capabilities: {} },
+      "conversation.patch",
+    ),
+    true,
+  );
+  assert.equal(
+    supportsRemoteCommand(
+      { version: 1, capabilities: {} },
+      "conversation.profile.get",
+    ),
+    false,
+  );
+  assert.equal(
+    supportsRemoteCommand(
+      {
+        version: 2,
+        capabilities: { commandTypes: ["conversation.profile.get"] },
+      },
+      "conversation.profile.get",
+    ),
+    true,
+  );
+  assert.equal(
+    supportsRemoteCommand(
+      {
+        version: 2,
+        capabilities: { commandTypes: ["conversation.profile.get"] },
+      },
+      "conversation.memory.patch",
+    ),
+    false,
+  );
+});
+
+test("model candidates follow both provider and supported input instead of mixing model families", async () => {
+  const { remoteModelOptions } = await import("../src/chat-remote-model.ts");
+  const models = [
+    { id: "codex-text", label: "文字模型", inputModalities: ["text"] },
+    {
+      id: "codex-image",
+      label: "图片模型",
+      inputModalities: ["text", "image"],
+    },
+  ];
+  assert.deepEqual(
+    remoteModelOptions("codex", "reply", models).map((m) => m.id),
+    ["codex-text", "codex-image"],
+  );
+  assert.deepEqual(
+    remoteModelOptions("codex", "vision", models).map((m) => m.id),
+    ["codex-image"],
+  );
+  assert.deepEqual(remoteModelOptions("codex", "audio", models), []);
+  assert.equal(
+    remoteModelOptions("qwen", "analysis", models).every((m) =>
+      m.id.startsWith("qwen"),
+    ),
+    true,
+  );
+  assert.deepEqual(remoteModelOptions("compatible", "analysis", models), []);
+});
+
+test("emotion and self-review switches produce a scoped patch without changing other contact options", () => {
+  const original = {
+    id: "contact",
+    name: "合成联系人",
+    revision: "a".repeat(64),
+    processing: {
+      intentEnabled: true,
+      affinityEnabled: true,
+      emotionEnabled: false,
+      replyReviewEnabled: false,
+      memoryEnabled: true,
+    },
+  };
+  const patch = changedRemoteConversation(original, {
+    ...original,
+    processing: {
+      ...original.processing,
+      emotionEnabled: true,
+      replyReviewEnabled: true,
+    },
+  });
+  assert.deepEqual(patch.processing, {
+    emotionEnabled: true,
+    replyReviewEnabled: true,
+  });
+  assert.equal(patch.id, original.id);
+  assert.deepEqual(
+    changedRemoteConversation(original, {
+      ...original,
+      processing: { ...original.processing },
+    }),
+    { id: original.id },
+  );
 });

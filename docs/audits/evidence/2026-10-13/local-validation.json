@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-13",
+  "environment": "macOS Python 3.12.3 PostgreSQL 18.6 isolated :55443; Node 22",
+  "phase_full_backend": {
+    "passed": 1676,
+    "subtests": 12,
+    "skipped": 0,
+    "seconds": 224.05,
+    "final_metadata_guard_included": false
+  },
+  "final_metadata_regression": {
+    "passed": 24,
+    "skipped": 0
+  },
+  "final_frontend": {
+    "passed": 196,
+    "skipped": 0,
+    "typecheck": true,
+    "build": true,
+    "format": true
+  },
+  "django_check": true,
+  "migration_drift": false,
+  "release_guard_tests": 8,
+  "production_deployed": false,
+  "logs": {
+    "/tmp/wealth-estimate-full-20261013.log": "17b0d281e1275fdf2c93dec12955f00fadc19d316e1e22d6ef90afe51d63f6b3",
+    "/tmp/wealth-estimate-final-targeted-20261013.log": "96aaeb0b2bea7044272f4e8d7053e8c2fe4a4335109f4de2605bcfba288f5f41",
+    "/tmp/wealth-estimate-metadata-final-20261013.log": "dabcc5f2137061f1a5cf45cffdabd9561789ee73846790fbfddbbf76b0e5f6b8",
+    "/tmp/wealth-estimate-frontend-final-20261013.log": "2ea7897b04d571bd5389d478e70e1242a5250219dbebc7005b823f041c1ba197",
+    "/tmp/wealth-estimate-frontend-final-build-20261013.log": "c5db617e6441a9b89b4fbab9f76f312f7a2f46906bd60bee3ba7fd0364c179e0",
+    "/tmp/wealth-estimate-frontend-format-20261013.log": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+    "/tmp/wealth-estimate-check-20261013.log": "c0f41e9d77fda2dc38b65183611472aa000dc0dc520211e6ca4ca14f52e1024d",
+    "/tmp/wealth-estimate-release-safety-20261013.log": "9ceb506219ec66b4ac461e2be68a63d4fc3b7e769be134d33eb3d17436830dcb"
+  },
+  "ui": {
+    "environment": "Synthetic ordinary owner at localhost:18093, no external market access",
+    "verified": [
+      "partial total and item coverage",
+      "native USD return preserved when FX missing",
+      "home and holdings links locate correct fund quotes",
+      "FX record navigation",
+      "hidden-amount details reveal no values",
+      "final rebuilt homepage"
+    ],
+    "screenshots": [
+      "estimate-return-home.png",
+      "estimate-return-details.png"
+    ]
+  }
+}

@@ -21,7 +21,7 @@ import {
 } from "antd";
 import { Download, FileUp, Plus, Check, ArrowRight } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { dcaNextAction } from "../business-action";
+import { dcaCashReconciliationAction, dcaNextAction } from "../business-action";
 import { dcaAutomationStatusLabel } from "../dca-automation";
 import {
   Blank,
@@ -1437,6 +1437,15 @@ export function Occurrences({
                   r.automation_enabled || r.automation?.requires_action ? (
                     (() => {
                       const action = actionFor(r);
+                      const cashAction =
+                        r.automation?.status === "waiting_cash" &&
+                        action?.kind === "plan"
+                          ? dcaCashReconciliationAction(
+                              space.id,
+                              r,
+                              plans.find((plan) => plan.id === r.plan_id),
+                            )
+                          : null;
                       if (!action)
                         return (
                           <Tooltip
@@ -1457,19 +1466,31 @@ export function Occurrences({
                           </Tooltip>
                         );
                       return (
-                        <Tooltip
-                          title={`${action.description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
-                        >
-                          <Button
-                            type="link"
-                            size="small"
-                            onClick={() => followAction(r)}
+                        <Space direction="vertical" size={0}>
+                          <Tooltip
+                            title={`${action.description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
                           >
-                            {space.role === "viewer" && action.kind === "match"
-                              ? "查看核对说明"
-                              : action.label}
-                          </Button>
-                        </Tooltip>
+                            <Button
+                              type="link"
+                              size="small"
+                              onClick={() => followAction(r)}
+                            >
+                              {space.role === "viewer" &&
+                              action.kind === "match"
+                                ? "查看核对说明"
+                                : action.label}
+                            </Button>
+                          </Tooltip>
+                          {cashAction && (
+                            <Button
+                              type="link"
+                              size="small"
+                              onClick={() => navigate(cashAction.to)}
+                            >
+                              {cashAction.label}
+                            </Button>
+                          )}
+                        </Space>
                       );
                     })()
                   ) : r.event_id ? (

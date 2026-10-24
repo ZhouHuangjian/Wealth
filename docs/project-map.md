@@ -1,6 +1,8 @@
 # Wealth 项目地图与维护入口
 
-维护日期：2026-10-10。初始审查基线 `e379dfe67a715d9913af246eba021c7b26ce45d1`（main）；2.12.0 已发布应用提交 `c99d3b35bc82e38cb52559333a30e7f86e527605`。
+维护日期：2026-10-13。2.14.2已于2026-10-13 19:34:36（北京时间）部署，应用`71f322456e8f64651bfc6b8d1da6e3599eece586`、schema`0015_chat_remote_controls`。指定定投补足、受限海外参考、实际镜像与验证范围见[最新发布记录](release-2.14.2.md)。初始审查基线`e379dfe67a715d9913af246eba021c7b26ce45d1`及2.14.1历史记录保留；后续状态见[开发状态](development-status.md)。
+2.14.4空仓/休市批次正在验收，当前实现及边界见[发布记录](release-2.14.4.md)。新增维护入口`return_account_state`、`return_sessions`与`ReturnEvidence`/`profit_calendar`，规则唯一维护于领域§14.4，回归与排障见RUNBOOK§8.10。
+
 本文负责“去哪里查、改哪里、测什么”；业务定义只维护在下面列出的唯一位置。覆盖和运行结果见[本次审查](audits/system-audit-2026-10-09.md)，不能从文件存在或测试数量推断已部署。
 
 2.12.0 的展示定位、日期倒序、表单默认值和独立娱乐角已于 2026-10-10 保数据发布，08:13:25（北京时间）最终验收通过；对应镜像、回归及运行范围见[发布说明](release-2.12.0.md)和[部署证据](audits/evidence/2026-10-10/ux-deployment-results.json)。只读接口维护在[api-contract§25](api-contract.md#25-2120只读展示与处理定位)，操作和验收维护在[RUNBOOK§8.6](RUNBOOK.md#86-2120-定位与保数据发布)。这批不新增账务事实、资产类型或迁移，未执行历史重算或数据修复。
@@ -13,7 +15,7 @@
 | 账务不变量、定投状态、日期、收益、估算、数据质量 | [domain-model](domain-model.md#12-现行业务基线2026-10-09) | 当前实现、目标行为、待决策分列；不要从版本发布说明拼当前规则 |
 | 请求、响应、权限、幂等、分页 | [api-contract](api-contract.md) | 以函数视图为准；没有已验证的自动 OpenAPI |
 | 导入、证据归并、核对和更正 | [import-reconciliation](import-reconciliation.md#15-标准基金核对的现行边界2026-10-09) | 通用格式与机构原生兼容分开 |
-| 问题、修复批次、状态 | [development-status](development-status.md#2026-10-09-系统审查与修复队列) | AUD 为确认发现，R 为未复现风险；修复不能仅关闭文档条目 |
+| 问题、修复批次、状态 | [development-status](development-status.md) | AUD/EST 为稳定问题编号，R 为未复现风险；修复不能仅关闭文档条目 |
 | 产品依据、待定政策、真实样本 | [open-decisions](open-decisions.md) | 保留 D01–D11；新增 OD 编号；负责人未知留“待指定” |
 | 排障、安全重试、重算、回归、回滚 | [RUNBOOK](RUNBOOK.md#8-定投与收益维护基线2026-10-09) | 初始审查使用隔离环境；2.12保数据部署已获授权并完成，生产恢复和历史修订仍需具体授权 |
 | 场景与放行 | [delivery-and-acceptance](delivery-and-acceptance.md#8-2026-10-09-验收场景与持续回归)、[browser-verification](browser-verification.md) | 历史 G0/A/AT 是验收编号，不代表本轮全组通过 |
@@ -59,7 +61,7 @@ flowchart LR
 | 账户、现金与负债、期初 | Assets / AccountOpeningDate | accounts、accounts/{id}/opening-date、profile | account_opening.initialize_account/correct_opening_date、account_balances.account_balance_projection、recording_coverage | Account/Event/Snapshot/Resource；Outbox | test_account_opening_v24、test_account_opening_edit_v255、test_account_balances、test_empty_account_defaults |
 | 产品身份、已有持仓补录 | InvestmentWorkspace / ProductIdentity / HoldingManagement | market/resolve、instruments、holdings | instrument_metadata、metadata_service、investments.record_holding、institution_funding.prepare_holding_funding/transfer_holding_shortfall | Instrument、opening Event/PositionMovement、holding_checks Resource；行情刷新 | test_instrument_metadata、test_metadata_api_v23、test_institution_funding_v25、test_holding_checks_v251 |
 | 买卖、转换、在途 | Cashbook → 投资交易；持仓行内操作；FundBuy/FundConvert/HoldingTrade | investment-trades、fund-orders/defaults、fund-orders、fund-orders/{id}/transition、fund-orders/convert | investment_trades.record_trade、fund_orders.save_order/estimate/transition/convert_fund、pending_purchases.PendingPurchases、ledger | Resource、Event、JournalLine、PositionMovement；scan_orders | test_fund_orders_v270、test_investments_v3、test_pending_purchases_v265 |
-| 自动定投、历史定投 | 持仓行内“定投”；持仓更多→全部定投；Investments / DcaPlanManager / DcaHistoryImport | plans、plans/{id}/automation、automation/run、history-import | planning.save_resource/generate_schedule、dca_automation.run_plan/_process、dca_history、dca_import、dca_schedule.prune_future_occurrences | Resource/ResourceRevision/Occurrence/Event；scan_all，每300秒 | test_dca_automation_v264、test_dca_once_v280、test_dca_due_schedule、test_dca_history_v252、test_dca_import_v253 |
+| 自动定投、历史定投 | 持仓行内“定投”；持仓更多→全部定投；Investments / DcaPlanManager / DcaHistoryImport | plans、plans/{id}/automation、automation/run、history-import | planning.save_resource/generate_schedule、dca_automation.run_plan/_process、dca_history、dca_import、dca_schedule.prune_future_occurrences | Resource/ResourceRevision/Occurrence/Event；scan_all，每300秒 | test_dca_top_up_v2142、audit_scenarios.probes dca-top-up-concurrency、test_dca_automation_v264、test_dca_once_v280、test_dca_due_schedule、test_dca_history_v252、test_dca_import_v253 |
 | 流水、消费、收入、转账、退款、预算 | Cashbook | events、events/{id}/reverse、budgets | ledger.post_event/reverse_event、planning.save_resource | Event/JournalLine/Resource；Outbox | test_ledger、test_api、test_final_acceptance、test_finance_math |
 | 导入、重复证据、基金核对 | Cashbook → 账单中心；FundReconciliation / DcaHistoryPreview | imports、mapping/preview/commit/reverse、fund-preview/fund-apply、fund-reconciliation/settings | imports.create_batch/preview/commit_batch、fund_reconciliation.preview/apply/_correct/_attach | ImportBatch/SourceRecord/SourceFact/EvidenceLink、私有文件、Event；Outbox | test_import_files、test_fund_reconciliation_v210、test_dca_import_matching_v264 |
 | 分红与再投、拆分 | Cashbook → 基金分红；Dividends | dividends/*、events | dividends 发现/候选/确认、ledger dividend/reinvest/split | Resource notices/candidates、Event/PositionMovement；每小时发现，仅确认记账 | test_dividends_v24、test_final_acceptance、audit_scenarios |
@@ -84,7 +86,7 @@ flowchart LR
 | EvidenceLink、核对与替代 Resource | 证据关系/归并决策可撤销、版本化并审计；不改原推算 payload 来冒充机构确认 |
 | Price / FxRate / Snapshot | 有来源和归属日的观察；行政更正以 superseded/deleted 标记加替代记录；不改原流水 |
 | Resource / ResourceRevision / Occurrence | 计划、配置和进度；已执行期次引用事实，不能随新计划静默重写 |
-| Projection / Outbox / market_quotes | 可重建结果、持久任务、刷新状态；重建绑定修订号，旧任务不能覆盖新修订。overview结构版本唯一维护于reporting.OVERVIEW_CALCULATION_VERSION；2.12为account-equity-v25，GET只读绕过旧结构缓存 |
+| Projection / Outbox / market_quotes | 可重建结果、持久任务、刷新状态；重建绑定修订号，旧任务不能覆盖新修订。overview结构版本唯一维护于reporting.OVERVIEW_CALCULATION_VERSION；2.14.2为account-equity-v27；2.14.1为account-equity-v26，GET只读绕过旧结构缓存；2.12的v25为历史版本 |
 | provider public cache / MarketSymbol | 公开行情缓存与公共身份目录；同源渠道不成为两份独立证据，不缓存私人账户 |
 
 普通查询表与管理 `all_objects` 的差异、RLS 上下文和软删除过滤是维护重点。不要把 JSON Resource 当成随意写入的无约束区。
@@ -95,10 +97,13 @@ flowchart LR
 | --- | --- | --- |
 | 净值选择/冲突恢复 | fund_sources、provider_policy、market_quality、market_sync、reporting.formal_price、ReturnEvidence、holdings、fund_orders、dca_automation、QuoteQualityDetails | 单源/同源/不同日期/真实冲突/身份币种/更正；已有 Price 和隔离需差异预览；不改交易 |
 | 收益归属日期/份额资格 | return_dates、investments._calendar_item、daily_returns、profit-calendar、DailyReturnCard、ProfitCalendar、performance | 案例A/B、费率、赎回、分红/拆分、实际核对；重建收益投影，原始经济日期保留 |
+| 行情刷新节奏/多源估值身份 | settings、fund_sources._data_cache_ttl、market_sync._refresh_is_due/refresh_due/refresh_one、daily_returns.ReturnEvidence.spot | test_estimate_refresh_cadence、test_estimate_availability_20261013：微偏差、锁内复查、队列失败恢复、禁用、独立fetch和身份/tick不匹配；保留原Price和真实时间 |
 | 定投计划/状态/生效配置 | planning、dca_schedule、dca_automation、dca_import、tasks.scan_all、FundOrders、DcaPlanManager、DcaAutomationFields | 到期/月末/假日/未知年历/暂停结束/并发/重启/历史期次；新配置生效范围须明确 |
 | 基金账单核对/更正 | fund_reconciliation、imports、SourceFact/EvidenceLink、return_dates、dca_automation、fund_orders、HoldingManagement | 同订单补证、异订单、部分数据、陈旧预览、后续卖出依赖、跨空间；实际金额差异需显式修订 |
-| 估算/正式替换/跨币种 | market_data、market_sync、daily_returns、portfolio、reporting、行情/首页/持仓/日历组件 | 时间戳/基准/覆盖区间、缺数据、QDII、多日、正式替换、汇率；估算不可生成收益事实 |
-| 首页计算/待办返回结构/投影版本 | reporting.OVERVIEW_CALCULATION_VERSION、reporting.overview、views的overview缓存判断、tasks重算、Home/business-action | test_overview_projection_version：真实旧v24 payload只读绕过、当前v25缓存可用；版本与修订/日期一致才读取缓存，不删除旧Projection或修改原始账务 |
+| 估算/正式替换/跨币种 | market_data、market_sync、daily_returns、portfolio、reporting、行情/首页/持仓/日历组件 | test_portfolio::test_formal_nav_supersedes_same_day_estimate_in_holdings_and_wealth、test_estimate_availability_20261013；同日替换/次日保留、原币资格、FX边界、子报价身份及时间；估算不生成收益事实 |
+| 日历机构权益/资金边界/筛选 | investments.profit_calendar、daily_returns.ReturnEvidence.snapshot/convert、EXTERNAL_FLOWS、ProfitCalendar | test_return_calendar_consistency：首页/日历交叉比较，收入支出退款转账换汇、股息、缺开放日、盘中/正式、无关产品股息筛选、FX日期；只改读投影，不改快照和流水 |
+| 收益缺口与下一步展示 | daily-return.ts、business-action.ts、holding-display.ts、DailyReturnCard、HoldingsOverview、QuotesTable、ProfitCalendar | daily-return.test.mjs、holding-display.test.mjs、business-action.test.mjs；partial零值、条目覆盖、原币/折算、正式+推算、未知身份/路由、隐藏金额和实际浏览器点击 |
+| 首页计算/待办返回结构/投影版本 | reporting.OVERVIEW_CALCULATION_VERSION、reporting.overview、views的overview缓存判断、tasks重算、Home/business-action | test_overview_projection_version：旧v24/v25/v26 payload只读绕过、v27缓存可用；版本与修订/日期一致才读取缓存，不删除旧Projection或修改原始账务 |
 | 期初/机构范围/可用资金 | account_opening、institution_funding、availability、account_balances、portfolio、reporting、reservations | 已有持仓/留存现金/冻结预留/快照去重；保存原期初、修订链和影响预览 |
 | 权限/管理/删除/导出 | views、admin_access、platform_admin、administration_data/purge、platform_cleanup、migrations、文件路径 | runtime RLS、跨空间、撤权后重放/下载、所有者、整事件闭包；删除与备份保留策略单独决定 |
 | 依赖/迁移/启动/发布 | requirements*.txt/lock、package-lock、Dockerfile、compose、settings、CI、local_dev、backup、database_privileges | 独立库迁移/重复init、runtime角色、私有清理表/函数ACL、不可变/RLS、任务及0012恢复；候选SHA/产物/生产镜像分别核对。授权策略唯一维护在scripts/database_privileges.py（AUD-007） |
@@ -134,3 +139,8 @@ flowchart LR
 ## 维护约定
 
 新增/修改规则时：更新它的唯一文档位置 → 记录 AUD/OD 编号与影响 → 先手算受控样本 → 回归页面/API/服务/数据库/任务 → 记录环境、失败、未覆盖 → 审查数据迁移和回滚 → 发布后另核对运行版本。实现、验证、部署是三种不同状态。
+
+
+2.14.2新增定位：`backend/wealth/sina_fund_estimate.py`只负责来源报价/基准/时间解析；`fund_return_updates.py`负责严格区间计算与正式结果展示，接入`daily_returns.daily_return_overview`，通过`net-worth-comparison`返回，非overview缓存。`frontend/src/pages/LatestFundUpdates.tsx`及`fund-updates.ts`负责逐项原币/缺数/隐藏展示。回归分别为`test_sina_fund_estimate.py`、`test_fund_return_updates_v2142.py`、`fund-updates.test.mjs`、`reference-estimate.test.mjs`。修改需同时检查API§21.1、领域§14.3、RUNBOOK§8.9；历史Price/Event不在本功能重算范围。
+
+2.14.3后续定位：EST-012“参考失效时最近正式收益被遮住”只涉及`fund_return_updates.py`读侧选择及其固定回归；不迁移数据库、不变更今日聚合。规则仍维护于领域模型/API；发布与转场证据见[2.14.3](release-2.14.3.md)。

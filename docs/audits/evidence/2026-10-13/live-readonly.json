@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-10-13T05:13:16.524009+00:00",
+  "version": "2.14.1",
+  "enforced_read_only": true,
+  "session_created": false,
+  "login_performed": false,
+  "manual_refresh_triggered": false,
+  "financial_values_omitted": true,
+  "spaces": [
+    {
+      "api_status": 200,
+      "date": "2026-10-13",
+      "status": "partial",
+      "known_count": 3,
+      "total_count": 8,
+      "missing_count": 5,
+      "amount_available": false,
+      "known_amount_available": true,
+      "reason_counts": {
+        "no_estimate": 5,
+        "available_or_legacy": 3
+      }
+    }
+  ]
+}

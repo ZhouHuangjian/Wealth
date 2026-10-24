@@ -4,10 +4,15 @@ import { accessSync, constants, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute } from 'node:path';
 import type { MessageKind } from '../shared/types.js';
+import {parseEmojiText} from '../shared/emoji.js';
+import {wechatEmojiMetadata} from './emoji-metadata.js';
 
 export interface WechatRecord {
   id: string; sortSeq: string; sentAt: string | null; role: 'self' | 'peer' | 'system';
   kind: MessageKind; text: string; mediaStatus?: 'pending';
+  wechatImage?: {localId?: string; md5?: string};
+  wechatEmoji?: {localId?: string; md5?: string};
+  emojiRecognition?: ReturnType<typeof parseEmojiText>;
 }
 export interface WechatPage { records: WechatRecord[]; hasMore: boolean; accountFingerprint: string }
 export interface WechatContactsPage { contacts: {externalId: string; name: string}[]; hasMore: boolean }
@@ -21,7 +26,8 @@ const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_DIAGNOSTIC_BYTES = 64 * 1024;
 const TIMEOUT_MS = 20_000;
 const INVALID = '微信查询结果格式不完整或不匹配，未接收本批消息。';
-const FAILED = '微信消息读取失败，请在本机检查微信、导出器与已有密钥状态。';
+const FAILED = '本批微信消息读取失败，已保存的消息不受影响；可稍后从断点重试。';
+const PAGINATION_FAILED = '微信查询工具不支持当前分页参数，已保存的消息和断点均已保留；请更新本地程序后续读。';
 const contactPattern = /^(?!-)[A-Za-z0-9_@.-]{1,200}$/;
 const positiveInteger = /^[1-9][0-9]{0,29}$/;
 const unsignedInteger = /^(?:0|[1-9][0-9]{0,29})$/;
@@ -105,11 +111,27 @@ function projectRecord(value: unknown, contact: string): WechatRecord {
     const content = object(row.content);
     if (typeof content.Text !== 'string' || !content.Text.length || content.Text.length > 10_000) throw new Error(INVALID);
     record.kind = 'text'; record.text = content.Text;
+    record.emojiRecognition=parseEmojiText(record.text,record.sentAt??'');
     delete record.mediaStatus;
-  } else if (type === '3') { record.kind = 'image'; record.text = '[图片，待人工查看]'; }
+  } else if (type === '3') {
+    record.kind = 'image'; record.text = '[图片，待人工查看]';
+    // Query exposes Image.md5, but current wx-cli versions omit local_id.
+    // Keep only bounded identifiers; never retain the image XML or a file path.
+    const image = row.content && typeof row.content === 'object' && !Array.isArray(row.content)
+      ? (row.content as Record<string, unknown>).Image : undefined;
+    const md5 = image && typeof image === 'object' && !Array.isArray(image)
+      ? (image as Record<string, unknown>).md5 : undefined;
+    const localId = typeof row.local_id === 'string' && positiveInteger.test(row.local_id) ? row.local_id : undefined;
+    if (typeof md5 === 'string' && /^[a-fA-F0-9]{32}$/.test(md5)) record.wechatImage = {md5: md5.toLowerCase(), ...(localId ? {localId} : {})};
+    else if (localId) record.wechatImage = {localId};
+  }
   else if (type === '34') { record.kind = 'voice'; record.text = '[语音，待人工查看]'; }
   else if (type === '43' || type === '62') { record.kind = 'video'; record.text = '[视频，待人工查看]'; }
-  else if (type === '47') { record.kind = 'emoji'; record.text = '[表情，待人工查看]'; }
+  else if (type === '47') {
+    record.kind = 'emoji'; record.text = '[表情，待人工查看]';
+    const localId=typeof row.local_id==='string'&&positiveInteger.test(row.local_id)?row.local_id:undefined;
+    record.wechatEmoji=wechatEmojiMetadata(row.content,localId);
+  }
   else if (type === '49') {
     record.kind = subType === '6' ? 'file' : 'link';
     record.text = subType === '6' ? '[文件，待人工查看]' : '[分享内容，待人工查看]';
@@ -161,12 +183,65 @@ export const queryWechat: WechatQuery = async (input, signal) => {
     throw new Error('微信查询参数无效，请使用准确的会话 ID 和有效分页范围。');
   }
   if (signal?.aborted) throw new Error('微信消息读取已取消。');
-  const args = ['query', input.contact, '--no-server', '--format', 'json', '--limit', String(input.limit),
-    '--offset', String(input.offset ?? 0), '--order', input.order];
-  if (input.after !== undefined) args.push('--after-sort-seq', input.after);
-  if (input.since !== undefined) args.push('--since', String(input.since));
-  const {stdout, stderr} = await runWechat(args, signal);
-  return parseWechatPage(stdout, stderr, input.contact);
+  // wx-cli forbids a nonzero offset with an anchor. Keep the collector's
+  // durable (anchor, relative offset) contract without sending that combination.
+  const native = async (limit: number, offset: number, after?: string): Promise<WechatPage> => {
+    const args = ['query', input.contact, '--no-server', '--format', 'json', '--limit', String(limit),
+      '--order', input.after === undefined ? input.order : 'asc'];
+    if (after === undefined) args.push('--offset', String(offset));
+    else args.push('--after-sort-seq', after);
+    if (input.since !== undefined) args.push('--since', String(input.since));
+    const {stdout, stderr} = await runWechat(args, signal);
+    const page = parseWechatPage(stdout, stderr, input.contact);
+    if (page.records.length > limit) throw new Error(INVALID);
+    return page;
+  };
+  const offset = input.offset ?? 0;
+  if (input.after === undefined) return native(input.limit, offset);
+  const page = await native(input.limit, 0, input.after);
+  const anchor = BigInt(input.after);
+  const validate = (next: WechatPage) => {
+    if (next.accountFingerprint !== page.accountFingerprint) throw new Error('微信账号在分页期间发生变化，未接收本批消息，请恢复原账号后续读。');
+    if (next.records.some((record, index, records) => index > 0 && BigInt(record.sortSeq) < BigInt(records[index - 1].sortSeq))) throw new Error(INVALID);
+  };
+  validate(page);
+  if (page.records.some(record => BigInt(record.sortSeq) <= anchor)) throw new Error(INVALID);
+  if (offset < page.records.length || !page.hasMore) return {...page, records: page.records.slice(offset)};
+
+  // More than one page can share a sort_seq. Advancing past that sequence
+  // would lose rows. Locate the anchor's absolute lower bound using bounded
+  // unanchored probes, then apply the persisted relative offset. No --all cap.
+  const probe = async (at: number): Promise<WechatRecord | undefined> => {
+    const next = await native(1, at); validate(next); return next.records[0];
+  };
+  let lower = 0, upper = 0;
+  let boundary = await probe(0);
+  if (boundary && BigInt(boundary.sortSeq) <= anchor) {
+    upper = 1;
+    while (true) {
+      boundary = await probe(upper);
+      if (!boundary || BigInt(boundary.sortSeq) > anchor) break;
+      lower = upper + 1;
+      if (upper > Math.floor(Number.MAX_SAFE_INTEGER / 2)) throw new Error(INVALID);
+      upper *= 2;
+    }
+    while (lower < upper) {
+      const middle = lower + Math.floor((upper - lower) / 2);
+      const record = await probe(middle);
+      if (record && BigInt(record.sortSeq) <= anchor) lower = middle + 1;
+      else upper = middle;
+    }
+  }
+  const base = lower;
+  const first = await probe(base), previous = base ? await probe(base - 1) : undefined;
+  if (!first || BigInt(first.sortSeq) <= anchor || (previous && BigInt(previous.sortSeq) > anchor)) {
+    throw new Error('微信历史在分页期间发生变化，已保留断点，请重试本批读取。');
+  }
+  if (!Number.isSafeInteger(base + offset)) throw new Error(INVALID);
+  // Anchor queries are always ASC, including the unanchored fallback.
+  const next = await native(input.limit, base + offset); validate(next);
+  if (next.records.some(record => BigInt(record.sortSeq) <= anchor)) throw new Error(INVALID);
+  return next;
 };
 
 export function parseWechatContacts(stdout: string): WechatContactsPage {
@@ -196,7 +271,8 @@ export const searchWechatContacts: WechatContactSearch = async (query, signal) =
   return parseWechatContacts(stdout);
 };
 
-function runWechat(args: string[], signal?: AbortSignal): Promise<{stdout: string; stderr: string}> {
+/** Internal CLI transport shared with bounded, single-file media reads. */
+export function runWechat(args: string[], signal?: AbortSignal): Promise<{stdout: string; stderr: string}> {
   if (signal?.aborted) return Promise.reject(new Error('微信消息读取已取消。'));
   const command = executable();
   return new Promise((resolve, reject) => {
@@ -239,7 +315,7 @@ function runWechat(args: string[], signal?: AbortSignal): Promise<{stdout: strin
       clearTimeout(timer); if (escalation) clearTimeout(escalation);
       signal?.removeEventListener('abort', abort);
       if (failure) { reject(failure); return; }
-      if (code !== 0) { reject(new Error(FAILED)); return; }
+      if (code !== 0) { reject(new Error(/--offset is not supported with anchor queries/.test(stderr) ? PAGINATION_FAILED : FAILED)); return; }
       resolve({stdout, stderr});
     });
   });

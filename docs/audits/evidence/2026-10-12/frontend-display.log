@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: QDII return date stays on the NAV day, separate from publication and fetch
+ok 1 - QDII return date stays on the NAV day, separate from publication and fetch
+  ---
+  duration_ms: 34.017
+  type: 'test'
+  ...
+# Subtest: unknown provider publication does not become local fetch time
+ok 2 - unknown provider publication does not become local fetch time
+  ---
+  duration_ms: 0.137708
+  type: 'test'
+  ...
+# Subtest: daily return never shows missing or no-position amounts as zero
+ok 3 - daily return never shows missing or no-position amounts as zero
+  ---
+  duration_ms: 0.18
+  type: 'test'
+  ...
+# Subtest: a partial daily return labels known money and suppresses a full portfolio rate
+ok 4 - a partial daily return labels known money and suppresses a full portfolio rate
+  ---
+  duration_ms: 0.149208
+  type: 'test'
+  ...
+# Subtest: a confirmed zero return remains a real zero, while invalid values stay missing
+ok 5 - a confirmed zero return remains a real zero, while invalid values stay missing
+  ---
+  duration_ms: 0.178
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 169.036625

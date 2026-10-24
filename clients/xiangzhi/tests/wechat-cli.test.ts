@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { inspectWechat, parseWechatPage, queryWechat, parseWechatContacts, searchWechatContacts } from '../server/wechat-cli.js';
+import { Store } from '../server/store.js';
+import { WechatCollector } from '../server/wechat-collector.js';
 
 const diagnostic = 'Auto-detected account: wxid_synthetic_123 (source: running-process)\nDirect encrypted open (SQLCipher)\n';
 const row = {sort_seq: '72057594037927937', server_id: '9223372036854775801', msg_type: '1', sub_type: '0',
@@ -31,6 +33,80 @@ async function fakeCli(source: string, run: (directory: string) => Promise<void>
 
 const success = `process.stderr.write(${JSON.stringify(diagnostic)});process.stdout.write(${JSON.stringify(fixture())});`;
 const query = {contact: 'filehelper', limit: 3, order: 'desc' as const};
+
+// Model the installed wx-cli contract, including the combination it rejects.
+const nativePaging = `const fs=require('node:fs');const args=process.argv.slice(2);
+const value=flag=>args.includes(flag)?args[args.indexOf(flag)+1]:undefined;
+const after=value('--after-sort-seq'),offset=Number(value('--offset')||0),limit=Number(value('--limit'));
+fs.appendFileSync(__filename+'.calls',JSON.stringify(args)+'\\n');
+if(after!==undefined&&offset!==0){process.stderr.write('error: --offset is not supported with anchor queries');process.exit(1);}
+let rows=JSON.parse(fs.readFileSync(__filename+'.rows','utf8'));
+if(after!==undefined)rows=rows.filter(r=>BigInt(r.sort_seq)>BigInt(after));
+if(value('--order')==='desc')rows.reverse();
+const items=rows.slice(offset,offset+limit);
+process.stderr.write(${JSON.stringify(diagnostic)});
+process.stdout.write(JSON.stringify({items,paging:{limit,returned:items.length,has_more:offset+limit<rows.length},stats:{skipped:0}}));`;
+
+test('native-compatible pagination resumes a saved boundary and completes long tied sequences without loss', async () => {
+  const start = 72057594037927937n;
+  const rows = Array.from({length: 1330}, (_, index) => ({...row,
+    server_id: String(9223372036854770000n + BigInt(index)),
+    sort_seq: String(index < 100 ? start + BigInt(index) : index < 1301 ? start + 100n : start + BigInt(index - 1200)),
+  }));
+  await fakeCli(nativePaging, async directory => {
+    await writeFile(join(directory, 'wx-cli.rows'), JSON.stringify(rows));
+    const seen: string[] = []; let after = String(start - 1n), offset = 0, complete = false;
+    for (let iteration = 0; iteration < 20; iteration++) {
+      const page = await queryWechat({contact:'filehelper',order:'asc',limit:200,after,offset});
+      seen.push(...page.records.map(record => record.id));
+      if (!page.hasMore) { complete = true; break; }
+      assert.ok(page.records.length);
+      const last = page.records.at(-1)!.sortSeq, cursor = String(BigInt(last) - 1n);
+      offset = (cursor === after ? offset : 0) + page.records.filter(record => record.sortSeq === last).length;
+      after = cursor;
+    }
+    assert.equal(complete, true);
+    assert.deepEqual(seen, rows.map(record => record.server_id));
+    const calls = (await readFile(join(directory,'wx-cli.calls'),'utf8')).trim().split('\n').map(line=>JSON.parse(line) as string[]);
+    assert.ok(calls.some(args=>args.includes('--offset')&&Number(args[args.indexOf('--offset')+1])>200));
+    assert.ok(calls.every(args=>!args.includes('--after-sort-seq')||!args.includes('--offset')));
+    assert.ok(calls.every(args=>Number(args[args.indexOf('--limit')+1])<=200&&!args.includes('--all')));
+  });
+});
+
+test('collector uses the real adapter contract to finish more than one native page and deduplicate rereads', async () => {
+  await fakeCli(nativePaging, async directory => {
+    const rows = Array.from({length: 865}, (_, index)=>({...row, sort_seq:String(index+1), server_id:String(9223372036854770000n+BigInt(index))}));
+    await writeFile(join(directory,'wx-cli.rows'),JSON.stringify(rows));
+    const store = new Store(':memory:');
+    store.update(state=>{state.conversations.push({id:'native-test',name:'合成联系人',avatar:'',color:'',note:'',autoReplyEnabled:false,
+      channel:'wechat',externalId:'filehelper',createdAt:'',updatedAt:'',wechat:{enabled:false,initialized:false,cursor:null,
+        accountFingerprint:null,lastCheckedAt:null,status:'paused',detail:''}});});
+    const live: boolean[] = [], collector = new WechatCollector(store,{onMessages:(_cid,_latest,isLive)=>{live.push(isLive);}});
+    try {
+      await collector.poll('native-test');
+      assert.notEqual(store.read().conversations[0].wechat!.history!.status,'complete');
+      for(let attempt=0;attempt<5&&store.read().conversations[0].wechat!.history!.status!=='complete';attempt++)await collector.poll('native-test');
+      assert.equal(store.read().conversations[0].wechat!.history!.status,'complete');
+      assert.deepEqual(store.read().messages.map(message=>message.externalId),rows.map(record=>record.server_id));
+      await collector.poll('native-test');
+      assert.equal(store.read().messages.length,865);assert.deepEqual(store.read().jobs,[]);
+      assert.ok(live.every(value=>!value));assert.equal(store.read().conversations[0].wechat!.enabled,false);
+    } finally {collector.stop();store.close();}
+  });
+});
+
+test('unanchored fallback rejects account changes and sanitizes known native parameter failures', async () => {
+  const rows=Array.from({length:3},(_,index)=>({...row,sort_seq:'100',server_id:String(index+1)}));
+  await fakeCli(nativePaging.replace(`process.stderr.write(${JSON.stringify(diagnostic)});`,
+    `process.stderr.write(after===undefined?${JSON.stringify(diagnostic.replace('synthetic_123','changed_account'))}:${JSON.stringify(diagnostic)});`),async directory=>{
+    await writeFile(join(directory,'wx-cli.rows'),JSON.stringify(rows));
+    await assert.rejects(queryWechat({contact:'filehelper',order:'asc',limit:2,after:'99',offset:2}),/账号在分页期间发生变化/);
+  });
+  await fakeCli(`process.stderr.write('secret-account error: --offset is not supported with anchor queries');process.exit(1);`,async()=>{
+    await assert.rejects(queryWechat(query),error=>error instanceof Error&&/分页参数/.test(error.message)&&!/secret-account|密钥/.test(error.message));
+  });
+});
 
 test('contact search projects only stable IDs and display names and never exports or reads messages', async () => {
   const contacts = JSON.stringify({items: [{user_name:'wxid_test',remark:'合成备注',nick_name:'合成昵称',alias:'alias',phone:'sensitive-phone',memo:'sensitive-memo'},
@@ -74,6 +150,27 @@ test('WeChat media and system notifications become explicit pending placeholders
   assert.doesNotMatch(JSON.stringify(records), /secret|<msg>/);
 });
 
+test('image projection retains only valid MD5 and optional local IDs while omitting paths and payloads', () => {
+  const records = parseWechatPage(fixture([{...row, msg_type: '3', local_id: '9223372036854775802',
+    content: {Image: {md5: 'A'.repeat(32), path: '/sensitive/private.dat', xml: 'sensitive XML'}}}]), diagnostic, 'filehelper').records;
+  assert.deepEqual(records[0].wechatImage, {localId: '9223372036854775802', md5: 'a'.repeat(32)});
+  assert.doesNotMatch(JSON.stringify(records), /sensitive|private|xml/);
+  const withoutLocalId = parseWechatPage(fixture([{...row, msg_type: '3', content: {Image: {md5: 'b'.repeat(32)}}}]), diagnostic, 'filehelper').records;
+  assert.deepEqual(withoutLocalId[0].wechatImage, {md5: 'b'.repeat(32)});
+});
+
+test('WeChat text emojis parse locally and custom sticker rows retain only their MD5 identifiers',()=>{
+  const records=parseWechatPage(fixture([
+    {...row,content:{Text:'哈哈[嘿哈]😂'}},
+    {...row,sort_seq:'72057594037927938',msg_type:'47',local_id:'222',content:{Emoji:{xml:`<msg><emoji md5="${'a'.repeat(32)}" cdnurl="https://private-url" aeskey="sensitive-key"/></msg>`}}},
+  ]),diagnostic,'filehelper').records;
+  assert.deepEqual(records[0].emojiRecognition?.tokens.map(item=>item.value),['[嘿哈]','😂']);
+  assert.equal(records[0].text,'哈哈[嘿哈]😂');assert.equal(records[0].mediaStatus,undefined);
+  assert.deepEqual(records[1].wechatEmoji,{md5:'a'.repeat(32),localId:'222'});
+  assert.equal(records[1].kind,'emoji');assert.equal(records[1].mediaStatus,'pending');
+  assert.doesNotMatch(JSON.stringify(records),/private-url|sensitive-key|<msg>|cdnurl/);
+});
+
 test('WeChat rejects wrong contacts, ambiguous directions, unsafe identifiers, missing accounts, and malformed pages', () => {
   for (const changed of [
     {...row, talker: 'someone_else'}, {...row, direction: 'unknown'}, {...row, direction: undefined},
@@ -97,14 +194,17 @@ test('WeChat launches only bounded query arguments without a shell, key retrieva
   try {
     await fakeCli(`const fs=require('node:fs');fs.writeFileSync(__filename+'.args',JSON.stringify({args:process.argv.slice(2),secret:process.env.OPENAI_API_KEY}));${success}`, async directory => {
       assert.equal(inspectWechat().available, true);
-      const page = await queryWechat({...query, after: '72057594037927937', since: 1700000000, offset: 2});
+      const page = await queryWechat({...query, after: '72057594037927936', since: 1700000000, offset: 0});
       assert.equal(page.records.length, 1);
       const captured = JSON.parse(await readFile(join(directory, 'wx-cli.args'), 'utf8'));
-      assert.deepEqual(captured.args, ['query', 'filehelper', '--no-server', '--format', 'json', '--limit', '3', '--offset', '2', '--order', 'desc', '--after-sort-seq', '72057594037927937', '--since', '1700000000']);
+      assert.deepEqual(captured.args, ['query', 'filehelper', '--no-server', '--format', 'json', '--limit', '3', '--order', 'asc', '--after-sort-seq', '72057594037927936', '--since', '1700000000']);
       assert.equal(captured.secret, undefined);
       await queryWechat({...query, after: '0'});
       const zeroCursor = JSON.parse(await readFile(join(directory, 'wx-cli.args'), 'utf8'));
       assert.deepEqual(zeroCursor.args.slice(-2), ['--after-sort-seq', '0']);
+      await queryWechat({...query, offset:2});
+      const unanchored = JSON.parse(await readFile(join(directory, 'wx-cli.args'), 'utf8'));
+      assert.deepEqual(unanchored.args.slice(-4), ['--order', 'desc', '--offset', '2']);
     });
   } finally {
     if (previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous;

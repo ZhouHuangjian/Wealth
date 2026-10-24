@@ -3,6 +3,31 @@ type Values = Record<string, any>;
 export const dcaHoldingKinds = ["fund", "broker", "securities"];
 export const dcaAutomationNotice =
   "保存一次，后续按计划自动记账；净值公布后自动计算份额，保留自动推算标记。不向银行或基金平台发起扣款。";
+export const dcaTopUpNotice =
+  "先使用扣款账户的可用现金，不足部分才从指定账户记一笔转入，再记本期扣款。只做账簿记账，不向银行发起扣款，也不会自动赎回货币基金。";
+
+/** DCA effective dates follow the workspace, never the device's local day. */
+export function dcaToday(timeZone: string, now = new Date()): string {
+  if (!timeZone) throw new Error("空间时区缺失，请刷新页面后再设置定投");
+  try {
+    return new Intl.DateTimeFormat("sv-SE", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+  } catch {
+    throw new Error("无法确定空间日期，请核对空间时区后再设置定投");
+  }
+}
+
+export function dcaTopUpInitialDate(values: Values, today: string): string {
+  if (!validDcaDate(today)) throw new Error("无法确定今天的日期，请刷新页面");
+  return [today, values.start_date, values.automatic_start_date]
+    .filter(validDcaDate)
+    .sort()
+    .at(-1)!;
+}
 
 export function validDcaDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
@@ -45,6 +70,17 @@ export function dcaAutomationInitial(
       ? automation.fee_amount
       : undefined,
     automatic_funding_source: automation.funding_source || "account",
+    automatic_top_up_account_id: automation.top_up_account_id || undefined,
+    automatic_top_up_start_date: automation.top_up_account_id
+      ? automation.top_up_start_date
+      : dcaTopUpInitialDate(
+          {
+            ...plan,
+            automatic_start_date:
+              automation.enabled === true ? automation.start_date : earliest,
+          },
+          today,
+        ),
     automatic_excluded_dates: (automation.excluded_dates || []).join("\n"),
     automatic_pause_ranges: (automation.pause_ranges || []).map(
       (range: Values) => ({ start: range.start, end: range.end }),
@@ -75,6 +111,8 @@ export function dcaAutomationConfiguration(
         "excluded_dates",
         "pause_ranges",
         "funding_source",
+        "top_up_account_id",
+        "top_up_start_date",
       ]
         .filter((key) => previous?.[key] !== undefined)
         .map((key) => [key, previous![key]]),
@@ -125,6 +163,24 @@ export function dcaAutomationConfiguration(
       throw new Error("请填写有效的暂停开始日和结束日，开始日不能晚于结束日");
     return { start: range.start, end: range.end };
   });
+  let topUp: Values = {};
+  const topUpAccount = values.automatic_top_up_account_id;
+  if (values.automatic_funding_source === "untracked" || !topUpAccount) {
+    if (topUpAccount !== undefined || previous?.top_up_account_id !== undefined)
+      topUp = { top_up_account_id: null, top_up_start_date: null };
+  } else {
+    if (typeof topUpAccount !== "string" || !topUpAccount.trim())
+      throw new Error("请选择有效的补足资金账户");
+    if (topUpAccount === values.account_id)
+      throw new Error("补足资金账户不能与扣款账户相同");
+    const topUpStart = values.automatic_top_up_start_date;
+    if (!validDcaDate(topUpStart) || topUpStart < start)
+      throw new Error("补足生效日期须有效，且不能早于自动补录生效日期");
+    topUp = {
+      top_up_account_id: topUpAccount,
+      top_up_start_date: topUpStart,
+    };
+  }
   return {
     enabled: true,
     start_date: start,
@@ -136,6 +192,7 @@ export function dcaAutomationConfiguration(
     ...(feeAmount !== undefined ? { fee_amount: feeAmount } : {}),
     excluded_dates: [...new Set(dates)].sort(),
     pause_ranges: ranges,
+    ...topUp,
   };
 }
 
@@ -242,6 +299,28 @@ export function eligibleDcaHolding(account: Values, currency: string): boolean {
     account.currency === currency &&
     account.valuation_mode !== "snapshot" &&
     dcaHoldingKinds.includes(account.kind)
+  );
+}
+
+/** Account cash only; product holdings and snapshot equity cannot fund a plan. */
+export function eligibleDcaTopUp(
+  account: Values,
+  currency: string,
+  debitAccountId: unknown,
+  spaceId?: string,
+): boolean {
+  return (
+    typeof account.id === "string" &&
+    !!account.id &&
+    account.id !== debitAccountId &&
+    !account.archived &&
+    !account.deleted_at &&
+    account.currency === currency &&
+    account.valuation_mode === "detailed" &&
+    ["bank", "cash", "wallet", "fund", "broker", "securities"].includes(
+      account.kind,
+    ) &&
+    (!spaceId || !account.tenant_id || account.tenant_id === spaceId)
   );
 }
 

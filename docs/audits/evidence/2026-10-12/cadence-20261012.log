@@ -1,0 +1,144 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /Volumes/mi/Wealth/.venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+django: version: 5.2.17, settings: config.settings (from env)
+rootdir: /Users/zhouhuangjian/.codex/worktrees/estimate-return-diagnosis-20261012/Wealth/backend
+configfile: pytest.ini
+plugins: hypothesis-6.168.1, django-4.14.0
+collecting ... collected 6 items
+
+audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_expected_business_successful_refresh_does_not_make_fresh_source_disappear SYNTHETIC_CADENCE_TRACE=[{"beat_elapsed": 0.0, "scheduled": 1, "refresh_status": "ready", "last_attempt_at": "2026-10-12T04:05:00.200000+00:00", "fetched_at": "2026-10-12T04:05:00.200000+00:00", "provider_calls": 1}, {"beat_elapsed": 300.0, "scheduled": 0, "refresh_status": "ready", "last_attempt_at": "2026-10-12T04:05:00.200000+00:00", "fetched_at": "2026-10-12T04:05:00.200000+00:00", "provider_calls": 1}, {"beat_elapsed": 599.8, "scheduled": 1, "refresh_status": "ready", "last_attempt_at": "2026-10-12T04:15:00+00:00", "fetched_at": "2026-10-12T04:05:00.200000+00:00", "provider_calls": 1}, {"read_elapsed": 620.0, "status": "unavailable", "amount": null, "reason": "盘中行情超过更新时间，待更新"}, {"beat_elapsed": 899.8, "scheduled": 0, "provider_calls": 1}, {"beat_elapsed": 1199.8, "scheduled": 1, "provider_calls": 2}, {"read_elapsed": 1200.0, "status": "estimated", "amount": "2.000000000000000000000000000000000000"}]
+FAILED
+audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_property_fresh_fetch_does_not_relabel_old_provider_quote PASSED
+audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_property_cache_keeps_real_fetch_time_until_exact_ttl[599.8-1] PASSED
+audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_property_cache_keeps_real_fetch_time_until_exact_ttl[600.0-2] PASSED
+audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_expected_business_each_five_minute_beat_is_not_lost_to_worker_offset[0.0] PASSED
+audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_expected_business_each_five_minute_beat_is_not_lost_to_worker_offset[0.2] FAILED
+
+=================================== FAILURES ===================================
+_ test_expected_business_successful_refresh_does_not_make_fresh_source_disappear _
+
+synthetic_book = namespace(clock={'elapsed': 1200.0, 'quote_age': 0.0, 'calls': 2}, space=<Workspace: Workspace object (112321f3-ddf8-4738-b5aa-5b76f75bf843)>, product=<Instrument: Instrument object (8ad74041-7be3-4263-9b7b-8a27520e5408)>)
+
+    @pytest.mark.django_db
+    def test_expected_business_successful_refresh_does_not_make_fresh_source_disappear(
+        synthetic_book,
+    ):
+        book, trace = synthetic_book, []
+        with tenant_context(book.space.pk):
+            before = money_facts(book.space)
+        for elapsed in (0.0, 300.0, 599.8):
+            book.clock["elapsed"] = elapsed
+            result = market_sync.refresh_due()
+            with tenant_context(book.space.pk):
+                state = market_sync._state(book.space, book.product).data
+                trace.append(
+                    {
+                        "beat_elapsed": elapsed,
+                        "scheduled": result["scheduled"],
+                        "refresh_status": state["refresh_status"],
+                        "last_attempt_at": state["last_attempt_at"],
+                        "fetched_at": state["fetched_at"],
+                        "provider_calls": book.clock["calls"],
+                    }
+                )
+        book.clock["elapsed"] = 620.0
+        with tenant_context(book.space.pk):
+            interrupted = daily_return_overview(book.space, TODAY)[0]
+        trace.append(
+            {
+                "read_elapsed": 620.0,
+                "status": interrupted["status"],
+                "amount": interrupted["amount"],
+                "reason": interrupted["items"][0]["message"],
+            }
+        )
+        for elapsed in (899.8, 1199.8):
+            book.clock["elapsed"] = elapsed
+            result = market_sync.refresh_due()
+            trace.append(
+                {
+                    "beat_elapsed": elapsed,
+                    "scheduled": result["scheduled"],
+                    "provider_calls": book.clock["calls"],
+                }
+            )
+        with tenant_context(book.space.pk):
+            recovered = daily_return_overview(book.space, TODAY)[0]
+            assert recovered["status"] == "estimated"
+            assert Decimal(recovered["amount"]) == Decimal(2)
+            assert money_facts(book.space) == before
+        trace.append(
+            {
+                "read_elapsed": book.clock["elapsed"],
+                "status": recovered["status"],
+                "amount": recovered["amount"],
+            }
+        )
+        print("SYNTHETIC_CADENCE_TRACE=" + json.dumps(trace, ensure_ascii=False))
+>       assert interrupted["status"] == "estimated", {
+            "expected_business": "A live source with current quotes must not vanish after successful refresh",
+            "actual": interrupted["items"][0]["message"],
+        }
+E       AssertionError: {'expected_business': 'A live source with current quotes must not vanish after successful refresh', 'actual': '盘中行情超过更新时间，待更新'}
+E       assert 'unavailable' == 'estimated'
+E         
+E         - estimated
+E         + unavailable
+
+audit_scenarios/test_estimate_refresh_cadence_20261012.py:303: AssertionError
+_ test_expected_business_each_five_minute_beat_is_not_lost_to_worker_offset[0.2] _
+
+controlled_source = {'elapsed': 300, 'quote_age': 0.0, 'calls': 0}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108e79640>
+worker_offset = 0.2
+
+    @pytest.mark.parametrize("worker_offset", [0.0, 0.2])
+    def test_expected_business_each_five_minute_beat_is_not_lost_to_worker_offset(
+        controlled_source, monkeypatch, worker_offset
+    ):
+        clock = controlled_source
+        space = SimpleNamespace(pk="synthetic-space", deleted_at=None)
+        product = SimpleNamespace(pk="synthetic-product")
+        owner = SimpleNamespace(user=SimpleNamespace())
+        state = SimpleNamespace(
+            data={
+                "refresh_status": "ready",
+                "last_attempt_at": (START + timedelta(seconds=worker_offset)).isoformat(),
+            },
+            save=lambda **kwargs: None,
+        )
+        monkeypatch.setattr(market_sync, "enabled", lambda: True)
+        monkeypatch.setattr(market_sync, "tenant_context", lambda *a: nullcontext())
+        monkeypatch.setattr(
+            market_sync, "Workspace", SimpleNamespace(objects=MemoryRows(space))
+        )
+        monkeypatch.setattr(
+            market_sync, "Membership", SimpleNamespace(objects=MemoryRows(owner))
+        )
+        monkeypatch.setattr(market_sync, "catalog_queryset", lambda *a: MemoryRows(product))
+        monkeypatch.setattr(market_sync, "_state", lambda *a: state)
+        published = []
+        monkeypatch.setattr(market_sync, "_publish", lambda *args: published.append(args))
+        clock["elapsed"] = market_sync.INTERVAL
+        result = market_sync.refresh_due()
+>       assert result["scheduled"] == 1, {
+            "expected_business": "One configured beat must not be lost to 0.2s worker latency",
+            "worker_offset_seconds": worker_offset,
+            "scanner_elapsed_seconds": clock["elapsed"],
+            "actual": result,
+        }
+E       AssertionError: {'expected_business': 'One configured beat must not be lost to 0.2s worker latency', 'worker_offset_seconds': 0.2, 'scanner_elapsed_seconds': 300, 'actual': {'scheduled': 0}}
+E       assert 0 == 1
+
+audit_scenarios/test_estimate_refresh_cadence_20261012.py:171: AssertionError
+=========================== short test summary info ============================
+FAILED audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_expected_business_successful_refresh_does_not_make_fresh_source_disappear - AssertionError: {'expected_business': 'A live source with current quotes must not vanish after successful refresh', 'actual': '盘中行情超过更新时间，待更新'}
+assert 'unavailable' == 'estimated'
+  
+  - estimated
+  + unavailable
+FAILED audit_scenarios/test_estimate_refresh_cadence_20261012.py::test_expected_business_each_five_minute_beat_is_not_lost_to_worker_offset[0.2] - AssertionError: {'expected_business': 'One configured beat must not be lost to 0.2s worker latency', 'worker_offset_seconds': 0.2, 'scanner_elapsed_seconds': 300, 'actual': {'scheduled': 0}}
+assert 0 == 1
+========================= 2 failed, 4 passed in 0.45s ==========================

@@ -4,6 +4,7 @@ import {
   configuredHoldingColumns,
   defaultHoldingDisplay,
   holdingDailyAmount,
+  holdingLatestReturnAmount,
   holdingMarketValue,
   holdingPendingAmount,
   hasPendingPurchases,
@@ -34,6 +35,75 @@ const holding = (id, overrides = {}) => ({
     status: "estimated",
   },
   ...overrides,
+});
+
+test("missing conversion FX preserves valid original-currency daily return without making a converted total", () => {
+  const row = holding("foreign", {
+    currency: "USD",
+    daily_return: {
+      date: asOf,
+      currency: "USD",
+      amount: "2.15",
+      base_currency: "CNY",
+      base_amount: null,
+      status: "unavailable",
+      native_status: "estimated",
+      missing_reason_code: "fx_missing",
+    },
+  });
+  assert.equal(holdingDailyAmount(row, asOf), "2.15");
+  assert.equal(row.daily_return.base_amount, null);
+  assert.equal(summarizeHoldings([row], asOf).groups[0].daily.amount, "2.15");
+  assert.equal(
+    holdingDailyAmount({ ...row, scope_unconfirmed: true }, asOf),
+    null,
+  );
+  assert.equal(
+    holdingDailyAmount(
+      {
+        ...row,
+        daily_return: { ...row.daily_return, native_status: "unavailable" },
+      },
+      asOf,
+    ),
+    null,
+  );
+  assert.equal(holdingDailyAmount(row, "2026-09-29"), null);
+});
+
+test("recent formal return cannot bypass an unverified holding scope, but valid native FX results remain visible", () => {
+  const row = holding("foreign", {
+    currency: "USD",
+    latest_confirmed_return: {
+      observation_kind: "formal",
+      currency: "USD",
+      amount: "2.15",
+      date: "2026-09-25",
+      status: "unavailable",
+      native_status: "confirmed",
+      missing_reason_code: "fx_missing",
+    },
+  });
+  assert.equal(holdingLatestReturnAmount(row), "2.15");
+  assert.equal(
+    holdingLatestReturnAmount({ ...row, scope_unconfirmed: true }),
+    null,
+  );
+  assert.equal(
+    holdingLatestReturnAmount({ ...row, status: "needs_reconciliation" }),
+    null,
+  );
+  assert.equal(holdingLatestReturnAmount({ ...row, contributes: false }), null);
+  assert.equal(
+    holdingLatestReturnAmount({
+      ...row,
+      latest_confirmed_return: {
+        ...row.latest_confirmed_return,
+        observation_kind: "estimate",
+      },
+    }),
+    null,
+  );
 });
 
 test("holding display settings are separately keyed by real user and workspace, without anonymous fallback", () => {
@@ -229,6 +299,41 @@ test("missing values are never fabricated as zero while recorded zero is retaine
   assert.equal(zero.value.amount, "0");
   assert.equal(zero.daily.amount, "0");
   assert.equal(zero.daily.complete, true);
+});
+
+test("closed holdings keep amounts empty and are counted separately from true gaps", () => {
+  const closed = holding("closed", {
+    daily_return: {
+      date: asOf,
+      currency: "CNY",
+      status: "market_closed",
+      amount: null,
+    },
+  });
+  assert.equal(holdingDailyAmount(closed, asOf), null);
+  let group = summarizeHoldings([closed], asOf).groups[0];
+  let daily = group.daily;
+  assert.equal(daily.amount, null);
+  assert.equal(group.dailyMarketClosedCount, 1);
+  assert.equal(group.dailyMissingCount, 0);
+  assert.equal(daily.complete, false);
+  group = summarizeHoldings(
+    [closed, holding("known"), holding("gap", { daily_return: null })],
+    asOf,
+  ).groups[0];
+  daily = group.daily;
+  assert.equal(daily.amount, "2");
+  assert.equal(daily.known, 1);
+  assert.equal(group.dailyMarketClosedCount, 1);
+  assert.equal(group.dailyMissingCount, 1);
+  assert.equal(daily.total, 3);
+  assert.equal(daily.complete, false);
+  const unresolved = summarizeHoldings(
+    [{ ...closed, status: "needs_reconciliation" }],
+    asOf,
+  ).groups[0];
+  assert.equal(unresolved.dailyMarketClosedCount, 0);
+  assert.equal(unresolved.dailyMissingCount, 1);
 });
 
 test("daily estimates require today's explicit amount and never use cumulative profit or stale/foreign currency data", () => {

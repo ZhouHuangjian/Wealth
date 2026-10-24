@@ -20,7 +20,7 @@ from .models import (
 )
 
 # Bump for overview calculation or response changes; GET rejects older projections.
-OVERVIEW_CALCULATION_VERSION = "account-equity-v25"
+OVERVIEW_CALCULATION_VERSION = "account-equity-v28"
 
 ASSET_CODES = {
     "cash",

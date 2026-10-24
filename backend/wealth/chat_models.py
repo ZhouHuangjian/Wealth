@@ -90,3 +90,95 @@ class ChatDraftBatch(models.Model):
                 fields=["owner", "-received_at", "-id"], name="chat_owner_received"
             )
         ]
+
+
+class ChatHistoryStream(models.Model):
+    """One opaque source-account stream per binding; never a WeChat account ID."""
+
+    device = models.OneToOneField(
+        ChatDevice, on_delete=models.CASCADE, primary_key=True, related_name="history"
+    )
+    stream_id = models.UUIDField()
+    ack_seq = models.PositiveBigIntegerField(default=0)
+    history_revision = models.PositiveBigIntegerField(default=0)
+    phase = models.CharField(max_length=12, default="unknown")
+    expected_conversations = models.PositiveBigIntegerField(null=True)
+    expected_messages = models.PositiveBigIntegerField(null=True)
+    last_synced_at = models.DateTimeField(null=True)
+
+
+class ChatHistoryBatch(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stream = models.ForeignKey(
+        ChatHistoryStream, on_delete=models.CASCADE, related_name="batches"
+    )
+    batch_id = models.UUIDField()
+    payload_digest = models.CharField(max_length=64)
+    ack_seq = models.PositiveBigIntegerField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stream", "batch_id"], name="chat_history_batch_unique"
+            )
+        ]
+
+
+class ChatHistoryConversation(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stream = models.ForeignKey(
+        ChatHistoryStream, on_delete=models.CASCADE, related_name="conversations"
+    )
+    conversation_id = models.UUIDField()
+    name = models.CharField(max_length=80)
+    note = models.TextField(blank=True, default="")
+    history_progress = models.JSONField(default=dict)
+    display_settings = models.JSONField(default=dict)
+    last_event_seq = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stream", "conversation_id"], name="chat_history_contact_unique"
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["stream", "deleted_at", "-created_at", "-id"],
+                name="chat_history_contacts",
+            )
+        ]
+
+
+class ChatHistoryMessage(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stream = models.ForeignKey(
+        ChatHistoryStream, on_delete=models.CASCADE, related_name="messages"
+    )
+    conversation = models.ForeignKey(
+        ChatHistoryConversation, on_delete=models.CASCADE, related_name="messages"
+    )
+    message_id = models.UUIDField()
+    sequence = models.PositiveBigIntegerField(null=True)
+    sent_at = models.DateTimeField(null=True)
+    payload = models.JSONField(default=dict)
+    last_event_seq = models.PositiveBigIntegerField()
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stream", "message_id"], name="chat_history_message_unique"
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["conversation", "deleted_at", "-sequence", "-message_id"],
+                name="chat_history_messages",
+            )
+        ]

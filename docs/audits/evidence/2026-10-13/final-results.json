@@ -1,0 +1,159 @@
+{
+  "status": "deployed",
+  "version": "2.14.1",
+  "source_commit": "2abad9f8d26fb14607e51bcde42c016512c30770",
+  "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5",
+  "started_at": "2026-10-13T05:11:01.907786+00:00",
+  "deployed_at": "2026-10-13T05:13:04.883642+00:00",
+  "verified_at": "2026-10-13T05:13:39.501687+00:00",
+  "prior_image": "sha256:5e769074c72847d97a3534e43bbb371dedf436891bb0489bf36ab657c1fc92cf",
+  "branch": "codex/estimate-return-diagnosis-20261012",
+  "main_merged": false,
+  "git_pushed": false,
+  "server_regression": {
+    "passed": 1679,
+    "subtests": 12,
+    "skipped": 0,
+    "seconds": 521.83,
+    "production_database_used": false
+  },
+  "frontend": {
+    "passed": 196,
+    "typecheck": true,
+    "format": true,
+    "frozen_source_rebuild": true
+  },
+  "preservation": {
+    "existing_tables_preserved": 44,
+    "full_fingerprint_equal": true,
+    "sessions_preserved": true,
+    "files_preserved": true,
+    "schema_preserved": true,
+    "permissions_preserved": true,
+    "production_migrations_run": false
+  },
+  "backup": {
+    "server_authenticated": true,
+    "local_copy_hash_verified": true,
+    "sha256": "11ad1bab40363032abc83f6500388db6cc1780496095763f1389a43f17ed7099",
+    "size": 6154321,
+    "production_restore_drill": false
+  },
+  "runtime": {
+    "version": "2.14.1",
+    "checked_at": "2026-10-13T05:13:15.401898+00:00",
+    "containers": [
+      {
+        "service": "web",
+        "healthy": true,
+        "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5"
+      },
+      {
+        "service": "worker",
+        "healthy": true,
+        "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5"
+      },
+      {
+        "service": "beat",
+        "healthy": true,
+        "image_id": "sha256:c2fcb778b51ed59c19f33b9e005c41080ea212ca7f21364bee4e39e387d0f9a5"
+      },
+      {
+        "service": "db",
+        "healthy": true,
+        "image_id": "sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650"
+      },
+      {
+        "service": "rabbitmq",
+        "healthy": true,
+        "image_id": "sha256:2531fe16e1cb4ec4086d3eaa63118c8f074dd98620d55f022f453a397b18f037"
+      }
+    ],
+    "timers": {
+      "wealth-backup.timer": "active",
+      "wealth-certbot.timer": "active"
+    },
+    "disposable_test_database_retained": true,
+    "production_database_reset": false,
+    "production_migrations_run": false
+  },
+  "public": {
+    "checked_at": "2026-10-13T05:13:39.501687+00:00",
+    "tls_verification": true,
+    "health": {
+      "status": "ok",
+      "version": "2.14.1",
+      "mode": "production"
+    },
+    "asset_count": 23,
+    "all_bytes_match_frozen_build": true,
+    "paths": [
+      "/assets/AdminConsole-B0rIYSag.js",
+      "/assets/AdminDataManagement-CG7Uyvus.js",
+      "/assets/Analytics-BcoZqUyO.js",
+      "/assets/Assets-DfYWE2iJ.js",
+      "/assets/Cashbook-BO06eHGL.js",
+      "/assets/ChatAssistant-BQ1mFRWR.js",
+      "/assets/ChatAssistant-CEqq1azB.css",
+      "/assets/Home-DL8UZmOL.js",
+      "/assets/MarketValuation-Bg5sSYmx.js",
+      "/assets/MarketValuation-CI9FkBJO.css",
+      "/assets/Notebook-CoT3fy-5.js",
+      "/assets/Planning-C2kINhLJ.js",
+      "/assets/ProfitCalendar-CCB5BRxj.js",
+      "/assets/Settings-qjnTMduq.js",
+      "/assets/WorkspaceIdentity-Bsywriwf.js",
+      "/assets/download-wW1LvKXJ.js",
+      "/assets/ellipsis-B1lmCYFf.js",
+      "/assets/fund-reconciliation-Ct1iZCxi.js",
+      "/assets/index-D0586Jed.js",
+      "/assets/index-D4MdqZRd.css",
+      "/assets/index-DV9doiJX.js",
+      "/assets/trash-2-DtiTVKdr.js",
+      "/"
+    ]
+  },
+  "live_readonly": {
+    "checked_at": "2026-10-13T05:13:16.524009+00:00",
+    "version": "2.14.1",
+    "enforced_read_only": true,
+    "session_created": false,
+    "login_performed": false,
+    "manual_refresh_triggered": false,
+    "financial_values_omitted": true,
+    "spaces": [
+      {
+        "api_status": 200,
+        "date": "2026-10-13",
+        "status": "partial",
+        "known_count": 3,
+        "total_count": 8,
+        "missing_count": 5,
+        "amount_available": false,
+        "known_amount_available": true,
+        "reason_counts": {
+          "no_estimate": 5,
+          "available_or_legacy": 3
+        }
+      }
+    ]
+  },
+  "market_refresh_scan_seconds": 60,
+  "final_reconciliation_navigation_browser_verified": false,
+  "synthetic_browser_evidence": [
+    "estimate-return-home.png",
+    "estimate-return-details.png"
+  ],
+  "unverified": [
+    "All real upstream adapters and QDII market windows",
+    "Final holding-reconciliation shortcut browser interaction (unit-covered)",
+    "Production browser login",
+    "Production restore drill and history repair",
+    "EST-003 stale latest estimate display policy"
+  ],
+  "notes": [
+    "Current production homepage computes 3 of 8 items; other 5 explicitly report no_estimate. No zero values are invented.",
+    "Table/sequence/schema/ACL/session/file fingerprints matched while application writers were stopped, before restart; normal authorized tasks may subsequently write new legitimate records.",
+    "No historical accounting rewrite, migration, permissions change, queue purge or enabling disabled sources."
+  ]
+}

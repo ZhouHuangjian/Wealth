@@ -4,6 +4,7 @@ import DcaHistoryPreview from "./DcaHistoryPreview";
 import DcaPlanManager from "./DcaPlanManager";
 import { FundOrders } from "./FundBuy";
 import { dcaPlanContext } from "../dca-preview";
+import { dcaToday } from "../dca-automation";
 import { Alert, App, Button, Space, Tabs } from "antd";
 import { Plus } from "lucide-react";
 import {
@@ -139,7 +140,7 @@ export default function InvestmentTools({
               label: "首期日期",
               type: "date",
               required: true,
-              initial: dateToday(),
+              initial: dcaToday(space.timezone),
             },
             {
               name: "frequency",

@@ -54,6 +54,7 @@ MONEY_FIELDS = {
 }
 DATE_FIELDS = {
     "start_date",
+    "top_up_start_date",
     "end_date",
     "target_date",
     "due_date",
@@ -107,6 +108,7 @@ def _normalize(space, value, key=""):
             "liability_account_id",
             "source_account_id",
             "holding_account_id",
+            "top_up_account_id",
         }:
             obj = get_obj(Account, space, value)
         elif key == "instrument_id":

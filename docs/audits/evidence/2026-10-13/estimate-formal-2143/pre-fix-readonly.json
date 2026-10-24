@@ -1,0 +1,344 @@
+{
+  "checked_at": "2026-10-13T11:44:06.570219+00:00",
+  "version": "2.14.2",
+  "enforced_read_only": true,
+  "session_created": false,
+  "login_performed": false,
+  "manual_refresh_triggered": false,
+  "financial_values_omitted": true,
+  "spaces": [
+    {
+      "api_status": 200,
+      "date": "2026-10-13",
+      "status": "partial",
+      "known_count": 2,
+      "total_count": 8,
+      "missing_count": 6,
+      "amount_available": false,
+      "known_amount_available": true,
+      "reason_counts": {
+        "no_estimate": 5,
+        "quote_delayed": 1,
+        "available_or_legacy": 2
+      },
+      "latest_fund_updates": {
+        "total_count": 7,
+        "known_count": 1,
+        "items": [
+          {
+            "code": "017641",
+            "status": "unavailable",
+            "native_status": "unavailable",
+            "return_date": null,
+            "base_nav_date": "2026-10-12",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "amount_available": false,
+            "reason": "reference_baseline"
+          },
+          {
+            "code": "019305",
+            "status": "unavailable",
+            "native_status": "unavailable",
+            "return_date": null,
+            "base_nav_date": "2026-10-12",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "amount_available": false,
+            "reason": "reference_baseline"
+          },
+          {
+            "code": "019172",
+            "status": "unavailable",
+            "native_status": "unavailable",
+            "return_date": null,
+            "base_nav_date": "2026-10-12",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "amount_available": false,
+            "reason": "reference_baseline"
+          },
+          {
+            "code": "021778",
+            "status": "unavailable",
+            "native_status": "unavailable",
+            "return_date": null,
+            "base_nav_date": "2026-10-12",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "amount_available": false,
+            "reason": "reference_baseline"
+          },
+          {
+            "code": "270042",
+            "status": "unavailable",
+            "native_status": "unavailable",
+            "return_date": null,
+            "base_nav_date": "2026-10-12",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "amount_available": false,
+            "reason": "reference_baseline"
+          },
+          {
+            "code": "000307",
+            "status": "estimated",
+            "native_status": "estimated",
+            "return_date": null,
+            "base_nav_date": "2026-10-12",
+            "quoted_at": "2026-10-13T16:04:00+08:00",
+            "amount_available": true,
+            "reason": null
+          },
+          {
+            "code": "020602",
+            "status": "unavailable",
+            "native_status": "unavailable",
+            "return_date": null,
+            "base_nav_date": "2026-10-13",
+            "quoted_at": "2026-10-13T16:05:00+08:00",
+            "amount_available": false,
+            "reason": "reference_baseline"
+          }
+        ]
+      },
+      "reference_sources": [
+        {
+          "code": "021778",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T11:41:09.458773+00:00"
+        },
+        {
+          "code": "270042",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T11:41:10.464762+00:00"
+        },
+        {
+          "code": "019172",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T11:41:14.695998+00:00"
+        },
+        {
+          "code": "019305",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T11:41:15.935493+00:00"
+        },
+        {
+          "code": "017641",
+          "refresh_status": "ready",
+          "reference_available": true,
+          "provider_id": "sina",
+          "quoted_at": "2026-10-13T05:04:00+08:00",
+          "fetched_at": "2026-10-13T11:41:17.089191+00:00"
+        }
+      ],
+      "transition_details": [
+        {
+          "code": "021778",
+          "quote_nav_date": "2026-10-12",
+          "quote_source": "AKShare·天天基金单位净值",
+          "ref_base": "8.3802",
+          "ref_base_date": "2026-10-12",
+          "ref_price": "8.4560",
+          "ref_growth": "0.158600",
+          "ratio_consistent": false,
+          "formal_rows": [
+            {
+              "day": "2026-10-12",
+              "value": "8.380200000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "8.442600000000000000",
+              "published_at": "None",
+              "source": "天天基金·单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "8.442600000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            }
+          ],
+          "recent_returns": [
+            {
+              "nav_date": "2026-10-12",
+              "amount_available": true,
+              "interval_start": "2026-10-09",
+              "message": ""
+            }
+          ]
+        },
+        {
+          "code": "270042",
+          "quote_nav_date": "2026-10-12",
+          "quote_source": "AKShare·天天基金单位净值",
+          "ref_base": "8.4119",
+          "ref_base_date": "2026-10-12",
+          "ref_price": "8.4880",
+          "ref_growth": "0.158900",
+          "ratio_consistent": false,
+          "formal_rows": [
+            {
+              "day": "2026-10-12",
+              "value": "8.411900000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "8.474500000000000000",
+              "published_at": "None",
+              "source": "天天基金·单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "8.474500000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            }
+          ],
+          "recent_returns": [
+            {
+              "nav_date": "2026-10-12",
+              "amount_available": true,
+              "interval_start": "2026-10-09",
+              "message": ""
+            }
+          ]
+        },
+        {
+          "code": "019172",
+          "quote_nav_date": "2026-10-12",
+          "quote_source": "AKShare·天天基金单位净值",
+          "ref_base": "1.8053",
+          "ref_base_date": "2026-10-12",
+          "ref_price": "1.8066",
+          "ref_growth": "-0.620200",
+          "ratio_consistent": false,
+          "formal_rows": [
+            {
+              "day": "2026-10-12",
+              "value": "1.805300000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "1.817900000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "1.817900000000000000",
+              "published_at": "None",
+              "source": "天天基金·单位净值"
+            }
+          ],
+          "recent_returns": [
+            {
+              "nav_date": "2026-10-12",
+              "amount_available": true,
+              "interval_start": "2026-10-09",
+              "message": "正式净值与自动推算份额计算"
+            }
+          ]
+        },
+        {
+          "code": "019305",
+          "quote_nav_date": "2026-10-12",
+          "quote_source": "AKShare·天天基金单位净值",
+          "ref_base": "1.7068",
+          "ref_base_date": "2026-10-12",
+          "ref_price": "1.7035",
+          "ref_growth": "-0.279700",
+          "ratio_consistent": false,
+          "formal_rows": [
+            {
+              "day": "2026-10-12",
+              "value": "1.706800000000000000",
+              "published_at": "None",
+              "source": "天天基金·单位净值"
+            },
+            {
+              "day": "2026-10-12",
+              "value": "1.706800000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "1.708300000000000000",
+              "published_at": "None",
+              "source": "天天基金·单位净值"
+            }
+          ],
+          "recent_returns": [
+            {
+              "nav_date": "2026-10-12",
+              "amount_available": true,
+              "interval_start": "2026-10-09",
+              "message": "正式净值与自动推算份额计算"
+            }
+          ]
+        },
+        {
+          "code": "017641",
+          "quote_nav_date": "2026-10-12",
+          "quote_source": "AKShare·天天基金单位净值",
+          "ref_base": "1.7237",
+          "ref_base_date": "2026-10-12",
+          "ref_price": "1.7203",
+          "ref_growth": "-0.278800",
+          "ratio_consistent": false,
+          "formal_rows": [
+            {
+              "day": "2026-10-12",
+              "value": "1.723700000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "1.725100000000000000",
+              "published_at": "None",
+              "source": "天天基金·单位净值"
+            },
+            {
+              "day": "2026-10-09",
+              "value": "1.725100000000000000",
+              "published_at": "None",
+              "source": "AKShare·天天基金单位净值"
+            }
+          ],
+          "recent_returns": [
+            {
+              "nav_date": "2026-10-12",
+              "amount_available": true,
+              "interval_start": "2026-10-09",
+              "message": "正式净值与自动推算份额计算"
+            }
+          ]
+        }
+      ],
+      "top_up_configured_plan_count": 0
+    }
+  ],
+  "target_reference_codes": [
+    "017641",
+    "019305",
+    "019172",
+    "021778",
+    "270042"
+  ]
+}

@@ -1,0 +1,7 @@
+PASS: overnight source produces dated interval only; no NAV date inferred
+PASS: reference_refresh
+PASS: reference_baseline
+PASS: reference_identity
+PASS: formal replacement retains Decimal result and NAV date 2026-10-12
+PASS: formal FX uses NAV date, not retrieval date
+PASS: older formal return cannot be relabelled as newer NAV date

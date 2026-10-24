@@ -60,7 +60,7 @@ def controlled(stack):
     stack.enter_context(patch("wealth.akshare_provider._invoke", side_effect=forbidden))
 
 
-def seed():
+def seed(*, top_up=False):
     user = get_user_model().objects.create_user("probe-" + uuid.uuid4().hex[:16])
     space = Workspace.objects.create(name="synthetic audit probe")
     Membership.objects.create(workspace=space, user=user, role="owner")
@@ -93,7 +93,7 @@ def seed():
             {
                 "name": "synthetic once",
                 "kind": "dca",
-                "account_id": str(bank.pk),
+                "account_id": str(fund.pk if top_up else bank.pk),
                 "instrument_id": str(inst.pk),
                 "start_date": str(DAY),
                 "end_date": str(DAY),
@@ -104,6 +104,14 @@ def seed():
                     "enabled": True,
                     "holding_account_id": str(fund.pk),
                     "fee_mode": "zero",
+                    **(
+                        {
+                            "top_up_account_id": str(bank.pk),
+                            "top_up_start_date": str(DAY),
+                        }
+                        if top_up
+                        else {}
+                    ),
                 },
             },
             run_automatic=False,
@@ -127,8 +135,9 @@ def facts(space, bank, fund, inst):
 def main(action):
     with ExitStack() as stack:
         controlled(stack)
-        if action == "concurrency":
-            space, user, bank, fund, inst, plan = seed()
+        if action in {"concurrency", "dca-top-up-concurrency"}:
+            top_up = action == "dca-top-up-concurrency"
+            space, user, bank, fund, inst, plan = seed(top_up=top_up)
             with tenant_context(space.pk):
                 Price.objects.create(
                     tenant=space,
@@ -153,12 +162,23 @@ def main(action):
             with ThreadPoolExecutor(max_workers=2) as pool:
                 results = list(pool.map(lambda _: worker(), range(2)))
             with tenant_context(space.pk):
+                extra = {}
+                if top_up:
+                    transfers = Event.objects.filter(
+                        tenant=space, payload__dca_top_up_transfer=True
+                    )
+                    assert transfers.count() == 1
+                    debit = Event.objects.get(tenant=space, kind="fund_debit")
+                    assert debit.related_id == transfers.get().pk
+                    assert balance(space, fund, "cash") == 0
+                    extra = {"top_up": transfers.count(), "fund_cash": "0"}
                 print(
                     json.dumps(
                         {
                             "probe": action,
                             "workers": results,
                             **facts(space, bank, fund, inst),
+                            **extra,
                         }
                     )
                 )

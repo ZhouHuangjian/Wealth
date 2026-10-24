@@ -1,0 +1,53 @@
+..........................E............................................. [ 39%]
+........................................................................ [ 79%]
+......................................                                   [100%]
+==================================== ERRORS ====================================
+___ ERROR at teardown of test_unexplained_cash_activity_requires_a_statement ___
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/db/backends/utils.py:103: in _execute
+    return self.cursor.execute(sql)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/psycopg/cursor.py:117: in execute
+    raise ex.with_traceback(None)
+E   psycopg.errors.CheckViolation: Journal is not balanced by currency
+E   CONTEXT:  PL/pgSQL function wealth_check_event() line 7 at RAISE
+
+The above exception was the direct cause of the following exception:
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/pytest_django/fixtures.py:305: in _django_db_helper
+    test_case._post_teardown()
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/test/testcases.py:1231: in _post_teardown
+    self._fixture_teardown()
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/test/testcases.py:1486: in _fixture_teardown
+    connections[db_name].check_constraints()
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/db/backends/postgresql/base.py:482: in check_constraints
+    cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/db/backends/utils.py:79: in execute
+    return self._execute_with_wrappers(
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/db/backends/utils.py:92: in _execute_with_wrappers
+    return executor(sql, params, many, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/db/backends/utils.py:100: in _execute
+    with self.db.wrap_database_errors:
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/db/utils.py:91: in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/db/backends/utils.py:103: in _execute
+    return self.cursor.execute(sql)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+/Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/psycopg/cursor.py:117: in execute
+    raise ex.with_traceback(None)
+E   django.db.utils.IntegrityError: Journal is not balanced by currency
+E   CONTEXT:  PL/pgSQL function wealth_check_event() line 7 at RAISE
+=============================== warnings summary ===============================
+tests/test_overview_projection_version.py::test_legacy_overview_cache_is_recomputed_read_only[waiting_cash-\u53ef\u7528\u8d44\u91d1\u4e0d\u8db3\uff0c\u7b49\u5f85\u6838\u5bf9\u4f59\u989d-account-equity-v24]
+tests/test_overview_projection_version.py::test_legacy_overview_cache_is_recomputed_read_only[waiting_cash-\u53ef\u7528\u8d44\u91d1\u4e0d\u8db3\uff0c\u7b49\u5f85\u6838\u5bf9\u4f59\u989d-account-equity-v25]
+tests/test_overview_projection_version.py::test_legacy_overview_cache_is_recomputed_read_only[waiting_cash-\u53ef\u7528\u8d44\u91d1\u4e0d\u8db3\uff0c\u7b49\u5f85\u6838\u5bf9\u4f59\u989d-account-equity-v26]
+tests/test_overview_projection_version.py::test_legacy_overview_cache_is_recomputed_read_only[needs_review-\u6b63\u5f0f\u51c0\u503c\u6765\u6e90\u5b58\u5728\u5dee\u5f02\uff0c\u8bf7\u6838\u5bf9-account-equity-v24]
+tests/test_overview_projection_version.py::test_legacy_overview_cache_is_recomputed_read_only[needs_review-\u6b63\u5f0f\u51c0\u503c\u6765\u6e90\u5b58\u5728\u5dee\u5f02\uff0c\u8bf7\u6838\u5bf9-account-equity-v25]
+tests/test_overview_projection_version.py::test_legacy_overview_cache_is_recomputed_read_only[needs_review-\u6b63\u5f0f\u51c0\u503c\u6765\u6e90\u5b58\u5728\u5dee\u5f02\uff0c\u8bf7\u6838\u5bf9-account-equity-v26]
+tests/test_overview_projection_version.py::test_current_overview_cache_remains_usable_and_read_only
+  /Volumes/mi/Wealth/.venv/lib/python3.12/site-packages/django/core/handlers/base.py:61: UserWarning: No directory at: /Users/zhouhuangjian/.codex/worktrees/estimate-return-diagnosis-20261012/Wealth/backend/staticfiles/
+    mw_instance = middleware(adapted_handler)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/test_return_account_state.py::test_unexplained_cash_activity_requires_a_statement
+181 passed, 7 warnings, 1 error in 18.24s

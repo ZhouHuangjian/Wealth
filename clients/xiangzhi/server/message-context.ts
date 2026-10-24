@@ -1,6 +1,6 @@
 import type { AppState, Message } from '../shared/types.js';
 
-// Use exactly the same ordered window for generation, media checks and invalidation.
+// Recent excerpts supplement full-history generation and bound the manual media check.
 export function recentConversationMessages(state: AppState, conversationId: string): Message[] {
   return state.messages.filter(message => message.conversationId === conversationId)
     .sort((a, b) => a.sequence - b.sequence).slice(-20);

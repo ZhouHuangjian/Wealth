@@ -7,7 +7,7 @@ import { LoadState, Money } from "../components";
 import { helpColumns } from "../help";
 import { marketTime } from "../market-quality";
 import { useResource, useWorkspace } from "../state";
-import { dcaNextAction } from "../business-action";
+import { dcaCashReconciliationAction, dcaNextAction } from "../business-action";
 import { newestFirst } from "../date-ordering";
 import {
   dcaAutomationNotice,
@@ -277,6 +277,10 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
                 width: 160,
                 render: (_, row) => {
                   const action = dcaNextAction(space.id, row, plan);
+                  const cashAction =
+                    row.status === "waiting_cash" && action?.kind === "plan"
+                      ? dcaCashReconciliationAction(space.id, row, plan)
+                      : null;
                   if (!action)
                     return row.processing_state === "waiting" ? (
                       <small className="muted">系统继续重试</small>
@@ -284,21 +288,36 @@ export default function DcaPlanAutomationStatus({ plan }: { plan: Item }) {
                       "—"
                     );
                   return (
-                    <Tooltip
-                      title={`${action.description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
-                    >
-                      <Button
-                        disabled={busy}
-                        size="small"
-                        type="link"
-                        onClick={() => {
-                          close();
-                          navigate(action.to);
-                        }}
+                    <Space direction="vertical" size={0}>
+                      <Tooltip
+                        title={`${action.description}${space.role === "viewer" ? " 修正请联系空间管理员。" : ""}`}
                       >
-                        {action.label}
-                      </Button>
-                    </Tooltip>
+                        <Button
+                          disabled={busy}
+                          size="small"
+                          type="link"
+                          onClick={() => {
+                            close();
+                            navigate(action.to);
+                          }}
+                        >
+                          {action.label}
+                        </Button>
+                      </Tooltip>
+                      {cashAction && (
+                        <Button
+                          disabled={busy}
+                          size="small"
+                          type="link"
+                          onClick={() => {
+                            close();
+                            navigate(cashAction.to);
+                          }}
+                        >
+                          {cashAction.label}
+                        </Button>
+                      )}
+                    </Space>
                   );
                 },
               },

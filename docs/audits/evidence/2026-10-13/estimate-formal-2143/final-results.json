@@ -1,0 +1,312 @@
+{
+  "status": "deployed",
+  "version": "2.14.3",
+  "source_commit": "8f538c3a88afb4bff5e76ea6e5ce4e0c4d3dfb27",
+  "image_id": "sha256:9f4ca6be7bbb75b123654a7bde0145a81aca50ab09ea528f9222662d8a1b912c",
+  "previous_image_id": "sha256:8e7a7ad87dcc87ac8478a7bb847234e432e71bb07d97e81b63a15e163f098057",
+  "schema": "0015_chat_remote_controls",
+  "deployed_at": "2026-10-13T12:06:07.395659+00:00",
+  "deployed_at_shanghai": "2026-10-13T20:06:07.395659+08:00",
+  "linux_full_regression": {
+    "passed": 1807,
+    "subtests_passed": 12,
+    "skipped": 0,
+    "database": "wealth_funding_v2143_test",
+    "production_database_used": false
+  },
+  "local_validation": {
+    "backend_passed": 1807,
+    "subtests_passed": 12,
+    "frontend_passed": 214,
+    "frontend_tests_carried_forward_from_2_14_2_unchanged_source": true,
+    "skipped": 0,
+    "frontend_typecheck": true,
+    "frontend_format": true,
+    "frontend_build": true,
+    "frozen_archive_rebuilt": true,
+    "release_guards_passed": 8
+  },
+  "preservation": {
+    "existing_tables_preserved": 44,
+    "full_fingerprint_equal": true,
+    "sessions_preserved": true,
+    "files_preserved": true,
+    "schema_preserved": true,
+    "permissions_preserved": true,
+    "production_migrations_run": false
+  },
+  "backup": {
+    "file": "wealth-20261013T120413Z.backup.enc",
+    "sha256": "57df1d92934cbbc5e3db4bbf6fbc203f63fc26a25fba5c4c577030a566a47e92",
+    "size": 6256721,
+    "server_authenticated_verify": true,
+    "local_bytes_match_authenticated_server_copy": true,
+    "restore_drill_performed": false
+  },
+  "runtime": {
+    "version": "2.14.3",
+    "checked_at": "2026-10-13T12:06:07.515557+00:00",
+    "containers": [
+      {
+        "service": "web",
+        "healthy": true,
+        "image_id": "sha256:9f4ca6be7bbb75b123654a7bde0145a81aca50ab09ea528f9222662d8a1b912c"
+      },
+      {
+        "service": "worker",
+        "healthy": true,
+        "image_id": "sha256:9f4ca6be7bbb75b123654a7bde0145a81aca50ab09ea528f9222662d8a1b912c"
+      },
+      {
+        "service": "beat",
+        "healthy": true,
+        "image_id": "sha256:9f4ca6be7bbb75b123654a7bde0145a81aca50ab09ea528f9222662d8a1b912c"
+      },
+      {
+        "service": "db",
+        "healthy": true,
+        "image_id": "sha256:3725f4e2499eef5134592b3b4ab79a543ed7f8e533b05b5b637af926630f6650"
+      },
+      {
+        "service": "rabbitmq",
+        "healthy": true,
+        "image_id": "sha256:2531fe16e1cb4ec4086d3eaa63118c8f074dd98620d55f022f453a397b18f037"
+      }
+    ],
+    "timers": {
+      "wealth-backup.timer": "active",
+      "wealth-certbot.timer": "active"
+    },
+    "disposable_test_database_retained": true,
+    "production_database_reset": false,
+    "production_migrations_run": false
+  },
+  "public": {
+    "checked_at": "2026-10-13T12:06:27.141461+00:00",
+    "tls_verification": true,
+    "health": {
+      "status": "ok",
+      "version": "2.14.3",
+      "mode": "production"
+    },
+    "asset_count": 23,
+    "all_bytes_match_frozen_build": true,
+    "paths": [
+      "/assets/AdminConsole-CcInn5sY.js",
+      "/assets/AdminDataManagement-G-WvU3sD.js",
+      "/assets/Analytics-BIjzsrxu.js",
+      "/assets/Assets-DKktF1Nd.js",
+      "/assets/Cashbook-Byj8zYKP.js",
+      "/assets/ChatAssistant-CEqq1azB.css",
+      "/assets/ChatAssistant-Cuclrxln.js",
+      "/assets/Home-W-xkLzxQ.js",
+      "/assets/MarketValuation-CI9FkBJO.css",
+      "/assets/MarketValuation-tngZdFzQ.js",
+      "/assets/Notebook-Cbzmop2Y.js",
+      "/assets/Planning-DVk2E92P.js",
+      "/assets/ProfitCalendar-a6690UpQ.js",
+      "/assets/Settings-vrBw9CfN.js",
+      "/assets/WorkspaceIdentity-Ckao8Y5u.js",
+      "/assets/download-CWNbI1QR.js",
+      "/assets/ellipsis-BhgcBxEa.js",
+      "/assets/fund-reconciliation-Ct1iZCxi.js",
+      "/assets/index-D4MdqZRd.css",
+      "/assets/index-DcTERlBJ.js",
+      "/assets/index-Wo1Bw-BL.js",
+      "/assets/trash-2-Dt1S_pKE.js",
+      "/"
+    ]
+  },
+  "live_readonly": {
+    "checked_at": "2026-10-13T12:06:29.815641+00:00",
+    "version": "2.14.3",
+    "enforced_read_only": true,
+    "session_created": false,
+    "login_performed": false,
+    "manual_refresh_triggered": false,
+    "financial_values_omitted": true,
+    "spaces": [
+      {
+        "api_status": 200,
+        "date": "2026-10-13",
+        "status": "partial",
+        "known_count": 3,
+        "total_count": 8,
+        "missing_count": 5,
+        "amount_available": false,
+        "known_amount_available": true,
+        "reason_counts": {
+          "no_estimate": 5,
+          "available_or_legacy": 3
+        },
+        "latest_fund_updates": {
+          "total_count": 7,
+          "known_count": 7,
+          "items": [
+            {
+              "code": "017641",
+              "status": "formal",
+              "native_status": "formal",
+              "return_date": "2026-10-12",
+              "base_nav_date": "2026-10-09",
+              "quoted_at": null,
+              "amount_available": true,
+              "reason": null,
+              "reference_unavailable_reason": "reference_baseline",
+              "quantity_source": "automatic_estimate",
+              "formal_updated_at": "2026-10-13 11:17:51.846468+00:00"
+            },
+            {
+              "code": "019305",
+              "status": "formal",
+              "native_status": "formal",
+              "return_date": "2026-10-12",
+              "base_nav_date": "2026-10-09",
+              "quoted_at": null,
+              "amount_available": true,
+              "reason": null,
+              "reference_unavailable_reason": "reference_baseline",
+              "quantity_source": "automatic_estimate",
+              "formal_updated_at": "2026-10-13 11:17:49.203000+00:00"
+            },
+            {
+              "code": "019172",
+              "status": "formal",
+              "native_status": "formal",
+              "return_date": "2026-10-12",
+              "base_nav_date": "2026-10-09",
+              "quoted_at": null,
+              "amount_available": true,
+              "reason": null,
+              "reference_unavailable_reason": "reference_baseline",
+              "quantity_source": "automatic_estimate",
+              "formal_updated_at": "2026-10-13 11:17:46.401066+00:00"
+            },
+            {
+              "code": "021778",
+              "status": "formal",
+              "native_status": "formal",
+              "return_date": "2026-10-12",
+              "base_nav_date": "2026-10-09",
+              "quoted_at": null,
+              "amount_available": true,
+              "reason": null,
+              "reference_unavailable_reason": "reference_baseline",
+              "quantity_source": "recorded",
+              "formal_updated_at": "2026-10-13 11:11:37.722923+00:00"
+            },
+            {
+              "code": "270042",
+              "status": "formal",
+              "native_status": "formal",
+              "return_date": "2026-10-12",
+              "base_nav_date": "2026-10-09",
+              "quoted_at": null,
+              "amount_available": true,
+              "reason": null,
+              "reference_unavailable_reason": "reference_baseline",
+              "quantity_source": "recorded",
+              "formal_updated_at": "2026-10-13 11:11:38.619747+00:00"
+            },
+            {
+              "code": "000307",
+              "status": "formal",
+              "native_status": "formal",
+              "return_date": "2026-10-13",
+              "base_nav_date": "2026-10-12",
+              "quoted_at": null,
+              "amount_available": true,
+              "reason": null,
+              "reference_unavailable_reason": null,
+              "quantity_source": "recorded",
+              "formal_updated_at": "2026-10-13 11:53:12.002440+00:00"
+            },
+            {
+              "code": "020602",
+              "status": "formal",
+              "native_status": "formal",
+              "return_date": "2026-10-13",
+              "base_nav_date": "2026-10-12",
+              "quoted_at": null,
+              "amount_available": true,
+              "reason": null,
+              "reference_unavailable_reason": "reference_baseline",
+              "quantity_source": "automatic_estimate",
+              "formal_updated_at": "2026-10-13 11:17:47.348917+00:00"
+            }
+          ]
+        },
+        "reference_sources": [
+          {
+            "code": "021778",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T12:05:50.565095+00:00"
+          },
+          {
+            "code": "270042",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T12:05:51.719865+00:00"
+          },
+          {
+            "code": "019172",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T12:05:59.082892+00:00"
+          },
+          {
+            "code": "019305",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T12:05:59.195431+00:00"
+          },
+          {
+            "code": "017641",
+            "refresh_status": "ready",
+            "reference_available": true,
+            "provider_id": "sina",
+            "quoted_at": "2026-10-13T05:04:00+08:00",
+            "fetched_at": "2026-10-13T12:06:01.638151+00:00"
+          }
+        ],
+        "top_up_configured_plan_count": 0
+      }
+    ],
+    "target_reference_codes": [
+      "017641",
+      "019305",
+      "019172",
+      "021778",
+      "270042"
+    ]
+  },
+  "boundaries": {
+    "production_plan_changed_by_agent": false,
+    "historical_financial_repair": false,
+    "new_database_migration": false,
+    "all_products_estimate_guarantee": false,
+    "production_browser_login_performed": false,
+    "server_test_database_retained": true
+  },
+  "evidence_sha256": {
+    "source-manifest.json": "46c8ed97bb71a783cb3c1d7395d4ba1afa97215af6966a2c164b44def100befd",
+    "frontend-build-receipt.json": "446e268d9a2515342dd19e8c34e64d068228709e71d125dfc8bd323f76bf94af",
+    "image-files.json": "f4f9740c40219921cec819cbea726764167d86d4bf652352cccf32bcaa5fdd46",
+    "image-verification.json": "40a0c3889e2e4cbeb5a957c65002067da7390472253a68e9fbb6fff194463cb5",
+    "server-full-regression.json": "64637d902957a4c865d640d7e7b0b2a6b92bad5f5188cc2275fa9d24e546cbff",
+    "backend-full.log": "5b10c0ef37edf361f135ce2bc620a8869fb60cee13fa02ecc48af2cb50ee5e8e",
+    "cutover.json": "83081587eb82da4da5b1f71a29f9c863aca8115ab0817c2714e55374711d0e8a",
+    "post-deployment.json": "b962fe9ae2f6fb49612999748a0959ebb1241e3d2662489ccbcc2f69b01ed9fa",
+    "public-verification.json": "81e3ef24f41c1bb9f4c2b70a1e66aa8fddc179fd76ddda8baa65c876a6f484e2",
+    "live-readonly.json": "9f3e8573977caf02632babb3c2131b6ce70ad7b077d67c788f2354f171424712"
+  }
+}

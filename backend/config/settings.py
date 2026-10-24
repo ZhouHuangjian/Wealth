@@ -132,7 +132,7 @@ REST_FRAMEWORK = {
 }
 SPECTACULAR_SETTINGS = {
     "TITLE": "Wealth API",
-    "VERSION": "2.14.0",
+    "VERSION": "2.14.8",
     "SERVE_INCLUDE_SCHEMA": False,
 }
 CELERY_BROKER_URL = os.getenv(
@@ -162,7 +162,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     "dispatch-outbox": {"task": "wealth.tasks.dispatch_all", "schedule": 30.0},
     "scan-due": {"task": "wealth.tasks.scan_all", "schedule": 300.0},
-    "refresh-market": {"task": "wealth.tasks.refresh_market_all", "schedule": 300.0},
+    # Each product remains on a five-minute cadence. A finer scan avoids losing
+    # another five minutes to worker latency and leaves room below the ten-
+    # minute fetched-at validity window (intraday provider cache: one minute).
+    "refresh-market": {"task": "wealth.tasks.refresh_market_all", "schedule": 60.0},
     "evaluate-signals": {
         "task": "wealth.tasks.evaluate_signals_all",
         "schedule": 300.0,

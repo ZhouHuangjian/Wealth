@@ -25,7 +25,7 @@ if(process.env.NODE_ENV==='production') {
   instance.app.use(vite.middlewares);
 }
 server.on('error',(error)=>{console.error('无法启动本机服务：',error.message);process.exitCode=1;instance.close();});
-server.listen(port,'127.0.0.1',()=>{instance.engine.start();instance.collector.start();instance.remote.start();console.log(`相知已启动：http://127.0.0.1:${port} · 自动回复默认关闭`);});
+server.listen(port,'127.0.0.1',()=>{instance.engine.start();instance.collector.start();instance.remote.start();instance.historySync.start();instance.mediaAutomation.start();instance.insights.start();console.log(`相知已启动：http://127.0.0.1:${port} · 自动回复默认关闭`);});
 let closing=false;
-async function shutdown(){if(closing)return;closing=true;instance.remote.stop();instance.collector.stop();instance.engine.pause();instance.engine.stop();await instance.engine.tick().catch(()=>{});await vite?.close();server.close(()=>{instance.store.close();process.exit(0);});setTimeout(()=>process.exit(0),3000).unref();}
+async function shutdown(){if(closing)return;closing=true;instance.insights.stop();instance.mediaAutomation.stop();instance.remote.stop();instance.historySync.stop();instance.collector.stop();instance.engine.pause();instance.engine.stop();await instance.engine.tick().catch(()=>{});await vite?.close();server.close(()=>{instance.store.close();process.exit(0);});setTimeout(()=>process.exit(0),3000).unref();}
 process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);

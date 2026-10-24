@@ -127,6 +127,8 @@ export function QuoteStatus({ status }: { status?: string }) {
     quotes_only: "合约行情",
     product_quotes: "产品行情",
     no_position: "无持仓",
+    market_closed: "休市",
+    estimated: "推算",
     future: "未发生",
     current: "已更新",
     ok: "已更新",
@@ -829,7 +831,8 @@ export default function InvestmentWorkspace({
                     },
                     {
                       key: "daily",
-                      title: "今日估算收益",
+                      title:
+                        asOf === dateToday() ? "今日估算收益" : "当日估算收益",
                       render: (_, r) => (
                         <HoldingDailyReturn row={r} asOf={asOf} />
                       ),
