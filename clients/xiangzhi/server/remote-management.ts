@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {draftConnectionCheckUrl} from './draft-sync-check.js';
 import type {DraftSyncConfig} from './draft-sync.js';
 import type {Store} from './store.js';
+import {HISTORY_JOB_TIMEOUT_MS} from './model-timeouts.js';
 import {remoteCommandSchema,legacyRemoteSnapshot,MAX_REMOTE_POLL_BYTES,type RemoteCommand} from './remote-protocol.js';
 export * from './remote-protocol.js';
 
@@ -28,8 +29,8 @@ export function batchRemoteReceipts(snapshot:Record<string,unknown>,receipts:rea
   return selected;
 }
 export function remoteCommandTimeout(command:RemoteCommand,now:number,serverTime:number):number{
-  const modelJob=['conversation.basis.generate','conversation.memory.compress','conversation.message.analyze','conversation.message.recognize','conversation.drafts.generate'].includes(command.type);
-  return Math.min(modelJob?120_000:command.type==='conversation.refresh'?65_000:30_000,Math.max(1,Date.parse(command.expires_at)-now),Math.max(1,Date.parse(command.expires_at)-serverTime));
+  const historyJob=['conversation.basis.generate','conversation.memory.compress','conversation.message.analyze','conversation.drafts.generate'].includes(command.type);
+  return Math.min(historyJob?HISTORY_JOB_TIMEOUT_MS:command.type==='conversation.message.recognize'?120_000:command.type==='conversation.refresh'?65_000:30_000,Math.max(1,Date.parse(command.expires_at)-now),Math.max(1,Date.parse(command.expires_at)-serverTime));
 }
 /** Outbound polling uses only the bound Wealth origin. Receipts survive process restarts. */
 export class RemoteManagement {
@@ -52,6 +53,31 @@ export class RemoteManagement {
   start() {if(this.timer||this.closed)return;if(!this.options.enabled())this.store.remoteRequestPause();void this.tick();this.timer=setInterval(()=>void this.tick(),this.options.intervalMs??5000);this.timer.unref();}
   invalidate(paused=false) {this.revision++;this.active?.abort();this.lastConnectedAt=null;this.error=false;if(paused){this.store.remoteRequestPause();this.disabledReportAttempted=false;}}
   stop() {this.closed=true;this.invalidate();if(this.timer)clearInterval(this.timer);this.timer=null;}
+  /** Keep the device online while one long task runs; never execute polled work here. */
+  private keepAlive(signal:AbortSignal,current:()=>boolean,legacyMode:boolean) {
+    let pending:Promise<void>|null=null;
+    const pulse=()=>{
+      if(pending||signal.aborted||!current())return;
+      pending=(async()=>{
+        try {
+          const check=draftConnectionCheckUrl(this.options.config());if(!check)return;
+          const original={...this.options.snapshot(),remoteEnabled:true};
+          const snapshot=legacyMode?legacyRemoteSnapshot(original):original;
+          batchRemoteReceipts(snapshot,[]);
+          const response=await (this.options.fetch??fetch)(new URL('/api/v1/chat/device/poll',check.origin),{
+            method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:`Bearer ${this.options.config().token}`},
+            body:JSON.stringify({snapshot,completed:[]}),signal:AbortSignal.any([signal,AbortSignal.timeout(15_000)])});
+          await response.body?.cancel();
+          if(current()&&!signal.aborted){
+            this.error=!response.ok;
+            if(response.ok)this.lastConnectedAt=new Date(this.options.now?.()??Date.now()).toISOString();
+          }
+        } catch {if(current()&&!signal.aborted)this.error=true;}
+      })().finally(()=>{pending=null;});
+    };
+    const timer=setInterval(pulse,30_000);timer.unref();
+    return async()=>{clearInterval(timer);await pending;};
+  }
   tick():Promise<void> {
     if(this.pending)return this.pending;
     if(this.closed)return Promise.resolve();
@@ -101,16 +127,20 @@ export class RemoteManagement {
           const expires=Date.parse(command.expires_at);
           if(!this.store.remoteClaim(scope,command.id,expires)){this.store.remoteReplay(scope,command.id);continue;}
           let result:Record<string,unknown>={},error='',status:'succeeded'|'failed'='succeeded';
+          let stopHeartbeat:(()=>Promise<void>)|undefined;
           try {
             if(expires<=now||expires<=Date.parse(receipt.server_time))throw new Error('远程操作已过期。');
             if(legacyMode&&!['settings.patch','contacts.search','conversation.add','conversation.patch'].includes(command.type))throw new Error('服务器尚未更新，请稍后重试此功能。');
             const commandSignal=AbortSignal.any([controller.signal,AbortSignal.timeout(remoteCommandTimeout(command,now,Date.parse(receipt.server_time)))]);
+            stopHeartbeat=this.keepAlive(commandSignal,current,legacyMode);
             result=await this.options.execute(command,commandSignal);
             commandSignal.throwIfAborted();
             if(Buffer.byteLength(JSON.stringify({snapshot,completed:[{id:command.id,status:'succeeded',result,error:''}]}))>MAX_REMOTE_POLL_BYTES)throw new Error('远程结果过大，请先在 Mac 整理。');
             if(!current())throw new Error('连接或远程管理设置已更改。');
           } catch (cause) {status='failed';result={};error='本地执行未完成，请核对当前配置后重试。';if(!this.closed)this.options.onFailure?.(cause);}
+          finally {await stopHeartbeat?.();}
           if(this.closed)return;
+          if(!current()){status='failed';result={};error='连接或远程管理设置已更改，本次结果未采用。';}
           this.store.remoteFinish(scope,{id:command.id,status,result,error});
         }
       } catch {if(current())this.error=true;}

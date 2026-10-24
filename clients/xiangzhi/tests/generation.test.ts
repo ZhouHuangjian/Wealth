@@ -293,10 +293,15 @@ test('generation keeps a recent-message preview while also supplying every earli
 test('reply generation summarizes every long historical message before the final draft and reuses stored segments',async t=>{
   const state=fixture();state.messages=Array.from({length:150},(_,index)=>message(`history-${index}`,'a','peer',`BEGIN-${index} ${'长历史内容'.repeat(500)} END-${index}`,index+1));
   const readIds=new Set<string>(),saved=new Map<string,unknown>();let summaries=0,finals=0;
+  let elapsed=0;const deadlines:{at:number;controller:AbortController}[]=[];
+  t.mock.method(AbortSignal,'timeout',(ms:number)=>{const controller=new AbortController();deadlines.push({at:elapsed+ms,controller});return controller.signal;});
   t.mock.method(globalThis,'fetch',async(_url:URL,init:RequestInit)=>{
     const request=JSON.parse(String(init.body)),context=JSON.parse(request.messages[1].content);
     assert.ok(Buffer.byteLength(JSON.stringify(request.messages))<128_000);
-    if(context.level!==undefined){summaries++;for(const row of context.messages??[])readIds.add(row.id);return response(JSON.stringify({summary:'本段已逐条读取的合成摘要'}));}
+    if(context.level!==undefined){
+      elapsed+=45_000;for(const deadline of deadlines)if(deadline.at<=elapsed)deadline.controller.abort();
+      assert.equal(init.signal!.aborted,false,'history calls must not inherit the short reply timeout');assert.equal(request.max_tokens,6000);
+      summaries++;for(const row of context.messages??[])readIds.add(row.id);return response(JSON.stringify({summary:'本段已逐条读取的合成摘要'}));}
     finals++;assert.equal(context.fullHistory.coveredMessages,150);assert.equal(context.fullHistory.mode,'hierarchical');
     assert.equal(context.recentMessages.at(-1).text,state.messages.at(-1)!.text.slice(0,2000));return response();
   });

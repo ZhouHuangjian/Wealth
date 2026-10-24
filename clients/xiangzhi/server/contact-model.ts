@@ -1,5 +1,6 @@
 import type { ContactModelSettings, Conversation, Settings } from '../shared/types.js';
 import { codexStructuredCompletion } from './codex-provider.js';
+import { CONTACT_MODEL_TIMEOUT_MS } from './model-timeouts.js';
 import { assertModelName, isLoopback, isQwenHost, modelEndpoint, readModelResponse, replyEndpoint } from './model-config.js';
 
 /** Shared transport only; each feature supplies its own fixed JSON schema. */
@@ -8,7 +9,6 @@ export interface ContactModelCompletion {
   content: string; provider: 'qwen' | 'compatible' | 'codex'; modelName: string;
   usage?: {promptTokens: number; completionTokens: number; totalTokens: number};
 }
-const TIMEOUT_MS = 40_000;
 const INVALID_CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 
 export function safeContextText(value: string, maximum = 2000): string {
@@ -84,12 +84,12 @@ export async function contactModelCompletion(settings: Settings, config: Contact
   if (signal?.aborted) throw new Error(`${feature}已取消。`);
   if (!config || config.provider === 'disabled') throw new Error(`请先在设置中配置并开启${feature}模型。`);
   if (Buffer.byteLength(JSON.stringify(messages)) > 128_000) throw new Error(`${feature}上下文过长，请减少输入。`);
-  const timeout = AbortSignal.timeout(TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(CONTACT_MODEL_TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let content: string;
   let tokenUsage: ContactModelCompletion['usage'];
   const abortError = (): Error | null => signal?.aborted ? new Error(`${feature}已取消。`)
-    : timeout.aborted ? new Error(`${feature}超过 40 秒，已取消。`) : null;
+    : timeout.aborted ? new Error(`${feature}超过 ${CONTACT_MODEL_TIMEOUT_MS / 1000} 秒，已取消。${feature === '全量历史整理' ? '已完成的历史分段已保存在本机，再次分析会复用这些分段。' : '可稍后重试。'}`) : null;
   if (config.provider === 'codex') {
     if (!config.allowRemoteModel) throw new Error(`Codex ${feature}会调用远程模型，请先允许远程处理。`);
     try {
@@ -114,7 +114,7 @@ export async function contactModelCompletion(settings: Settings, config: Contact
     let response: Response;
     try {
       response = await (dependencies.fetch ?? fetch)(endpoint, {method: 'POST', headers, redirect: 'error', signal: combined,
-        body: JSON.stringify({model: config.modelName.trim(), messages:requestMessages, stream: false, temperature: 0.1, max_tokens: feature==='记忆压缩'?6000:3000,
+        body: JSON.stringify({model: config.modelName.trim(), messages:requestMessages, stream: false, temperature: 0.1, max_tokens: ['记忆压缩','全量历史整理'].includes(feature)?6000:3000,
           ...(qwen ? {enable_thinking: config.thinkingEnabled ?? false} : {})})});
     } catch { throw abortError() ?? new Error(`无法连接${feature}模型，请检查地址、网络和认证。`); }
     if (!response.ok) {

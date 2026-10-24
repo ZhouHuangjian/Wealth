@@ -9,6 +9,7 @@ import { assertReplyContextReady, recentConversationMessages } from './message-c
 import { assertModelName, isLoopback, qwenReply, readModelResponse, replyEndpoint } from './model-config.js';
 import { currentModelMemoryRecap, validContactBasisFacts, validMemoryEntries } from './contact-context.js';
 import {messageEmojiRecognition} from '../shared/emoji.js';
+import {CONTACT_MODEL_TIMEOUT_MS} from './model-timeouts.js';
 
 export interface GenerationModelFailure {modelChoiceId: string; modelName: string; provider: Provider; message: string}
 export interface GenerationDependencies extends HistoryDependencies { codex?: typeof codexCompletion; structuredCodex?: typeof codexStructuredCompletion; onModelFailure?: (failure: GenerationModelFailure) => void }
@@ -78,7 +79,7 @@ export function contactReplyMemoryContext(state: AppState, conversationId: strin
   };
 }
 
-async function modelCompletion(settings: Settings, messages: {role: string; content: string}[], signal?: AbortSignal, dependencies: GenerationDependencies = {}): Promise<string> {
+async function modelCompletion(settings: Settings, messages: {role: string; content: string}[], signal?: AbortSignal, dependencies: GenerationDependencies = {}, history = false): Promise<string> {
   if (settings.provider === 'codex') {
     if (!settings.allowRemoteModel) throw new Error('Codex 会调用模型服务，请先允许发送必要的对话片段。');
     return (dependencies.codex ?? codexCompletion)(settings, messages, signal);
@@ -86,19 +87,23 @@ async function modelCompletion(settings: Settings, messages: {role: string; cont
   const url = replyEndpoint(settings);
   assertModelName(settings.modelName);
   signal?.throwIfAborted();
-  const timeout = AbortSignal.timeout(MODEL_TIMEOUT_MS);
+  const limit = history ? CONTACT_MODEL_TIMEOUT_MS : MODEL_TIMEOUT_MS;
+  const timeout = AbortSignal.timeout(limit);
+  const timedOut = () => new Error(history
+    ? `全量历史整理超过 ${limit / 1000} 秒，已取消。已完成分段保存在本机，再次生成会继续复用。`
+    : `模型请求超过 ${limit / 1000} 秒，已取消。`);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
   const body = settings.provider === 'ollama'
     ? {model: settings.modelName, messages, stream: false, format: 'json', options: {temperature: 0.6}}
-    : {model: settings.modelName, messages, stream: false, temperature: 0.6, max_tokens: 1500, ...(qwenReply(settings) ? {enable_thinking: settings.modelThinkingEnabled ?? false} : {})};
+    : {model: settings.modelName, messages, stream: false, temperature: history ? 0.1 : 0.6, max_tokens: history ? 6000 : 1500, ...(qwenReply(settings) ? {enable_thinking: settings.modelThinkingEnabled ?? false} : {})};
   let response: Response;
   try {
     response = await fetch(url, {method: 'POST', headers, body: JSON.stringify(body), signal: combined, redirect: 'error'});
   } catch {
     if (signal?.aborted) throw new Error('生成已取消。');
-    if (timeout.aborted) throw new Error('模型请求超过 20 秒，已取消。');
+    if (timeout.aborted) throw timedOut();
     throw new Error('无法连接模型服务；请检查地址、网络和认证。');
   }
   if (!response.ok) {
@@ -109,7 +114,7 @@ async function modelCompletion(settings: Settings, messages: {role: string; cont
   try { data = await readModelResponse(response, combined); }
   catch (error) {
     if (signal?.aborted) throw new Error('生成已取消。');
-    if (timeout.aborted) throw new Error('模型请求超过 20 秒，已取消。');
+    if (timeout.aborted) throw timedOut();
     throw error;
   }
   const result = data as {message?: {content?: unknown}; choices?: {message?: {content?: unknown}}[]};
@@ -218,7 +223,7 @@ async function generateDraftsSingle(state: AppState, conversationId: string, int
       revisedReply: redact(feedback.revisedText.slice(0, 500)),
       feedbackType: feedback.kind, reason: redact(feedback.reason.slice(0, 500)),
     }));
-  const history=await fullHistoryContext(messages,conversationId,JSON.stringify([state.settings.provider,state.settings.modelName,state.settings.modelUrl,state.settings.modelThinkingEnabled??false]),(parts,partSignal)=>state.settings.provider==='codex'?(dependencies.structuredCodex??codexStructuredCompletion)(state.settings,parts,HISTORY_SUMMARY_SCHEMA,partSignal):modelCompletion(state.settings,parts,partSignal,dependencies),signal,dependencies);
+  const history=await fullHistoryContext(messages,conversationId,JSON.stringify([state.settings.provider,state.settings.modelName,state.settings.modelUrl,state.settings.modelThinkingEnabled??false]),(parts,partSignal)=>state.settings.provider==='codex'?(dependencies.structuredCodex??codexStructuredCompletion)(state.settings,parts,HISTORY_SUMMARY_SCHEMA,partSignal):modelCompletion(state.settings,parts,partSignal,dependencies,true),signal,dependencies);
   const context = {
     fullHistory:history,
     intent: redact(intent.slice(0, 1000)), approvedSelfClaims: claims.map(claim => ({...claim, statement: redact(claim.statement)})),

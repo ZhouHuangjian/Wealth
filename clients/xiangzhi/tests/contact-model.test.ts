@@ -104,3 +104,27 @@ test('contact model identity ignores keys but distinguishes normalized endpoint,
   assert.notEqual(contactModelIdentity(config), contactModelIdentity({...config, thinkingEnabled: true}));
   assert.equal(contactModelIdentity({...config, modelUrl: `${endpoint}/`}), contactModelIdentity(config));
 });
+
+test('full-history model calls may complete after forty seconds for both API and Codex transports', async t => {
+  let clock = 0;
+  const timers: {at: number; controller: AbortController}[] = [];
+  t.mock.method(AbortSignal, 'timeout', (ms: number) => {
+    const controller = new AbortController(); timers.push({at: clock + ms, controller}); return controller.signal;
+  });
+  const advance = (ms: number) => {clock += ms; for (const timer of timers) if (timer.at <= clock) timer.controller.abort();};
+  for (const provider of ['qwen', 'codex'] as const) {
+    const result = await contactModelCompletion(settings, {...config, provider}, messages, schema, '全量历史整理', undefined, {
+      fetch: async (_url, init) => {
+        const body = JSON.parse(String(init!.body)); assert.equal(body.max_tokens, 6000);
+        advance(45_000); assert.equal(init!.signal!.aborted, false); return response();
+      },
+      codex: async (_settings, _messages, _schema, signal) => {
+        advance(45_000); assert.equal(signal!.aborted, false); return '{"ok":true}';
+      },
+    });
+    assert.equal(result.content, '{"ok":true}');
+  }
+  await assert.rejects(contactModelCompletion(settings, config, messages, schema, '全量历史整理', undefined, {
+    fetch: async () => {advance(180_001); throw new Error('PRIVATE-UPSTREAM');},
+  }), /超过 180 秒.*已完成.*保存在本机/);
+});

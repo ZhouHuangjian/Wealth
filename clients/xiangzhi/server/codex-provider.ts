@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { Settings } from '../shared/types.js';
+import { CONTACT_MODEL_TIMEOUT_MS } from './model-timeouts.js';
 
 const MAX_INPUT_BYTES = 256_000;
 const MAX_STDOUT_BYTES = 512_000;
@@ -66,9 +67,9 @@ function executable(): string {
   return configured || 'codex';
 }
 
-function timeoutMs(): number {
+function timeoutMs(fallback = DEFAULT_TIMEOUT_MS): number {
   const raw = process.env.XIANZHI_CODEX_TIMEOUT_MS;
-  if (!raw) return DEFAULT_TIMEOUT_MS;
+  if (!raw) return fallback;
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 1_000 || value > 180_000) {
     throw new Error('XIANZHI_CODEX_TIMEOUT_MS 必须是 1000 至 180000 之间的整数。');
@@ -205,12 +206,12 @@ export async function codexImageCompletion(
 export async function codexStructuredCompletion(
   settings: Settings, messages: {role: string; content: string}[], schema: Record<string, unknown>, signal?: AbortSignal,
 ): Promise<string> {
-  return runCodexStructuredCompletion(settings, messages, signal, undefined, schema);
+  return runCodexStructuredCompletion(settings, messages, signal, undefined, schema, CONTACT_MODEL_TIMEOUT_MS);
 }
 
 async function runCodexStructuredCompletion(
   settings: Settings, messages: {role: string; content: string}[], signal?: AbortSignal, image?: CodexInputImage,
-  schema?: Record<string, unknown>,
+  schema?: Record<string, unknown>, defaultTimeout = DEFAULT_TIMEOUT_MS,
 ): Promise<string> {
   if (!settings.allowRemoteModel) throw new Error('Codex 会将所选会话上下文交给远程模型，请先明确开启远程处理。');
   if (signal?.aborted) throw new Error('生成已取消。');
@@ -223,7 +224,7 @@ async function runCodexStructuredCompletion(
     + '不要读取本机文件、调用工具、联网查询或恢复其他聊天。只输出指定格式的最终 JSON。\n'
     + JSON.stringify(messages);
   if (Buffer.byteLength(input) > MAX_INPUT_BYTES) throw new Error('Codex 输入超过大小限制，请减少上下文。');
-  const timeout = timeoutMs();
+  const timeout = timeoutMs(defaultTimeout);
   const directory = await mkdtemp(join(tmpdir(), 'xiangzhi-codex-'));
   try {
     const schemaPath = join(directory, image ? 'image.schema.json' : schema ? 'structured.schema.json' : 'reply.schema.json');

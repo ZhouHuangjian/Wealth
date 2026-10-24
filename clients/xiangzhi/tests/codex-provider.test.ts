@@ -210,6 +210,23 @@ test('Codex enforces bounded timeout and never retries the child', async () => {
   });
 });
 
+test('structured analysis gives the child three minutes while ordinary replies and explicit operator overrides keep their limits', async t => {
+  const timers: number[] = [], original = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (...args: Parameters<typeof setTimeout>) => {
+    timers.push(Number(args[1])); return original(...args);
+  });
+  await withFake(async () => {
+    const schema = {type:'object', properties:{ok:{type:'boolean'}}, required:['ok'], additionalProperties:false};
+    await codexStructuredCompletion(settings, synthetic, schema);
+    assert.ok(timers.includes(180_000)); assert.ok(!timers.includes(60_000)); timers.length = 0;
+    await codexCompletion(settings, synthetic);
+    assert.ok(timers.includes(60_000)); assert.ok(!timers.includes(180_000)); timers.length = 0;
+    process.env.XIANZHI_CODEX_TIMEOUT_MS = '2000';
+    await codexStructuredCompletion(settings, synthetic, schema);
+    assert.ok(timers.includes(2000)); assert.ok(!timers.includes(180_000));
+  });
+});
+
 test('Codex removes background descendants after the leader exits, on success and cancellation', {skip: process.platform === 'win32'}, async () => {
   await withFake(async fake => {
     for (const mode of ['descendant-success', 'descendant-abort']) {

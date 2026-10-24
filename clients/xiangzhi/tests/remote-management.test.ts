@@ -160,10 +160,33 @@ test('legacy fallback never executes newly queued profile work from a reverted s
 
 test('model operations receive longer timeouts while respecting client and server expiry',()=>{
   const now=Date.now(),model=command('conversation.basis.generate',{id:randomUUID()},now+900_000);
-  assert.equal(remoteCommandTimeout(model,now,now),120_000);
+  assert.equal(remoteCommandTimeout(model,now,now),840_000);
+  for(const type of ['conversation.message.analyze','conversation.memory.compress','conversation.drafts.generate'] as const)
+    assert.equal(remoteCommandTimeout(command(type,{id:randomUUID()},now+900_000),now,now),840_000);
+  assert.equal(remoteCommandTimeout(command('conversation.message.recognize',{},now+900_000),now,now),120_000);
   assert.equal(remoteCommandTimeout(command('settings.patch',{},now+900_000),now,now),30_000);
   const short=command('conversation.memory.compress',{id:randomUUID()},now+50_000);
   assert.equal(remoteCommandTimeout(short,now,now+10_000),40_000);
+});
+
+test('remote full-history work can span several model calls beyond two minutes without losing its receipt',async t=>{
+  const store=new Store(':memory:');let now=Date.now();
+  const timers:{at:number;controller:AbortController}[]=[];
+  t.mock.method(AbortSignal,'timeout',(ms:number)=>{const controller=new AbortController();timers.push({at:now+ms,controller});return controller.signal;});
+  const queued=command('conversation.message.analyze',{id:randomUUID(),messageId:randomUUID()},now+900_000);
+  let delivered=false;
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,now:()=>now,snapshot:()=>({}),
+    execute:async(_command,signal)=>{
+      for(let segment=0;segment<3;segment++){
+        now+=65_000;for(const timer of timers)if(timer.at<=now)timer.controller.abort();
+        signal.throwIfAborted();
+      }
+      return {segments:3};
+    },fetch:async()=>{const commands=delivered?[]:[queued];delivered=true;return response(commands);}});
+  t.after(()=>{worker.stop();store.close();});
+  await worker.tick();
+  const scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex');
+  const receipt=store.remoteReceipts(scope,now)[0];assert.equal(receipt.status,'succeeded');assert.deepEqual(receipt.result,{segments:3});
 });
 
 test('an executor that ignores its timeout cannot acknowledge a successful result',async t=>{
@@ -172,4 +195,22 @@ test('an executor that ignores its timeout cannot acknowledge a successful resul
   t.after(()=>{worker.stop();store.close();});await worker.tick();assert.equal(executions,1);
   const scope=createHash('sha256').update(JSON.stringify([config.url,config.token])).digest('hex'),stored=store.remoteReceipts(scope,expires-20)[0];
   assert.equal(stored.status,'failed');assert.deepEqual(stored.result,{});
+});
+
+test('long task heartbeats update the snapshot without duplicating work or acknowledging an unfinished task',async t=>{
+  const store=new Store(':memory:'),queued=command('conversation.message.analyze',{id:randomUUID(),messageId:randomUUID()},Date.now()+900_000);
+  let pulse:(()=>void)|undefined,release!:()=>void,started!:()=>void,calls=0,executions=0;
+  const gate=new Promise<void>(resolve=>{release=resolve;}),entered=new Promise<void>(resolve=>{started=resolve;});
+  const original=setInterval,requests:any[]=[];
+  t.mock.method(globalThis,'setInterval',((callback:()=>void,ms:number)=>{if(ms===30_000)pulse=callback;return original(callback,ms);}) as typeof setInterval);
+  const worker=new RemoteManagement(store,{config:()=>config,enabled:()=>true,snapshot:()=>({version:1}),
+    execute:async()=>{executions++;started();await gate;return {done:true};},
+    fetch:async(_url,init)=>{requests.push(JSON.parse(String(init!.body)));calls++;return response(calls<=2?[queued]:[]);}});
+  t.after(()=>{release();worker.stop();store.close();});
+  const work=worker.tick();await entered;assert.ok(pulse);pulse();
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.equal(calls,2);assert.equal(executions,1);assert.deepEqual(requests[1].completed,[]);
+  assert.equal(requests[1].snapshot.remoteEnabled,true);assert.equal(worker.status().status,'connected');
+  release();await work;await worker.tick();
+  assert.equal(executions,1);assert.equal(requests[2].completed[0].id,queued.id);assert.equal(requests[2].completed[0].status,'succeeded');
 });
