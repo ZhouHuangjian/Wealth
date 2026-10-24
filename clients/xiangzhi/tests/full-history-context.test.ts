@@ -108,6 +108,27 @@ test('the SQLite history cache survives restart and reuses all validated summari
   }finally{store.close();}
 });
 
+test('final summary packing can use the available context without changing leaf boundaries or discarding cached work',async()=>{
+  const rows=Array.from({length:8},(_,index)=>message(index+1,'合成资料'.repeat(700))),saved=cache();
+  let leaves=0,merges=0;
+  const complete=async(messages:{role:string;content:string}[])=>{
+    const body=input(messages);
+    if(body.level===0){leaves++;return JSON.stringify({summary:'摘要'.repeat(750)});}
+    merges++;return JSON.stringify({summary:'已合并全部分段'});
+  };
+  const result=await fullHistoryContext(rows,'contact-a','model-a',complete,undefined,
+    {historyBudgetBytes:12_000,historySummaryBudgetBytes:48_000,historyCache:saved.api});
+  assert.equal(leaves,8);assert.equal(merges,0);assert.equal(result.coveredMessages,8);
+  assert.ok(Buffer.byteLength(JSON.stringify(result.summaries))>12_000);
+  assert.ok(Buffer.byteLength(JSON.stringify(result.summaries))<=48_000);
+  await fullHistoryContext(rows,'contact-a','model-a',complete,undefined,{historyBudgetBytes:12_000,historyCache:saved.api});
+  assert.equal(leaves,8,'changing final packing must reuse all existing source summaries');assert.ok(merges>0);
+  const bounded=await fullHistoryContext(rows,'contact-a','model-a',complete,undefined,
+    {historyBudgetBytes:12_000,historySummaryBudgetBytes:96_000,historyCache:saved.api,
+      historyContextFits:history=>Buffer.byteLength(JSON.stringify(history))<=20_000});
+  assert.equal(leaves,8);assert.ok(Buffer.byteLength(JSON.stringify(bounded))<=20_000);
+});
+
 test('cancellation does not save a late summary and retry reuses only previously completed segments',async()=>{
   const rows=Array.from({length:12},(_,index)=>message(index+1,'长篇内容'.repeat(2500))),saved=cache(),controller=new AbortController();let calls=0;
   await assert.rejects(fullHistoryContext(rows,'contact-a','model-a',async(_messages,signal)=>{

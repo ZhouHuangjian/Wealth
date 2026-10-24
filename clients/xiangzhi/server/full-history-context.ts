@@ -4,7 +4,7 @@ import {messageEmojiRecognition} from '../shared/emoji.js';
 import {safeContextText,jsonObject,boundedString,exactKeys} from './contact-model.js';
 
 export interface HistoryCache {get(namespace:string,key:string):unknown;set(namespace:string,key:string,value:unknown):void}
-export interface HistoryDependencies {historyCache?:HistoryCache;historyBudgetBytes?:number;onHistoryProgress?:(progress:{total:number;processed:number;stage:'reading'|'summarizing'|'complete'})=>void}
+export interface HistoryDependencies {historyCache?:HistoryCache;historyBudgetBytes?:number;historySummaryBudgetBytes?:number;historyContextFits?:(history:unknown)=>boolean;onHistoryProgress?:(progress:{total:number;processed:number;stage:'reading'|'summarizing'|'complete'})=>void}
 export const HISTORY_VERSION='full-history-v2';
 const BUDGET=48_000;
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -41,10 +41,14 @@ export async function fullHistoryContext(messages:Message[],conversationId:strin
   complete:(messages:{role:string;content:string}[],signal?:AbortSignal)=>Promise<string>,signal?:AbortSignal,dependencies:HistoryDependencies={}){
   if(signal?.aborted)throw new Error('全量历史整理已取消。');
   const budget=Math.min(BUDGET,Math.max(12_000,dependencies.historyBudgetBytes??BUDGET));
+  // Reading batches and the final summary bundle have different limits. Keep
+  // existing leaf boundaries/cache keys while avoiding needless merge levels.
+  const summaryBudget=Math.min(96_000,Math.max(budget,dependencies.historySummaryBudgetBytes??budget));
   const ordered=messages.filter(m=>m.role!=='system').slice().sort((a,b)=>a.sequence-b.sequence||a.id.localeCompare(b.id));
   const observations=ordered.map(fullHistoryObservation),sourceDigest=hash(observations),total=ordered.length;
   dependencies.onHistoryProgress?.({total,processed:0,stage:'reading'});
-  if(bytes(observations)<=budget){dependencies.onHistoryProgress?.({total,processed:total,stage:'complete'});return {mode:'full' as const,totalMessages:total,coveredMessages:total,sourceDigest,messages:observations as unknown[],summaries:[] as string[],lossy:false};}
+  const full={mode:'full' as const,totalMessages:total,coveredMessages:total,sourceDigest,messages:observations as unknown[],summaries:[] as string[],lossy:false};
+  if(bytes(observations)<=budget&&(dependencies.historyContextFits?.(full)??true)){dependencies.onHistoryProgress?.({total,processed:total,stage:'complete'});return full;}
   const all=fragments(ordered);
   const namespace=`history:${conversationId}`;
   const summarize=async(items:unknown[],level:number):Promise<string>=>{
@@ -66,13 +70,14 @@ export async function fullHistoryContext(messages:Message[],conversationId:strin
     dependencies.onHistoryProgress?.({total,processed:Math.min(total,covered.size),stage:'summarizing'});
   }
   let reduced=summaries,level=1;
-  while(bytes(reduced)>budget){
-    const next:string[]=[];for(const group of groups(reduced,budget))next.push(await summarize(group,level));
+  const context=()=>({mode:'hierarchical' as const,totalMessages:total,coveredMessages:total,sourceDigest,messages:[] as unknown[],summaries:reduced,lossy:true});
+  while(bytes(reduced)>summaryBudget||!(dependencies.historyContextFits?.(context())??true)){
+    const next:string[]=[];for(const group of groups(reduced,Math.min(BUDGET,summaryBudget)))next.push(await summarize(group,level));
     if(bytes(next)>=bytes(reduced))throw new Error('历史摘要未有效缩短，请调整模型后重试；已完成分段仍保留。');
     reduced=next;level++;
   }
   dependencies.onHistoryProgress?.({total,processed:total,stage:'complete'});
-  return {mode:'hierarchical' as const,totalMessages:total,coveredMessages:total,sourceDigest,messages:[] as unknown[],summaries:reduced,lossy:true};
+  return context();
 }
 
 /** Known incomplete reads must not be described as full-history analysis. */

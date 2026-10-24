@@ -54,6 +54,14 @@ function usage(data: unknown): ContactModelCompletion['usage'] {
   return {promptTokens: values[0] as number, completionTokens: values[1] as number, totalTokens: values[2] as number};
 }
 
+/** The same schema envelope is used when measuring and sending API context. */
+export function contactModelRequestMessages(messages:{role:string;content:string}[],schema:Record<string,unknown>) {
+  const instruction=`\n输出必须严格符合以下固定 JSON Schema；不增加说明、reason 或其他未定义字段：\n${JSON.stringify(schema)}`;
+  return messages[0]?.role==='system'
+    ? [{...messages[0],content:messages[0].content+instruction},...messages.slice(1)]
+    : [{role:'system',content:instruction},...messages];
+}
+
 export function contactModelIdentity(config: ContactModelSettings): string {
   const provider = config.provider;
   if (provider === 'disabled') return 'disabled';
@@ -99,10 +107,7 @@ export async function contactModelCompletion(settings: Settings, config: Contact
   } else {
     // Compatible APIs do not all implement schema-constrained output. Include
     // the server-owned schema in the instruction and still validate the result.
-    const instruction=`\n输出必须严格符合以下固定 JSON Schema；不增加说明、reason 或其他未定义字段：\n${JSON.stringify(schema)}`;
-    const requestMessages=messages[0]?.role==='system'
-      ? [{...messages[0],content:messages[0].content+instruction},...messages.slice(1)]
-      : [{role:'system',content:instruction},...messages];
+    const requestMessages=contactModelRequestMessages(messages,schema);
     if(Buffer.byteLength(JSON.stringify(requestMessages))>128_000)throw new Error(`${feature}上下文过长，请减少输入。`);
     const endpoint = modelEndpoint({...config, provider: config.provider});
     assertModelName(config.modelName);

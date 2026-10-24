@@ -5,7 +5,7 @@ export {INTENT_LABELS} from '../shared/analysis-rubric.js';
 import {eventEvidenceContext} from './event-context.js';
 import type { AppState, ContactInsights } from '../shared/types.js';
 import { boundedMessageBatch, contactBasisContext, memoryContext, messageObservation, scopedConversation, scopedMessages } from './contact-context.js';
-import { boundedString, contactModelCompletion, contactModelIdentity, effectiveContactModelSettings, exactKeys, jsonObject, safeContextText,
+import { boundedString, contactModelCompletion, contactModelIdentity, contactModelRequestMessages, effectiveContactModelSettings, exactKeys, jsonObject, safeContextText,
   type ContactModelDependencies } from './contact-model.js';
 
 export type ContactInsightsDependencies = ContactModelDependencies & HistoryDependencies;
@@ -115,9 +115,15 @@ export async function analyzeContactMessage(state: AppState, conversationId: str
   assertFullHistoryReady(state,conversationId);
   const prepared = input(state, conversationId, messageId);
   const inputDigest = insightsInputDigest(state, conversationId, messageId);
-  const history=await fullHistoryContext(prepared.historyMessages,conversationId,prepared.config?contactModelIdentity(prepared.config):'disabled',async(messages,partSignal)=>(await contactModelCompletion(state.settings,prepared.config,messages,HISTORY_SUMMARY_SCHEMA,'全量历史整理',partSignal,dependencies)).content,signal,{...dependencies,historyBudgetBytes:24_000});
-  const completion = await contactModelCompletion(state.settings, prepared.config, [{role: 'system', content: SYSTEM},
-    {role: 'user', content: JSON.stringify({...prepared.context,fullHistory:history,intentLabels:INTENT_LABELS,emotionLabels:EMOTION_LABELS,affinityDimensions:AFFINITY_DIMENSIONS,replyCriteria:REPLY_CRITERIA})}], schema(prepared.enabled), '沟通分析', signal, dependencies);
+  const outputSchema=schema(prepared.enabled);
+  const request=(history:unknown)=>[{role:'system',content:SYSTEM},{role:'user',content:JSON.stringify({...prepared.context,fullHistory:history,intentLabels:INTENT_LABELS,emotionLabels:EMOTION_LABELS,affinityDimensions:AFFINITY_DIMENSIONS,replyCriteria:REPLY_CRITERIA})}];
+  const fits=(history:unknown)=>{
+    const messages=request(history);
+    if(Buffer.byteLength(JSON.stringify(messages))>128_000)return false;
+    return prepared.config?.provider==='codex'||Buffer.byteLength(JSON.stringify(contactModelRequestMessages(messages,outputSchema)))<=128_000;
+  };
+  const history=await fullHistoryContext(prepared.historyMessages,conversationId,prepared.config?contactModelIdentity(prepared.config):'disabled',async(messages,partSignal)=>(await contactModelCompletion(state.settings,prepared.config,messages,HISTORY_SUMMARY_SCHEMA,'全量历史整理',partSignal,dependencies)).content,signal,{...dependencies,historyBudgetBytes:24_000,historySummaryBudgetBytes:96_000,historyContextFits:fits});
+  const completion = await contactModelCompletion(state.settings, prepared.config, request(history), outputSchema, '沟通分析', signal, dependencies);
   const result = parse(completion.content, prepared);
   if (!prepared.context.targetHasAnalyzableUtterance && prepared.enabled.intentEnabled) {
     result.intents = [{label: '其他', percentage: 100}];
